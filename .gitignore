@@ -1,0 +1,34 @@
+# Binaries
+/gnoma
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Build
+/bin/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project config with secrets
+.gnoma/config.toml
+
+# Debug
+__debug_bin*
