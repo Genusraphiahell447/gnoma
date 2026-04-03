@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
@@ -51,7 +52,7 @@ type Model struct {
 	streamBuf   strings.Builder
 	currentRole string
 
-	input          textinput.Model
+	input          textarea.Model
 	cwd            string
 	gitBranch      string
 	scrollOffset   int
@@ -61,11 +62,21 @@ type Model struct {
 }
 
 func New(sess session.Session, cfg Config) Model {
-	ti := textinput.New()
-	ti.Placeholder = ""
+	ti := textarea.New()
+	ti.Placeholder = "Type a message... (Enter to send, Shift+Enter for newline)"
 	ti.Prompt = "❯ "
-	ti.Focus()
+	ti.ShowLineNumbers = false
+	ti.SetHeight(1)
+	ti.MaxHeight = 10
 	ti.SetWidth(80)
+	ti.CharLimit = 0
+
+	// Remap: Shift+Enter/Ctrl+J for newline (not plain Enter)
+	km := ti.KeyMap
+	km.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"))
+	ti.KeyMap = km
+
+	ti.Focus()
 
 	cwd, _ := os.Getwd()
 	gitBranch := detectGitBranch()
@@ -450,6 +461,16 @@ func (m Model) View() tea.View {
 	if m.width == 0 {
 		return tea.NewView("")
 	}
+
+	// Auto-size textarea based on content
+	lines := strings.Count(m.input.Value(), "\n") + 1
+	if lines < 1 {
+		lines = 1
+	}
+	if lines > 10 {
+		lines = 10
+	}
+	m.input.SetHeight(lines)
 
 	status := m.renderStatus()
 	input := m.renderInput()
