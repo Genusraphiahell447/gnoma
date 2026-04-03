@@ -55,6 +55,7 @@ type Model struct {
 
 	input          textarea.Model
 	mdRenderer     *glamour.TermRenderer
+	expandOutput   bool // ctrl+o toggles expanded tool output
 	cwd            string
 	gitBranch      string
 	scrollOffset   int
@@ -198,6 +199,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.injectSystemContext(msg)
 				m.scrollOffset = 0
 			}
+			return m, nil
+		case "ctrl+o":
+			m.expandOutput = !m.expandOutput
 			return m, nil
 		case "pgup", "shift+up":
 			m.scrollOffset += 5
@@ -681,11 +685,14 @@ func (m Model) renderMessage(msg chatMessage) []string {
 	case "toolresult":
 		resultLines := strings.Split(msg.content, "\n")
 		maxShow := 10
+		if m.expandOutput {
+			maxShow = len(resultLines) // show all
+		}
 		for i, line := range resultLines {
 			if i >= maxShow {
 				remaining := len(resultLines) - maxShow
 				lines = append(lines, indent+indent+sHint.Render(
-					fmt.Sprintf("+%d lines (Ctrl+O to expand)", remaining)))
+					fmt.Sprintf("+%d lines (ctrl+o to expand)", remaining)))
 				break
 			}
 			// Diff coloring for edit results

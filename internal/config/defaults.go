@@ -12,7 +12,7 @@ func Defaults() Config {
 			Endpoints: make(map[string]string),
 		},
 		Permission: PermissionSection{
-			Mode: "default",
+			Mode: "auto",
 		},
 		Tools: ToolsSection{
 			BashTimeout: Duration(30 * time.Second),
