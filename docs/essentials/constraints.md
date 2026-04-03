@@ -63,6 +63,35 @@ depends_on: [domain-model]
 - **Because:** User maintains the Mistral Go SDK, knows its internals. Good baseline — similar to OpenAI's API shape. Anthropic's unique features (thinking blocks, cache tokens) are better added as an M2 extension.
 - **Consequence:** Thinking block support tested later. Cache token tracking added with Anthropic provider.
 
+### Security as core over plugin
+
+- **Chose:** Security firewall baked into gnoma core (`internal/security/`)
+- **Over:** MCP-based security server (optional plugin)
+- **Because:** Default-off security is no security. Every user should get secret scanning, unicode sanitization, and incognito mode out of the box.
+- **Consequence:** Core binary is larger. False positives affect all users. Mitigated by configurable sensitivity and warn-first mode.
+
+### Proper shell parsing over regex decomposition
+
+- **Chose:** `mvdan.cc/sh` (Go POSIX shell parser) for compound command decomposition
+- **Over:** Regex-based `splitCommand()` (CC approach, caps at 50 subcommands)
+- **Because:** AST-based parsing is accurate for nested structures, doesn't need arbitrary caps, handles edge cases CC's regex misses.
+- **Consequence:** Additional dependency. But `mvdan.cc/sh` is well-maintained and widely used in the Go ecosystem.
+
+### Full 6 permission modes over simplified 3
+
+- **Chose:** All 6 CC permission modes (default, acceptEdits, bypass, deny, plan, auto)
+- **Over:** Simplified 3-mode system (allow, deny, prompt)
+- **Because:** Users need fine-grained control. `acceptEdits` is crucial for trusting file tools while verifying bash. `plan` mode enables read-only exploration. `auto` mode uses router signals for smart defaults.
+- **Consequence:** More complex permission system. Testing matrix is larger (6 modes × rule types × tool types).
+
+### Router split over monolithic
+
+- **Chose:** Router in two milestones: M4 (heuristic) + M9 (bandit learning)
+- **Over:** Full router in one milestone
+- **Because:** Engine needs routing abstraction early (M4). Bandit learning needs elf feedback (M7) that doesn't exist yet. Building everything at once blocks other milestones.
+- **Consequence:** Two integration points. Heuristic → bandit migration must be seamless.
+
 ## Changelog
 
 - 2026-04-02: Initial version
+- 2026-04-03: Added trade-offs for security-as-core, shell parsing, 6 permission modes, router split

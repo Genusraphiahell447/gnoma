@@ -85,9 +85,17 @@ graph TB
 | `internal/context` | Token tracking, compaction strategies, sliding window | Depends on message, provider | Internal |
 | `internal/config` | TOML layered config loading | BurntSushi/toml | Internal |
 | `internal/auth` | API key resolution from env/config | Pure Go | Internal |
-| `internal/engine` | Agentic query loop, tool execution orchestration | Depends on all above | Internal |
-| `internal/session` | Session lifecycle, channel-based UI decoupling | Depends on engine, stream | Internal |
-| `internal/tui` | Terminal UI: chat, input, status, permission dialogs | Bubble Tea, lipgloss | Internal |
+| `internal/security` | Firewall, secret scanner, unicode sanitizer, incognito mode | message, config | Security boundary |
+| `internal/router` | Smart router: arm registry, pools, task classifier, selection | provider, message, config | Internal |
+| `internal/engine` | Agentic query loop, tool execution orchestration | router, security, tool, stream, context | Internal |
+| `internal/session` | Session lifecycle, channel-based UI decoupling | engine, stream | Internal |
+| `internal/elf` | Sub-agent spawning, lifecycle, communication | engine, router, session | Internal |
+| `internal/tui` | Terminal UI: chat, input, status, permission dialogs, config screen | session, stream, permission | Internal |
+| `internal/hook` | Hook system: events, protocol, registration | message, tool | Internal |
+| `internal/skill` | Skill loading, frontmatter parsing, discovery | message | Internal |
+| `internal/mcp` | MCP client, tool discovery, tool replaceability | tool, config | External (stdio) |
+| `internal/plugin` | Plugin manifest, loader, lifecycle | config | Internal |
+| `internal/tasklearn` | Repetitive task detection, suggestions, persistent tasks | router, engine | Internal |
 
 ## Package Dependency Graph
 
@@ -98,12 +106,20 @@ graph BT
     provider["provider"]
     tool["tool"]
     permission["permission"]
+    security["security"]
+    router["router"]
     context_mgr["context"]
     config["config"]
     auth["auth"]
     engine["engine"]
     session["session"]
+    elf["elf"]
     tui["tui"]
+    hook["hook"]
+    skill["skill"]
+    mcp["mcp"]
+    plugin["plugin"]
+    tasklearn["tasklearn"]
     cmd["cmd/gnoma"]
 
     stream --> message
@@ -111,24 +127,44 @@ graph BT
     provider --> stream
     tool --> message
     permission --> message
+    permission --> config
+    security --> message
+    security --> config
+    router --> provider
+    router --> message
+    router --> config
     context_mgr --> message
     context_mgr --> provider
-    config --> permission
-    engine --> provider
+    engine --> router
+    engine --> security
     engine --> tool
     engine --> permission
     engine --> stream
     engine --> context_mgr
     session --> engine
     session --> stream
+    elf --> engine
+    elf --> router
+    elf --> session
+    hook --> message
+    hook --> tool
+    skill --> message
+    mcp --> tool
+    mcp --> config
+    plugin --> config
+    tasklearn --> router
+    tasklearn --> engine
     tui --> session
     tui --> stream
+    tui --> permission
     cmd --> tui
     cmd --> config
     cmd --> auth
     cmd --> session
     cmd --> provider
     cmd --> tool
+    cmd --> router
+    cmd --> security
 ```
 
 ## Scope
@@ -136,15 +172,19 @@ graph BT
 **In scope:**
 - Streaming chat with tool execution across 5+ LLM providers
 - Agentic loop (stream → tool calls → re-query → until done)
-- Permission system for tool execution
+- Security firewall with secret scanning, redaction, incognito mode
+- Smart router with bandit-based multi-provider collaboration
+- 6-mode permission system for tool execution
 - TUI and CLI pipe modes
 - TOML configuration with layering
-- Context management and compaction
-- Multi-agent (elfs) with per-elf provider routing
-- Hook, skill, and MCP extensibility
+- Context management and compaction (truncation + LLM summarization)
+- Multi-agent (elfs) with router-integrated provider selection
+- Hook, skill, MCP, and plugin extensibility
+- Repetitive task learning and persistent tasks
+- Session persistence (SQLite) and serve mode
 
 **Out of scope:**
-- Web UI (future, via serve mode)
+- Web UI (M15, via serve mode)
 - Cloud hosting / SaaS deployment
 - Training or fine-tuning models
 - IDE extension authoring (gnoma provides the backend, not the extension itself)

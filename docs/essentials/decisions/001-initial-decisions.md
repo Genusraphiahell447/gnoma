@@ -183,6 +183,153 @@ Multi-provider collaboration is a core feature and part of gnoma's identity. The
 **Positive:** Clear differentiator from all existing tools. Shapes architecture from day one.
 **Negative:** Elf system design must account for per-elf provider config from the start.
 
+---
+
+# ADR-007: Security Firewall as Core (Not Plugin)
+
+**Status:** Accepted
+**Date:** 2026-04-03
+
+## Context
+
+gnoma needs to prevent secrets and sensitive data from leaking to LLM providers. Options: build it as an MCP server (plugin), or bake it into the core.
+
+## Decision
+
+Security firewall is a core component (`internal/security/`), not a plugin. It wraps all provider calls and tool results. Everyone benefits by default.
+
+## Alternatives Considered
+
+### Alternative A: MCP-based security server
+
+- **Pros:** Modular, replaceable, user can choose their own
+- **Cons:** Users must opt-in. Default-off security is no security. MCP adds latency.
+
+## Consequences
+
+**Positive:** Every gnoma user gets secret scanning, unicode sanitization, and incognito mode out of the box.
+**Negative:** Core binary is larger. False positives affect all users (mitigated by configurable sensitivity).
+
+---
+
+# ADR-008: Router Split into Foundation + Advanced
+
+**Status:** Accepted
+**Date:** 2026-04-03
+
+## Context
+
+The smart router is gnoma's core differentiator but is a massive system (arm registry, limit pools, task classification, bandit learning, feedback, ensemble strategies, state persistence). Building it all at once blocks other milestones.
+
+## Decision
+
+Split into M4 (foundation: arm registry, pools, task classifier, heuristic selection) and M9 (advanced: bandit, feedback, ensemble, persistence). M4 gives the engine a routing abstraction early. M9 adds learning after elfs provide real feedback signals.
+
+## Alternatives Considered
+
+### Alternative A: Full router in one milestone
+
+- **Pros:** Complete system from day one
+- **Cons:** Massive milestone, blocks TUI and other features, bandit needs elf feedback that doesn't exist yet
+
+## Consequences
+
+**Positive:** Engine routes from M4 onward. Heuristic selection is good enough for daily use. Bandit learning lands when feedback is available.
+**Negative:** Two integration points instead of one.
+
+---
+
+# ADR-009: Thompson Sampling for Multi-Armed Bandit
+
+**Status:** Accepted
+**Date:** 2026-04-03
+
+## Context
+
+The router needs to learn which arm (provider+model) performs best per task type. Options: epsilon-greedy, UCB, LinUCB, Thompson Sampling.
+
+## Decision
+
+Discounted Thompson Sampling with per-arm, per-task-type Beta(α, β) distributions. No ML framework dependency — Beta distribution sampling via Marsaglia-Tsang Gamma (~30 lines of Go).
+
+## Alternatives Considered
+
+### Alternative A: LinUCB (contextual bandit)
+
+- **Pros:** Uses full task feature vector, theoretically optimal
+- **Cons:** Matrix inversion per decision, complex implementation, marginal gain at v1 scale
+
+### Alternative B: Epsilon-greedy
+
+- **Pros:** Simplest to implement
+- **Cons:** Fixed exploration rate, doesn't adapt, wastes budget on known-bad arms
+
+## Consequences
+
+**Positive:** Natural exploration via sampling. Handles non-stationarity with discounting. No external deps. Fast (<1ms per decision).
+**Negative:** Per-task-type, not contextual — can't generalize across task clusters. Contextual bandit (v2) planned as future upgrade.
+
+---
+
+# ADR-010: MCP Tool Replaceability via Priority Registry
+
+**Status:** Accepted
+**Date:** 2026-04-03
+
+## Context
+
+MCP servers provide tools. Some users want MCP tools to replace gnoma's built-in tools (e.g., a custom file system tool). Need a mechanism for this.
+
+## Decision
+
+Tool registry has a priority system. MCP servers can declare `replace_default = "fs"` in config to replace all `fs.*` built-in tools. Resolution: MCP override > built-in.
+
+## Consequences
+
+**Positive:** Users can swap any built-in tool via config. No code changes needed.
+**Negative:** MCP tool must implement the same contract (same parameter schema). Mismatch → runtime errors.
+
+---
+
+# ADR-011: Task Learning as Late-Stage Feature (M11)
+
+**Status:** Accepted
+**Date:** 2026-04-03
+
+## Context
+
+Task learning (detecting recurring patterns, suggesting persistent tasks) could be built early or late.
+
+## Decision
+
+M11 — after router advanced (M9) and persistence (M10). Task learning needs: (1) router feedback signals to understand quality, (2) session persistence to observe patterns across sessions, (3) enough real usage to detect meaningful repetitions.
+
+## Consequences
+
+**Positive:** Built on solid foundations. Feedback signals are real, not synthetic.
+**Negative:** Users don't benefit from task learning until late in the roadmap.
+
+---
+
+# ADR-012: Incognito Mode as Core Security Feature
+
+**Status:** Accepted
+**Date:** 2026-04-03
+
+## Context
+
+Users working with sensitive code need a way to prevent any data from being persisted, logged, or fed back to the learning system.
+
+## Decision
+
+Incognito mode is part of the security firewall (M3). When active: no session persistence, no router learning, no logging of content, optional local-only routing. Activated via `--incognito` flag or TUI toggle. Visual indicator in status bar.
+
+## Consequences
+
+**Positive:** Strong privacy guarantee. Users can work on sensitive projects without worrying about data leakage to disk or learning systems.
+**Negative:** No learning improvement from incognito sessions. Router stays static.
+
 ## Changelog
 
-- 2026-04-02: Initial decisions from architecture planning session
+- 2026-04-02: Initial decisions (ADR-001 through ADR-006)
+- 2026-04-03: Added ADR-007 through ADR-012 (security, router split, Thompson Sampling, MCP replaceability, task learning, incognito)
