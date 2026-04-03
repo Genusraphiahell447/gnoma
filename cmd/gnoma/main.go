@@ -12,6 +12,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	anthropicprov "somegit.dev/Owlibou/gnoma/internal/provider/anthropic"
 	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
@@ -146,11 +147,6 @@ func readInput(args []string) (string, error) {
 	return "", nil
 }
 
-func resolveAPIKey(providerName string) string {
-	envVar := envKeyFor(providerName)
-	return os.Getenv(envVar)
-}
-
 func envKeyFor(providerName string) string {
 	switch providerName {
 	case "mistral":
@@ -166,6 +162,24 @@ func envKeyFor(providerName string) string {
 	}
 }
 
+func resolveAPIKey(providerName string) string {
+	// Try primary env var
+	primary := envKeyFor(providerName)
+	if key := os.Getenv(primary); key != "" {
+		return key
+	}
+	// Try common alternatives
+	alternatives := map[string][]string{
+		"anthropic": {"ANTHROPICS_API_KEY"},
+	}
+	for _, alt := range alternatives[providerName] {
+		if key := os.Getenv(alt); key != "" {
+			return key
+		}
+	}
+	return ""
+}
+
 func createProvider(name, apiKey, model string) (provider.Provider, error) {
 	cfg := provider.ProviderConfig{
 		APIKey: apiKey,
@@ -175,8 +189,10 @@ func createProvider(name, apiKey, model string) (provider.Provider, error) {
 	switch name {
 	case "mistral":
 		return mistral.New(cfg)
+	case "anthropic":
+		return anthropicprov.New(cfg)
 	default:
-		return nil, fmt.Errorf("unknown provider %q (M1 supports: mistral)", name)
+		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic)", name)
 	}
 }
 
