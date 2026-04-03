@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
@@ -28,8 +29,9 @@ type chatMessage struct {
 
 // Config holds optional dependencies for TUI features.
 type Config struct {
-	Firewall *security.Firewall // for incognito toggle
-	Engine   *engine.Engine     // for model switching
+	Firewall    *security.Firewall    // for incognito toggle
+	Engine      *engine.Engine        // for model switching
+	Permissions *permission.Checker   // for mode switching
 }
 
 type Model struct {
@@ -96,6 +98,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.session.Cancel()
 				return m, nil
 			}
+		case "shift+tab":
+			// Cycle permission mode: bypass → default → plan → bypass
+			if m.config.Permissions != nil {
+				mode := m.config.Permissions.Mode()
+				var next permission.Mode
+				switch mode {
+				case permission.ModeBypass:
+					next = permission.ModeDefault
+				case permission.ModeDefault:
+					next = permission.ModePlan
+				case permission.ModePlan:
+					next = permission.ModeAcceptEdits
+				case permission.ModeAcceptEdits:
+					next = permission.ModeAuto
+				case permission.ModeAuto:
+					next = permission.ModeBypass
+				default:
+					next = permission.ModeBypass
+				}
+				m.config.Permissions.SetMode(next)
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: fmt.Sprintf("permission mode: %s", next)})
+				m.scrollOffset = 0
+			}
+			return m, nil
 		case "pgup", "shift+up":
 			m.scrollOffset += 5
 			return m, nil
@@ -217,6 +244,27 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, chatMessage{role: "system",
 				content: fmt.Sprintf("model switched to: %s", args)})
 		}
+		return m, nil
+
+	case "/permission", "/perm":
+		if m.config.Permissions == nil {
+			m.messages = append(m.messages, chatMessage{role: "error", content: "permission checker not configured"})
+			return m, nil
+		}
+		if args == "" {
+			m.messages = append(m.messages, chatMessage{role: "system",
+				content: fmt.Sprintf("permission mode: %s\nUsage: /permission <mode> (bypass, default, plan, accept_edits, deny, auto)\nOr press Shift+Tab to cycle", m.config.Permissions.Mode())})
+			return m, nil
+		}
+		mode := permission.Mode(args)
+		if !mode.Valid() {
+			m.messages = append(m.messages, chatMessage{role: "error",
+				content: fmt.Sprintf("invalid mode: %s (valid: bypass, default, plan, accept_edits, deny, auto)", args)})
+			return m, nil
+		}
+		m.config.Permissions.SetMode(mode)
+		m.messages = append(m.messages, chatMessage{role: "system",
+			content: fmt.Sprintf("permission mode: %s", mode)})
 		return m, nil
 
 	case "/provider":
@@ -459,9 +507,13 @@ func (m Model) renderStatus() string {
 	}
 	left := sStatusHighlight.Render(provModel)
 
-	// Center: cwd + git branch
+	// Center: cwd + git branch + perm mode
 	dir := filepath.Base(m.cwd)
 	centerParts := []string{"📁 " + dir}
+	if m.config.Permissions != nil {
+		mode := string(m.config.Permissions.Mode())
+		centerParts = append(centerParts, sStatusDim.Render(" 🛡 "+mode))
+	}
 	if m.gitBranch != "" {
 		centerParts = append(centerParts, sStatusBranch.Render(" "+m.gitBranch))
 	}

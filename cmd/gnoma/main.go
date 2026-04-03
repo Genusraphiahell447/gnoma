@@ -218,8 +218,9 @@ func main() {
 		defer sess.Close()
 
 		m := tui.New(sess, tui.Config{
-			Firewall: fw,
-			Engine:   eng,
+			Firewall:    fw,
+			Engine:      eng,
+			Permissions: permChecker,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
