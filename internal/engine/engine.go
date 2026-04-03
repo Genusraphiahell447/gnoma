@@ -107,6 +107,13 @@ func (e *Engine) History() []message.Message {
 	return e.history
 }
 
+// InjectMessage appends a message to conversation history without triggering a turn.
+// Used for system notifications (permission mode changes, incognito toggles) that
+// the model should see as context in subsequent turns.
+func (e *Engine) InjectMessage(msg message.Message) {
+	e.history = append(e.history, msg)
+}
+
 // Usage returns cumulative token usage.
 func (e *Engine) Usage() message.Usage {
 	return e.usage

@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
@@ -126,13 +127,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle incognito
 			if m.config.Firewall != nil {
 				m.incognito = m.config.Firewall.Incognito().Toggle()
+				var msg string
 				if m.incognito {
-					m.messages = append(m.messages, chatMessage{role: "system",
-						content: "🔒 incognito ON — no persistence, no learning, no logging"})
+					msg = "🔒 incognito ON — no persistence, no learning, no logging"
 				} else {
-					m.messages = append(m.messages, chatMessage{role: "system",
-						content: "🔓 incognito OFF"})
+					msg = "🔓 incognito OFF"
 				}
+				m.messages = append(m.messages, chatMessage{role: "system", content: msg})
+				m.injectSystemContext(msg)
 				m.scrollOffset = 0
 			}
 			return m, nil
@@ -156,8 +158,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					next = permission.ModeBypass
 				}
 				m.config.Permissions.SetMode(next)
-				m.messages = append(m.messages, chatMessage{role: "system",
-					content: fmt.Sprintf("permission mode changed to: %s — previous tool denials no longer apply, retry if asked", next)})
+				msg := fmt.Sprintf("permission mode changed to: %s — previous tool denials no longer apply, retry if asked", next)
+				m.messages = append(m.messages, chatMessage{role: "system", content: msg})
+				m.injectSystemContext(msg)
 				m.scrollOffset = 0
 			}
 			return m, nil
@@ -309,8 +312,9 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.config.Permissions.SetMode(mode)
-		m.messages = append(m.messages, chatMessage{role: "system",
-			content: fmt.Sprintf("permission mode changed to: %s — previous tool denials no longer apply, retry if asked", mode)})
+		msg := fmt.Sprintf("permission mode changed to: %s — previous tool denials no longer apply, retry if asked", mode)
+		m.messages = append(m.messages, chatMessage{role: "system", content: msg})
+		m.injectSystemContext(msg)
 		return m, nil
 
 	case "/provider":
@@ -677,6 +681,17 @@ func wrapText(text string, width int) string {
 		}
 	}
 	return result.String()
+}
+
+// injectSystemContext adds a message to the engine's conversation history
+// so the model sees it as context in subsequent turns.
+func (m Model) injectSystemContext(text string) {
+	if m.config.Engine != nil {
+		m.config.Engine.InjectMessage(message.NewUserText("[system] " + text))
+		// Immediately follow with a synthetic assistant acknowledgment
+		// so the conversation stays in user→assistant alternation
+		m.config.Engine.InjectMessage(message.NewAssistantText("Understood."))
+	}
 }
 
 func detectGitBranch() string {
