@@ -12,6 +12,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	anthropicprov "somegit.dev/Owlibou/gnoma/internal/provider/anthropic"
 	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
@@ -81,6 +82,23 @@ func main() {
 	// Re-register bash tool with aliases
 	reg.Register(bash.New(bash.WithAliases(aliases)))
 
+	// Create router and register the provider as a single arm
+	// (M4 foundation: one provider from CLI. Multi-provider routing comes with config.)
+	rtr := router.New(router.Config{Logger: logger})
+	armModel := *model
+	if armModel == "" {
+		armModel = prov.DefaultModel()
+	}
+	armID := router.NewArmID(*providerName, armModel)
+	rtr.RegisterArm(&router.Arm{
+		ID:        armID,
+		Provider:  prov,
+		ModelName: armModel,
+		IsLocal:   localProviders[*providerName],
+		Capabilities: provider.Capabilities{ToolUse: true}, // trust CLI provider
+	})
+	rtr.ForceArm(armID)
+
 	// Create firewall
 	fw := security.NewFirewall(security.FirewallConfig{
 		ScanOutgoing:     true,
@@ -92,6 +110,7 @@ func main() {
 	// Create engine
 	eng, err := engine.New(engine.Config{
 		Provider: prov,
+		Router:   rtr,
 		Tools:    reg,
 		Firewall: fw,
 		System:   *system,

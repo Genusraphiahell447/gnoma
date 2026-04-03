@@ -7,6 +7,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
@@ -38,16 +39,50 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		// Build provider request (gates tools on model capabilities)
 		req := e.buildRequest(ctx)
 
-		e.logger.Debug("streaming request",
-			"provider", e.cfg.Provider.Name(),
-			"model", req.Model,
-			"messages", len(req.Messages),
-			"tools", len(req.Tools),
-			"round", turn.Rounds,
-		)
+		// Route and stream
+		var s stream.Stream
+		var err error
 
-		// Stream from provider
-		s, err := e.cfg.Provider.Stream(ctx, req)
+		if e.cfg.Router != nil {
+			// Classify task from the latest user message
+			prompt := ""
+			for i := len(e.history) - 1; i >= 0; i-- {
+				if e.history[i].Role == message.RoleUser {
+					prompt = e.history[i].TextContent()
+					break
+				}
+			}
+			task := router.ClassifyTask(prompt)
+			task.EstimatedTokens = 4000 // rough default
+
+			e.logger.Debug("routing request",
+				"task_type", task.Type,
+				"complexity", task.ComplexityScore,
+				"round", turn.Rounds,
+			)
+
+			var arm *router.Arm
+			s, arm, err = e.cfg.Router.Stream(ctx, task, req)
+			if arm != nil {
+				e.logger.Debug("streaming request",
+					"provider", arm.Provider.Name(),
+					"model", arm.ModelName,
+					"arm", arm.ID,
+					"messages", len(req.Messages),
+					"tools", len(req.Tools),
+					"round", turn.Rounds,
+				)
+			}
+		} else {
+			e.logger.Debug("streaming request",
+				"provider", e.cfg.Provider.Name(),
+				"model", req.Model,
+				"messages", len(req.Messages),
+				"tools", len(req.Tools),
+				"round", turn.Rounds,
+			)
+			s, err = e.cfg.Provider.Stream(ctx, req)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("provider stream: %w", err)
 		}

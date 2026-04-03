@@ -7,13 +7,15 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
 
 // Config holds engine configuration.
 type Config struct {
-	Provider provider.Provider
+	Provider provider.Provider  // direct provider (used if Router is nil)
+	Router   *router.Router     // nil = use Provider directly
 	Tools    *tool.Registry
 	Firewall *security.Firewall // nil = no scanning
 	System   string             // system prompt
