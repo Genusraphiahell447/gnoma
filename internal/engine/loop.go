@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
+	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
@@ -197,6 +198,24 @@ func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb 
 				IsError:    true,
 			})
 			continue
+		}
+
+		// Permission check
+		if e.cfg.Permissions != nil {
+			info := permission.ToolInfo{
+				Name:        call.Name,
+				IsReadOnly:  t.IsReadOnly(),
+				IsDestructive: t.IsDestructive(),
+			}
+			if err := e.cfg.Permissions.Check(ctx, info, call.Arguments); err != nil {
+				e.logger.Info("tool permission denied", "name", call.Name, "error", err)
+				results = append(results, message.ToolResult{
+					ToolCallID: call.ID,
+					Content:    fmt.Sprintf("permission denied: %v", err),
+					IsError:    true,
+				})
+				continue
+			}
 		}
 
 		e.logger.Debug("executing tool", "name", call.Name, "id", call.ID)

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
+	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
@@ -17,8 +18,9 @@ type Config struct {
 	Provider provider.Provider  // direct provider (used if Router is nil)
 	Router   *router.Router     // nil = use Provider directly
 	Tools    *tool.Registry
-	Firewall *security.Firewall // nil = no scanning
-	System   string             // system prompt
+	Firewall    *security.Firewall    // nil = no scanning
+	Permissions *permission.Checker  // nil = allow all
+	System      string               // system prompt
 	Model    string             // override model (empty = provider default)
 	MaxTurns int                // safety limit on tool loops (0 = unlimited)
 	Logger   *slog.Logger

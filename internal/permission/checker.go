@@ -51,6 +51,11 @@ func NewChecker(mode Mode, rules []Rule, promptFn PromptFunc) *Checker {
 	}
 }
 
+// SetPromptFunc replaces the prompt function (e.g., switching from pipe to TUI prompt).
+func (c *Checker) SetPromptFunc(fn PromptFunc) {
+	c.promptFn = fn
+}
+
 // SetMode changes the active permission mode.
 func (c *Checker) SetMode(mode Mode) {
 	c.mode = mode

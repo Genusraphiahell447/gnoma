@@ -16,7 +16,8 @@ const (
 	EventToolCallStart
 	EventToolCallDelta
 	EventToolCallDone
-	EventToolResult // tool execution output
+	EventToolResult    // tool execution output
+	EventPermissionReq // permission prompt needed
 	EventUsage
 	EventError
 )
@@ -35,6 +36,8 @@ func (et EventType) String() string {
 		return "tool_call_done"
 	case EventToolResult:
 		return "tool_result"
+	case EventPermissionReq:
+		return "permission_req"
 	case EventUsage:
 		return "usage"
 	case EventError:
@@ -62,6 +65,9 @@ type Event struct {
 	// ToolResult: tool name + output
 	ToolName   string
 	ToolOutput string
+
+	// PermissionReq: tool requesting permission, response channel
+	PermissionResponse chan bool
 
 	// Usage
 	Usage *message.Usage

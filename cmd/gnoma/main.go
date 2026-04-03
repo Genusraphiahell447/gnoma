@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"encoding/json"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
@@ -131,8 +132,14 @@ func main() {
 		logger.Debug("incognito mode enabled")
 	}
 
-	// Permission checker
-	_ = permission.NewChecker(permission.Mode(*permMode), nil, nil)
+	// Permission checker with console prompt for pipe mode
+	pipePromptFn := func(ctx context.Context, toolName string, args json.RawMessage) (bool, error) {
+		fmt.Fprintf(os.Stderr, "⚠ Tool %s wants to execute. Allow? [y/N] ", toolName)
+		var response string
+		fmt.Scanln(&response)
+		return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes", nil
+	}
+	permChecker := permission.NewChecker(permission.Mode(*permMode), nil, pipePromptFn)
 
 	// Build system prompt with compact inventory summary
 	systemPrompt := *system
@@ -142,13 +149,14 @@ func main() {
 
 	// Create engine
 	eng, err := engine.New(engine.Config{
-		Provider: prov,
-		Router:   rtr,
-		Tools:    reg,
-		Firewall: fw,
-		System:   systemPrompt,
-		Model:    *model,
-		MaxTurns: *maxTurns,
+		Provider:    prov,
+		Router:      rtr,
+		Tools:       reg,
+		Firewall:    fw,
+		Permissions: permChecker,
+		System:      systemPrompt,
+		Model:       *model,
+		MaxTurns:    *maxTurns,
 		Logger:   logger,
 	})
 	if err != nil {
@@ -191,7 +199,17 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		// TUI mode: interactive terminal
+		// TUI mode: replace permission prompt with channel-based one
+		permChecker.SetPromptFunc(func(ctx context.Context, toolName string, args json.RawMessage) (bool, error) {
+			// Send permission request through a channel, block until TUI responds
+			respCh := make(chan bool, 1)
+			// The engine callback will emit this as an event
+			// For now, auto-approve in TUI (proper overlay is M5+)
+			// TODO: wire to TUI overlay
+			respCh <- true
+			return <-respCh, nil
+		})
+
 		armModel := *model
 		if armModel == "" {
 			armModel = prov.DefaultModel()
