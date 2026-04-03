@@ -39,7 +39,7 @@ func main() {
 		system       = flag.String("system", defaultSystem, "system prompt")
 		apiKey       = flag.String("api-key", "", "API key (or set MISTRAL_API_KEY env)")
 		maxTurns     = flag.Int("max-turns", 50, "max tool-calling rounds per turn")
-		permMode     = flag.String("permission", "bypass", "permission mode (default, accept_edits, bypass, deny, plan, auto)")
+		permMode     = flag.String("permission", "default", "permission mode (default, accept_edits, bypass, deny, plan, auto)")
 		incognito    = flag.Bool("incognito", false, "incognito mode — no persistence, no learning")
 		verbose      = flag.Bool("verbose", false, "enable debug logging")
 		version      = flag.Bool("version", false, "print version and exit")

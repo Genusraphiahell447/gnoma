@@ -98,6 +98,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.session.Cancel()
 				return m, nil
 			}
+		case "ctrl+i":
+			// Toggle incognito
+			if m.config.Firewall != nil {
+				m.incognito = m.config.Firewall.Incognito().Toggle()
+				if m.incognito {
+					m.messages = append(m.messages, chatMessage{role: "system",
+						content: "🔒 incognito ON — no persistence, no learning, no logging"})
+				} else {
+					m.messages = append(m.messages, chatMessage{role: "system",
+						content: "🔓 incognito OFF"})
+				}
+				m.scrollOffset = 0
+			}
+			return m, nil
 		case "shift+tab":
 			// Cycle permission mode: bypass → default → plan → bypass
 			if m.config.Permissions != nil {
@@ -494,7 +508,6 @@ func (m Model) renderMessage(msg chatMessage) []string {
 }
 
 func (m Model) renderSeparators() (string, string) {
-	// Get mode color
 	lineColor := cSurface // default dim
 	modeLabel := ""
 
@@ -502,6 +515,12 @@ func (m Model) renderSeparators() (string, string) {
 		mode := m.config.Permissions.Mode()
 		lineColor = ModeColor(mode)
 		modeLabel = string(mode)
+	}
+
+	// Incognito overrides everything with amber
+	if m.incognito {
+		lineColor = cYellow
+		modeLabel = "🔒 incognito"
 	}
 
 	lineStyle := lipgloss.NewStyle().Foreground(lineColor)
@@ -541,13 +560,9 @@ func (m Model) renderStatus() string {
 	}
 	left := sStatusHighlight.Render(provModel)
 
-	// Center: cwd + git branch + perm mode
+	// Center: cwd + git branch
 	dir := filepath.Base(m.cwd)
 	centerParts := []string{"📁 " + dir}
-	if m.config.Permissions != nil {
-		mode := string(m.config.Permissions.Mode())
-		centerParts = append(centerParts, sStatusDim.Render(" 🛡 "+mode))
-	}
 	if m.gitBranch != "" {
 		centerParts = append(centerParts, sStatusBranch.Render(" "+m.gitBranch))
 	}
