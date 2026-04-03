@@ -3,21 +3,23 @@ module somegit.dev/Owlibou/gnoma
 go 1.26.1
 
 require (
+	charm.land/bubbles/v2 v2.1.0
+	charm.land/bubbletea/v2 v2.0.2
+	charm.land/lipgloss/v2 v2.0.2
 	github.com/BurntSushi/toml v0.3.1
 	github.com/VikingOwl91/mistral-go-sdk v1.2.1
 	github.com/anthropics/anthropic-sdk-go v1.29.0
 	github.com/openai/openai-go v1.12.0
 	golang.org/x/text v0.27.0
 	google.golang.org/genai v1.52.1
+	mvdan.cc/sh/v3 v3.13.0
 )
 
 require (
-	charm.land/bubbles/v2 v2.1.0 // indirect
-	charm.land/bubbletea/v2 v2.0.2 // indirect
-	charm.land/lipgloss/v2 v2.0.2 // indirect
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.9.3 // indirect
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
+	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/charmbracelet/colorprofile v0.4.2 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260205113103-524a6607adb8 // indirect
 	github.com/charmbracelet/x/ansi v0.11.6 // indirect
@@ -48,5 +50,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/grpc v1.66.2 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
-	mvdan.cc/sh/v3 v3.13.0 // indirect
 )
