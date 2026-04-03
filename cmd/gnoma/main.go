@@ -23,6 +23,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 	"somegit.dev/Owlibou/gnoma/internal/tool/bash"
 	"somegit.dev/Owlibou/gnoma/internal/tool/fs"
+	"somegit.dev/Owlibou/gnoma/internal/tool/sysinfo"
 )
 
 func main() {
@@ -89,6 +90,9 @@ func main() {
 	// Re-register bash tool with aliases
 	reg.Register(bash.New(bash.WithAliases(aliases)))
 
+	// Register system_info tool backed by the inventory
+	reg.Register(sysinfo.New(inventory))
+
 	// Create router and register the provider as a single arm
 	// (M4 foundation: one provider from CLI. Multi-provider routing comes with config.)
 	rtr := router.New(router.Config{Logger: logger})
@@ -114,10 +118,10 @@ func main() {
 		Logger:           logger,
 	})
 
-	// Build system prompt with inventory
+	// Build system prompt with compact inventory summary
 	systemPrompt := *system
-	if invStr := inventory.String(); invStr != "" {
-		systemPrompt = systemPrompt + "\n\n" + invStr
+	if summary := inventory.Summary(); summary != "" {
+		systemPrompt = systemPrompt + "\n\n" + summary
 	}
 
 	// Create engine

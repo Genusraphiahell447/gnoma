@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -16,46 +17,216 @@ const inventoryTimeout = 15 * time.Second
 
 // SystemInventory holds dynamically discovered system information.
 type SystemInventory struct {
+	// Core
 	OS       string
 	Shell    string
-	Tools    []string  // all executables found in PATH
-	Runtimes []Runtime // detected runtimes with versions
+	Hardware HardwareInfo
+
+	// Discovered
+	Tools        []string  // all executables found in PATH
+	Runtimes     []Runtime // detected runtimes with versions
+	PackageCount int       // total installed packages
+	PackageMgr   string    // detected package manager
+	DevPackages  []string  // development-relevant packages
 }
 
-// Runtime is a detected language runtime or package manager.
+type HardwareInfo struct {
+	CPU     string
+	Cores   int
+	MemTotal string
+	GPU     string
+}
+
 type Runtime struct {
 	Name    string
 	Version string
 }
 
-// HarvestInventory dynamically discovers installed tools and runtimes.
-// No hardcoded lists — scans $PATH and probes for version info.
+// HarvestInventory dynamically discovers system info.
 func HarvestInventory(ctx context.Context) *SystemInventory {
 	ctx, cancel := context.WithTimeout(ctx, inventoryTimeout)
 	defer cancel()
 
 	inv := &SystemInventory{
-		OS:    detectOS(ctx),
-		Shell: detectShell(),
+		OS:       detectOS(ctx),
+		Shell:    os.Getenv("SHELL"),
+		Hardware: detectHardware(ctx),
 	}
 
-	// Scan all executables in PATH
-	allBinaries := scanPATH()
-	inv.Tools = allBinaries
-
-	// Probe for runtimes: try --version on known runtime name patterns
-	inv.Runtimes = probeRuntimes(ctx, allBinaries)
+	inv.Tools = scanPATH()
+	inv.Runtimes = probeRuntimes(ctx, inv.Tools)
+	inv.PackageMgr, inv.PackageCount, inv.DevPackages = queryPackageManager(ctx)
 
 	return inv
 }
 
-// scanPATH collects all unique executable names from $PATH directories.
+// Summary returns a compact one-paragraph description for the system prompt.
+// Minimal tokens — just enough for the LLM to know the system's capabilities.
+func (inv *SystemInventory) Summary() string {
+	if inv == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("System: ")
+
+	if inv.OS != "" {
+		b.WriteString(inv.OS)
+	}
+	if inv.Shell != "" {
+		fmt.Fprintf(&b, ", %s", filepath.Base(inv.Shell))
+	}
+	if inv.Hardware.CPU != "" {
+		fmt.Fprintf(&b, ". CPU: %s (%d cores)", inv.Hardware.CPU, inv.Hardware.Cores)
+	}
+	if inv.Hardware.MemTotal != "" {
+		fmt.Fprintf(&b, ", RAM: %s", inv.Hardware.MemTotal)
+	}
+	if inv.Hardware.GPU != "" {
+		fmt.Fprintf(&b, ", GPU: %s", inv.Hardware.GPU)
+	}
+
+	// Top runtimes (max 6)
+	if len(inv.Runtimes) > 0 {
+		top := inv.Runtimes
+		if len(top) > 6 {
+			top = top[:6]
+		}
+		names := make([]string, len(top))
+		for i, rt := range top {
+			names[i] = rt.Name
+		}
+		fmt.Fprintf(&b, ". Runtimes: %s", strings.Join(names, ", "))
+		if len(inv.Runtimes) > 6 {
+			fmt.Fprintf(&b, " +%d more", len(inv.Runtimes)-6)
+		}
+	}
+
+	if inv.PackageCount > 0 {
+		fmt.Fprintf(&b, ". %d packages (%s)", inv.PackageCount, inv.PackageMgr)
+	}
+	fmt.Fprintf(&b, ", %d commands in PATH.", len(inv.Tools))
+	b.WriteString(" Use system_info tool for full details.")
+
+	return b.String()
+}
+
+// QuerySection returns detailed info for a specific section.
+// Sections: "all", "runtimes", "packages", "tools", "hardware"
+func (inv *SystemInventory) QuerySection(section string) string {
+	if inv == nil {
+		return "no inventory available"
+	}
+
+	switch strings.ToLower(section) {
+	case "runtimes":
+		return inv.formatRuntimes()
+	case "packages", "dev":
+		return inv.formatPackages()
+	case "tools", "commands":
+		return inv.formatTools()
+	case "hardware", "hw":
+		return inv.formatHardware()
+	case "all", "":
+		return inv.formatAll()
+	default:
+		return fmt.Sprintf("unknown section %q. Available: runtimes, packages, tools, hardware, all", section)
+	}
+}
+
+func (inv *SystemInventory) formatRuntimes() string {
+	if len(inv.Runtimes) == 0 {
+		return "no runtimes detected"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Detected runtimes (%d):\n", len(inv.Runtimes))
+	for _, rt := range inv.Runtimes {
+		fmt.Fprintf(&b, "  %s: %s\n", rt.Name, rt.Version)
+	}
+	return b.String()
+}
+
+func (inv *SystemInventory) formatPackages() string {
+	var b strings.Builder
+	if inv.PackageMgr != "" {
+		fmt.Fprintf(&b, "Package manager: %s (%d total packages)\n", inv.PackageMgr, inv.PackageCount)
+	}
+	if len(inv.DevPackages) > 0 {
+		fmt.Fprintf(&b, "Dev packages (%d):\n  %s\n", len(inv.DevPackages), strings.Join(inv.DevPackages, ", "))
+	}
+	return b.String()
+}
+
+func (inv *SystemInventory) formatTools() string {
+	if len(inv.Tools) == 0 {
+		return "no tools found in PATH"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Executables in PATH (%d):\n  %s\n", len(inv.Tools), strings.Join(inv.Tools, ", "))
+	return b.String()
+}
+
+func (inv *SystemInventory) formatHardware() string {
+	var b strings.Builder
+	b.WriteString("Hardware:\n")
+	fmt.Fprintf(&b, "  OS: %s\n", inv.OS)
+	fmt.Fprintf(&b, "  Shell: %s\n", inv.Shell)
+	hw := inv.Hardware
+	if hw.CPU != "" {
+		fmt.Fprintf(&b, "  CPU: %s\n", hw.CPU)
+	}
+	fmt.Fprintf(&b, "  Cores: %d\n", hw.Cores)
+	if hw.MemTotal != "" {
+		fmt.Fprintf(&b, "  Memory: %s\n", hw.MemTotal)
+	}
+	if hw.GPU != "" {
+		fmt.Fprintf(&b, "  GPU: %s\n", hw.GPU)
+	}
+	return b.String()
+}
+
+func (inv *SystemInventory) formatAll() string {
+	var b strings.Builder
+	b.WriteString(inv.formatHardware())
+	b.WriteString("\n")
+	b.WriteString(inv.formatRuntimes())
+	b.WriteString("\n")
+	b.WriteString(inv.formatPackages())
+	return b.String()
+}
+
+// --- Hardware Detection ---
+
+func detectHardware(ctx context.Context) HardwareInfo {
+	hw := HardwareInfo{
+		Cores: runtime.NumCPU(),
+	}
+
+	// CPU model
+	if cpuInfo := runQuiet(ctx, "sh", "-c", `command grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2`); cpuInfo != "" {
+		hw.CPU = strings.TrimSpace(cpuInfo)
+	}
+
+	// Total memory
+	if memInfo := runQuiet(ctx, "sh", "-c", `command grep MemTotal /proc/meminfo 2>/dev/null | awk '{printf "%.0f GB", $2/1024/1024}'`); memInfo != "" {
+		hw.MemTotal = memInfo
+	}
+
+	// GPU (try lspci first, then nvidia-smi)
+	if gpu := runQuiet(ctx, "sh", "-c", `lspci 2>/dev/null | command grep -i 'vga\|3d\|display' | head -1 | sed 's/.*: //'`); gpu != "" {
+		hw.GPU = gpu
+	}
+
+	return hw
+}
+
+// --- PATH Scanning ---
+
 func scanPATH() []string {
 	seen := make(map[string]bool)
 	var names []string
 
-	pathDirs := filepath.SplitList(os.Getenv("PATH"))
-	for _, dir := range pathDirs {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -68,7 +239,6 @@ func scanPATH() []string {
 			if seen[name] {
 				continue
 			}
-			// Check it's actually executable
 			info, err := entry.Info()
 			if err != nil {
 				continue
@@ -84,18 +254,13 @@ func scanPATH() []string {
 	return names
 }
 
-// runtimeCandidate defines how to detect a runtime from a binary name.
-type runtimeCandidate struct {
-	name    string   // display name
-	binary  string   // executable name to look for
-	args    []string // version flag
-}
+// --- Runtime Probing ---
 
-// knownRuntimePatterns returns binary names that are likely runtimes.
-// We still need a pattern list to know WHICH binaries to try --version on,
-// but the actual detection is dynamic (only probes what's in PATH).
-var runtimePatterns = []runtimeCandidate{
-	// Systems languages
+var runtimePatterns = []struct {
+	name   string
+	binary string
+	args   []string
+}{
 	{"go", "go", []string{"version"}},
 	{"rust", "rustc", []string{"--version"}},
 	{"zig", "zig", []string{"version"}},
@@ -104,7 +269,6 @@ var runtimePatterns = []runtimeCandidate{
 	{"gcc", "gcc", []string{"--version"}},
 	{"clang", "clang", []string{"--version"}},
 	{"nasm", "nasm", []string{"-v"}},
-	// Scripting
 	{"python3", "python3", []string{"--version"}},
 	{"python2", "python2", []string{"--version"}},
 	{"perl", "perl", []string{"--version"}},
@@ -112,50 +276,33 @@ var runtimePatterns = []runtimeCandidate{
 	{"lua", "lua", []string{"-v"}},
 	{"luajit", "luajit", []string{"-v"}},
 	{"guile", "guile", []string{"--version"}},
-	// tcl detection is tricky (needs stdin), skipped
 	{"php", "php", []string{"--version"}},
 	{"r", "R", []string{"--version"}},
-	// JS/TS
 	{"node", "node", []string{"--version"}},
 	{"deno", "deno", []string{"--version"}},
 	{"bun", "bun", []string{"--version"}},
-	// JVM
 	{"java", "java", []string{"-version"}},
 	{"kotlin", "kotlin", []string{"-version"}},
 	{"scala", "scala", []string{"-version"}},
 	{"groovy", "groovy", []string{"--version"}},
 	{"clojure", "clj", []string{"--version"}},
-	// Functional
 	{"haskell", "ghc", []string{"--version"}},
 	{"ocaml", "ocaml", []string{"-version"}},
 	{"elixir", "elixir", []string{"--version"}},
-	{"erlang", "erl", []string{"-eval", "io:format(erlang:system_info(otp_release)),halt()."}},
 	{"racket", "racket", []string{"--version"}},
-	// Other
 	{"dart", "dart", []string{"--version"}},
 	{"julia", "julia", []string{"--version"}},
 	{"swift", "swift", []string{"--version"}},
-	// .NET
 	{"dotnet", "dotnet", []string{"--version"}},
 	{"mono", "mono", []string{"--version"}},
-	// Package managers
 	{"cargo", "cargo", []string{"--version"}},
 	{"npm", "npm", []string{"--version"}},
 	{"yarn", "yarn", []string{"--version"}},
 	{"pnpm", "pnpm", []string{"--version"}},
 	{"pip", "pip3", []string{"--version"}},
 	{"gem", "gem", []string{"--version"}},
-	{"composer", "composer", []string{"--version"}},
-	{"mix", "mix", []string{"--version"}},
-	{"cabal", "cabal", []string{"--version"}},
-	{"stack", "stack", []string{"--version"}},
-	{"opam", "opam", []string{"--version"}},
-	{"maven", "mvn", []string{"--version"}},
-	{"gradle", "gradle", []string{"--version"}},
 }
 
-// probeRuntimes checks which runtime candidates exist in the discovered binaries
-// and gets their version info. Runs probes concurrently for speed.
 func probeRuntimes(ctx context.Context, available []string) []Runtime {
 	availSet := make(map[string]bool, len(available))
 	for _, name := range available {
@@ -165,53 +312,39 @@ func probeRuntimes(ctx context.Context, available []string) []Runtime {
 	var mu sync.Mutex
 	var runtimes []Runtime
 	var wg sync.WaitGroup
-
-	// Semaphore to limit concurrent version probes
 	sem := make(chan struct{}, 10)
 
-	for _, candidate := range runtimePatterns {
-		if !availSet[candidate.binary] {
+	for _, p := range runtimePatterns {
+		if !availSet[p.binary] {
 			continue
 		}
-
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(c runtimeCandidate) {
+		go func(name, binary string, args []string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			version := probeVersion(ctx, c.binary, c.args)
-			if version != "" {
+			if v := probeVersion(ctx, binary, args); v != "" {
 				mu.Lock()
-				runtimes = append(runtimes, Runtime{Name: c.name, Version: version})
+				runtimes = append(runtimes, Runtime{Name: name, Version: v})
 				mu.Unlock()
 			}
-		}(candidate)
+		}(p.name, p.binary, p.args)
 	}
-
 	wg.Wait()
 
-	sort.Slice(runtimes, func(i, j int) bool {
-		return runtimes[i].Name < runtimes[j].Name
-	})
+	sort.Slice(runtimes, func(i, j int) bool { return runtimes[i].Name < runtimes[j].Name })
 	return runtimes
 }
 
-// probeVersion runs a binary with version args and extracts the first line.
 func probeVersion(ctx context.Context, binary string, args []string) string {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Stdin = nil
-
-	// Some tools print version to stderr (java -version)
 	output, err := cmd.CombinedOutput()
 	if err != nil && len(output) == 0 {
 		return ""
 	}
-
-	// First non-empty line
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
@@ -221,89 +354,92 @@ func probeVersion(ctx context.Context, binary string, args []string) string {
 	return ""
 }
 
-// String formats the inventory for inclusion in a system prompt.
-func (inv *SystemInventory) String() string {
-	if inv == nil {
-		return ""
+// --- Package Manager ---
+
+func queryPackageManager(ctx context.Context) (mgr string, total int, devPkgs []string) {
+	managers := []struct {
+		name, binary string
+		args         []string
+	}{
+		{"pacman", "pacman", []string{"-Qq"}},
+		{"apt", "dpkg", []string{"--get-selections"}},
+		{"dnf", "rpm", []string{"-qa", "--qf", "%{NAME}\\n"}},
+		{"brew", "brew", []string{"list", "--formula", "-1"}},
+		{"nix", "nix-env", []string{"-q"}},
+		{"apk", "apk", []string{"list", "--installed", "-q"}},
 	}
 
-	var b strings.Builder
-	b.WriteString("System environment:\n")
-
-	if inv.OS != "" {
-		fmt.Fprintf(&b, "- OS: %s\n", inv.OS)
-	}
-	if inv.Shell != "" {
-		fmt.Fprintf(&b, "- Shell: %s\n", inv.Shell)
-	}
-	if len(inv.Runtimes) > 0 {
-		b.WriteString("- Runtimes & package managers:\n")
-		for _, rt := range inv.Runtimes {
-			fmt.Fprintf(&b, "  - %s: %s\n", rt.Name, rt.Version)
+	for _, pm := range managers {
+		if _, err := exec.LookPath(pm.binary); err != nil {
+			continue
 		}
-	}
-	if len(inv.Tools) > 0 {
-		fmt.Fprintf(&b, "- Available commands: %d executables in PATH", len(inv.Tools))
-		// Include notable tools only (not the full list — saves tokens)
-		notable := filterNotable(inv.Tools)
-		if len(notable) > 0 {
-			fmt.Fprintf(&b, " (notable: %s)", strings.Join(notable, ", "))
+		cmd := exec.CommandContext(ctx, pm.binary, pm.args...)
+		output, err := cmd.Output()
+		if err != nil {
+			continue
 		}
-		b.WriteString("\n")
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		return pm.name, len(lines), filterDevPackages(lines)
 	}
-
-	return b.String()
+	return "", 0, nil
 }
 
-// notableTools are development-relevant tools worth highlighting in the system prompt.
-var notableTools = map[string]bool{
-	// VCS
-	"git": true, "gh": true, "tea": true, "lazygit": true,
-	// Build
-	"make": true, "cmake": true, "just": true,
-	// Containers
-	"docker": true, "podman": true, "kubectl": true, "helm": true,
-	// Data
-	"jq": true, "yq": true, "rg": true, "fd": true, "fzf": true,
-	// Modern CLI
-	"bat": true, "eza": true, "delta": true, "sd": true, "dust": true,
-	"hyperfine": true, "tokei": true, "scc": true,
-	// Debug
-	"gdb": true, "strace": true, "perf": true, "valgrind": true,
-	// Database
-	"sqlite3": true, "psql": true, "mysql": true, "mongosh": true, "redis-cli": true,
-	// Media
-	"ffmpeg": true, "convert": true,
-	// Infra
-	"terraform": true, "ansible": true,
-	// Network
-	"curl": true, "wget": true, "ssh": true,
-	// Editors
-	"nvim": true, "vim": true,
-	// Multiplexer
-	"tmux": true,
+var devPrefixes = []string{
+	"python", "ruby", "nodejs", "go", "rustup", "lua", "luajit",
+	"perl", "dart", "deno", "bun", "zig", "nim", "crystal",
+	"elixir", "erlang", "ghc", "ocaml", "swift", "kotlin", "scala",
+	"julia", "php", "dotnet", "mono", "clojure", "racket", "guile",
+	"openjdk", "jdk", "gcc", "clang", "llvm", "cmake", "make",
+	"ninja", "meson", "nasm", "gdb", "valgrind", "strace",
+	"docker", "podman", "kubectl", "helm", "terraform", "ansible",
+	"npm", "yarn", "pnpm", "cargo", "rubygems", "composer",
+	"sqlite", "postgresql", "mysql", "redis", "mongodb",
+	"git", "mercurial", "subversion", "neovim", "vim", "emacs",
 }
 
-func filterNotable(tools []string) []string {
-	var out []string
-	for _, t := range tools {
-		if notableTools[t] {
-			out = append(out, t)
+func filterDevPackages(packages []string) []string {
+	var devPkgs []string
+	seen := make(map[string]bool)
+
+	for _, pkg := range packages {
+		pkg = strings.TrimSpace(pkg)
+		if f := strings.Fields(pkg); len(f) > 0 {
+			pkg = f[0]
+		}
+		if pkg == "" || seen[pkg] {
+			continue
+		}
+		lower := strings.ToLower(pkg)
+
+		// Skip sub-packages
+		if strings.HasPrefix(lower, "python-") || strings.HasPrefix(lower, "haskell-") ||
+			strings.HasPrefix(lower, "perl-") || strings.HasPrefix(lower, "ruby-") ||
+			strings.HasPrefix(lower, "lua-") || strings.HasPrefix(lower, "lua51-") ||
+			strings.HasPrefix(lower, "lua54-") || strings.HasPrefix(lower, "lib32-") ||
+			strings.HasPrefix(lower, "lib") || strings.HasPrefix(lower, "ttf-") ||
+			strings.HasPrefix(lower, "otf-") || strings.HasPrefix(lower, "qt5-") ||
+			strings.HasPrefix(lower, "qt6-") || strings.HasPrefix(lower, "gtk") ||
+			strings.HasPrefix(lower, "gst-") {
+			continue
+		}
+
+		for _, prefix := range devPrefixes {
+			if lower == prefix || strings.HasPrefix(lower, prefix+"-") ||
+				strings.HasPrefix(lower, prefix+"1") || strings.HasPrefix(lower, prefix+"2") ||
+				strings.HasPrefix(lower, prefix+"3") {
+				seen[pkg] = true
+				devPkgs = append(devPkgs, pkg)
+				break
+			}
 		}
 	}
-	return out
+	sort.Strings(devPkgs)
+	return devPkgs
 }
 
 func detectOS(ctx context.Context) string {
-	if output := runQuiet(ctx, "uname", "-srm"); output != "" {
-		return strings.TrimSpace(output)
-	}
-	return ""
-}
-
-func detectShell() string {
-	if s := os.Getenv("SHELL"); s != "" {
-		return s
+	if out := runQuiet(ctx, "uname", "-srm"); out != "" {
+		return strings.TrimSpace(out)
 	}
 	return ""
 }
