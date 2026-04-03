@@ -102,16 +102,21 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	done := make(chan elf.Result, 1)
 	go func() { done <- e.Wait() }()
 
-	// Forward elf streaming events as 2-line progress summary
+	// Forward elf streaming events as live progress
 	go func() {
-		var buf strings.Builder
+		var textBuf strings.Builder
 		for evt := range e.Events() {
-			if evt.Type == stream.EventTextDelta && evt.Text != "" {
-				buf.WriteString(evt.Text)
+			if t.ProgressCh == nil {
+				continue
+			}
 
-				if t.ProgressCh != nil {
-					// Extract last 2 non-empty lines, truncate to 70 chars each
-					allLines := strings.Split(buf.String(), "\n")
+			var progress string
+			switch evt.Type {
+			case stream.EventTextDelta:
+				if evt.Text != "" {
+					textBuf.WriteString(evt.Text)
+					// Show last 2 non-empty lines of text
+					allLines := strings.Split(textBuf.String(), "\n")
 					var recent []string
 					for i := len(allLines) - 1; i >= 0 && len(recent) < 2; i-- {
 						line := strings.TrimSpace(allLines[i])
@@ -122,10 +127,28 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 							recent = append([]string{line}, recent...)
 						}
 					}
-					select {
-					case t.ProgressCh <- strings.Join(recent, "\n"):
-					default:
-					}
+					progress = strings.Join(recent, "\n")
+				}
+			case stream.EventToolCallDone:
+				name := evt.ToolCallName
+				if name == "" {
+					name = "tool"
+				}
+				progress = fmt.Sprintf("⚙ [%s] running...", name)
+			case stream.EventToolResult:
+				// Show truncated tool result
+				out := evt.ToolOutput
+				if len(out) > 70 {
+					out = out[:70] + "…"
+				}
+				out = strings.ReplaceAll(out, "\n", " ")
+				progress = fmt.Sprintf("  → %s", out)
+			}
+
+			if progress != "" {
+				select {
+				case t.ProgressCh <- progress:
+				default:
 				}
 			}
 		}
