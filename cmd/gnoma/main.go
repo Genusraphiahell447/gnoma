@@ -13,6 +13,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"encoding/json"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
+	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
@@ -211,6 +212,13 @@ func main() {
 		systemPrompt = systemPrompt + "\n\n" + summary
 	}
 
+	// Create context window with truncation compaction
+	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{
+		MaxTokens: cfg.Provider.MaxTokens * 20, // rough: max_tokens is per-turn, context window ~20x
+		Strategy:  gnomactx.NewTruncateStrategy(),
+		Logger:    logger,
+	})
+
 	// Create engine
 	eng, err := engine.New(engine.Config{
 		Provider:    prov,
@@ -218,6 +226,7 @@ func main() {
 		Tools:       reg,
 		Firewall:    fw,
 		Permissions: permChecker,
+		Context:     ctxWindow,
 		System:      systemPrompt,
 		Model:       *model,
 		MaxTurns:    *maxTurns,

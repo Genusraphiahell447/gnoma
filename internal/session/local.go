@@ -116,11 +116,21 @@ func (s *Local) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return Status{
+	st := Status{
 		State:      s.state,
 		Provider:   s.provider,
 		Model:      s.model,
 		TokensUsed: s.eng.Usage().TotalTokens(),
 		TurnCount:  s.turnCount,
+		TokenState: "ok",
 	}
+
+	if w := s.eng.ContextWindow(); w != nil {
+		tr := w.Tracker()
+		st.TokensMax = tr.MaxTokens()
+		st.TokenPercent = tr.PercentUsed()
+		st.TokenState = tr.State().String()
+	}
+
+	return st
 }

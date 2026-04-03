@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
@@ -20,6 +21,7 @@ type Config struct {
 	Tools    *tool.Registry
 	Firewall    *security.Firewall    // nil = no scanning
 	Permissions *permission.Checker  // nil = allow all
+	Context     *gnomactx.Window     // nil = no compaction
 	System      string               // system prompt
 	Model    string             // override model (empty = provider default)
 	MaxTurns int                // safety limit on tool loops (0 = unlimited)
@@ -105,6 +107,11 @@ func (e *Engine) resolveCapabilities(ctx context.Context) *provider.Capabilities
 // History returns the full conversation.
 func (e *Engine) History() []message.Message {
 	return e.history
+}
+
+// ContextWindow returns the context window (may be nil).
+func (e *Engine) ContextWindow() *gnomactx.Window {
+	return e.cfg.Context
 }
 
 // InjectMessage appends a message to conversation history without triggering a turn.

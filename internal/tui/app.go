@@ -750,10 +750,21 @@ func (m Model) renderStatus() string {
 	}
 	center := sStatusDim.Render(strings.Join(centerParts, ""))
 
-	// Right: stats
-	right := sStatusDim.Render(
-		fmt.Sprintf("tokens: %d │ turns: %d ", status.TokensUsed, status.TurnCount),
-	)
+	// Right: tokens with state color + turns
+	tokenStr := fmt.Sprintf("tokens: %d", status.TokensUsed)
+	if status.TokenPercent > 0 {
+		tokenStr = fmt.Sprintf("tokens: %d (%d%%)", status.TokensUsed, status.TokenPercent)
+	}
+	var tokenStyle lipgloss.Style
+	switch status.TokenState {
+	case "warning":
+		tokenStyle = lipgloss.NewStyle().Foreground(cYellow)
+	case "critical":
+		tokenStyle = lipgloss.NewStyle().Foreground(cRed).Bold(true)
+	default:
+		tokenStyle = sStatusDim
+	}
+	right := tokenStyle.Render(tokenStr) + sStatusDim.Render(fmt.Sprintf(" │ turns: %d ", status.TurnCount))
 
 	if m.streaming {
 		right = sStatusStreaming.Render("● streaming ") + sStatusDim.Render("│ ") + right

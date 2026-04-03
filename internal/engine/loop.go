@@ -122,6 +122,17 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		e.history = append(e.history, resp.Message)
 		e.usage.Add(resp.Usage)
 
+		// Track in context window and check for compaction
+		if e.cfg.Context != nil {
+			e.cfg.Context.Append(resp.Message, resp.Usage)
+			if compacted, err := e.cfg.Context.CompactIfNeeded(); err != nil {
+				e.logger.Error("context compaction failed", "error", err)
+			} else if compacted {
+				e.history = e.cfg.Context.Messages()
+				e.logger.Info("context compacted", "messages", len(e.history))
+			}
+		}
+
 		e.logger.Debug("turn response",
 			"stop_reason", resp.StopReason,
 			"tool_calls", len(resp.Message.ToolCalls()),

@@ -38,11 +38,14 @@ func (s SessionState) String() string {
 
 // Status holds observable session state.
 type Status struct {
-	State      SessionState
-	Provider   string
-	Model      string
-	TokensUsed int64
-	TurnCount  int
+	State        SessionState
+	Provider     string
+	Model        string
+	TokensUsed   int64
+	TokensMax    int64
+	TokenPercent int // 0-100
+	TokenState   string // "ok", "warning", "critical"
+	TurnCount    int
 }
 
 // Session is the boundary between UI and engine.
