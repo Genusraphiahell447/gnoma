@@ -12,6 +12,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"encoding/json"
+	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
@@ -58,20 +59,54 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
-	// Resolve API key (local providers don't need one)
+	// Load config (defaults → global → project → env vars)
+	cfg, err := gnomacfg.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: config load: %v\n", err)
+		defaults := gnomacfg.Defaults()
+		cfg = &defaults
+	}
+	logger.Debug("config loaded",
+		"provider", cfg.Provider.Default,
+		"model", cfg.Provider.Model,
+		"keys", len(cfg.Provider.APIKeys),
+		"perm_mode", cfg.Permission.Mode,
+		"perm_rules", len(cfg.Permission.Rules),
+	)
+
+	// CLI flags override config
+	if !isFlagSet("provider") {
+		*providerName = cfg.Provider.Default
+	}
+	if !isFlagSet("model") && cfg.Provider.Model != "" {
+		*model = cfg.Provider.Model
+	}
+	if !isFlagSet("permission") && cfg.Permission.Mode != "" {
+		*permMode = cfg.Permission.Mode
+	}
+
+	// Resolve API key: CLI flag → config → env vars
+	localProviders := map[string]bool{"ollama": true, "llamacpp": true}
 	key := *apiKey
+	if key == "" {
+		if cfgKey, ok := cfg.Provider.APIKeys[*providerName]; ok && cfgKey != "" {
+			key = cfgKey
+		}
+	}
 	if key == "" {
 		key = resolveAPIKey(*providerName)
 	}
-	localProviders := map[string]bool{"ollama": true, "llamacpp": true}
 	if key == "" && !localProviders[*providerName] {
 		fmt.Fprintf(os.Stderr, "error: no API key for provider %q\nSet %s environment variable or use --api-key\n",
 			*providerName, envKeyFor(*providerName))
 		os.Exit(1)
 	}
 
+	// Resolve base URL from config endpoints
+	baseURL := cfg.Provider.Endpoints[*providerName]
+
 	// Create provider
-	prov, err := createProvider(*providerName, key, *model)
+	prov, err := createProvider(*providerName, key, *model, baseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -95,8 +130,12 @@ func main() {
 		"runtimes", len(inventory.Runtimes),
 	)
 
-	// Re-register bash tool with aliases
-	reg.Register(bash.New(bash.WithAliases(aliases)))
+	// Re-register bash tool with aliases and config timeout
+	bashOpts := []bash.Option{bash.WithAliases(aliases)}
+	if cfg.Tools.BashTimeout.Duration() > 0 {
+		bashOpts = append(bashOpts, bash.WithTimeout(cfg.Tools.BashTimeout.Duration()))
+	}
+	reg.Register(bash.New(bashOpts...))
 
 	// Register system_info tool backed by the inventory
 	reg.Register(sysinfo.New(inventory))
@@ -139,7 +178,16 @@ func main() {
 		fmt.Scanln(&response)
 		return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes", nil
 	}
-	permChecker := permission.NewChecker(permission.Mode(*permMode), nil, pipePromptFn)
+	// Convert config rules to permission rules
+	var permRules []permission.Rule
+	for _, r := range cfg.Permission.Rules {
+		permRules = append(permRules, permission.Rule{
+			Tool:    r.Tool,
+			Pattern: r.Pattern,
+			Action:  permission.Action(r.Action),
+		})
+	}
+	permChecker := permission.NewChecker(permission.Mode(*permMode), permRules, pipePromptFn)
 
 	// Build system prompt with compact inventory summary
 	systemPrompt := *system
@@ -292,10 +340,21 @@ func resolveAPIKey(providerName string) string {
 	return ""
 }
 
-func createProvider(name, apiKey, model string) (provider.Provider, error) {
+func isFlagSet(name string) bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
+func createProvider(name, apiKey, model, baseURL string) (provider.Provider, error) {
 	cfg := provider.ProviderConfig{
-		APIKey: apiKey,
-		Model:  model,
+		APIKey:  apiKey,
+		Model:   model,
+		BaseURL: baseURL,
 	}
 
 	switch name {

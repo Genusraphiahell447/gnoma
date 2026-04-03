@@ -5,7 +5,19 @@ import "time"
 // Config is the top-level configuration.
 type Config struct {
 	Provider   ProviderSection   `toml:"provider"`
+	Permission PermissionSection `toml:"permission"`
 	Tools      ToolsSection      `toml:"tools"`
+}
+
+type PermissionSection struct {
+	Mode  string           `toml:"mode"`
+	Rules []PermissionRule `toml:"rules"`
+}
+
+type PermissionRule struct {
+	Tool    string `toml:"tool"`
+	Pattern string `toml:"pattern"`
+	Action  string `toml:"action"`
 }
 
 type ProviderSection struct {

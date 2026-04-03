@@ -11,6 +11,9 @@ func Defaults() Config {
 			APIKeys:   make(map[string]string),
 			Endpoints: make(map[string]string),
 		},
+		Permission: PermissionSection{
+			Mode: "default",
+		},
 		Tools: ToolsSection{
 			BashTimeout: Duration(30 * time.Second),
 			MaxFileSize: 1 << 20, // 1MB
