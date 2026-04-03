@@ -94,7 +94,7 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 
 	systemPrompt := "You are an elf — a focused sub-agent of gnoma. Complete the given task thoroughly and concisely. Use tools as needed."
 
-	// Spawn all elfs
+	// Spawn all elfs with slight stagger to avoid rate limit bursts
 	type elfEntry struct {
 		elf  elf.Elf
 		desc string
@@ -102,11 +102,22 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 	}
 	var elfs []elfEntry
 
-	for _, task := range a.Tasks {
+	for i, task := range a.Tasks {
+		// Stagger spawns to avoid hitting rate limits (e.g., Mistral's 1 req/s)
+		if i > 0 {
+			select {
+			case <-time.After(300 * time.Millisecond):
+			case <-ctx.Done():
+				for _, entry := range elfs {
+					entry.elf.Cancel()
+				}
+				return tool.Result{Output: "cancelled during spawn"}, nil
+			}
+		}
+
 		taskType := parseTaskType(task.TaskType)
 		e, err := t.manager.Spawn(ctx, taskType, task.Prompt, systemPrompt, maxTurns)
 		if err != nil {
-			// Clean up already-spawned elfs
 			for _, entry := range elfs {
 				entry.elf.Cancel()
 			}
@@ -120,7 +131,6 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 
 		elfs = append(elfs, elfEntry{elf: e, desc: desc, task: task})
 
-		// Send initial progress
 		t.sendProgress(elf.Progress{
 			ElfID:       e.ID(),
 			Description: desc,
