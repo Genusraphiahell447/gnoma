@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/glamour/v2"
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
@@ -53,6 +54,7 @@ type Model struct {
 	currentRole string
 
 	input          textarea.Model
+	mdRenderer     *glamour.TermRenderer
 	cwd            string
 	gitBranch      string
 	scrollOffset   int
@@ -88,13 +90,20 @@ func New(sess session.Session, cfg Config) Model {
 	cwd, _ := os.Getwd()
 	gitBranch := detectGitBranch()
 
+	// Markdown renderer for chat output
+	mdRenderer, _ := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(80),
+	)
+
 	return Model{
-		session:   sess,
-		config:    cfg,
-		input:     ti,
-		cwd:       cwd,
-		gitBranch: gitBranch,
-		streamBuf: &strings.Builder{},
+		session:    sess,
+		config:     cfg,
+		input:      ti,
+		mdRenderer: mdRenderer,
+		cwd:        cwd,
+		gitBranch:  gitBranch,
+		streamBuf:  &strings.Builder{},
 	}
 }
 
@@ -110,6 +119,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(m.width - 4)
+		// Recreate markdown renderer with new width
+		m.mdRenderer, _ = glamour.NewTermRenderer(
+			glamour.WithStandardStyle("dark"),
+			glamour.WithWordWrap(m.width-4),
+		)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -538,9 +552,16 @@ func (m Model) renderChat(height int) string {
 
 	// Streaming
 	if m.streaming && m.streamBuf.Len() > 0 {
-		wrapped := wrapText(m.streamBuf.String(), m.width-4)
-		wLines := strings.Split(wrapped, "\n")
-		for i, line := range wLines {
+		// Live-render markdown while streaming
+		raw := m.streamBuf.String()
+		rendered := raw
+		if m.mdRenderer != nil {
+			if md, err := m.mdRenderer.Render(raw); err == nil {
+				rendered = strings.TrimSpace(md)
+			}
+		}
+		rLines := strings.Split(rendered, "\n")
+		for i, line := range rLines {
 			if i == 0 {
 				lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
 			} else {
@@ -608,7 +629,6 @@ func (m Model) renderChat(height int) string {
 
 func (m Model) renderMessage(msg chatMessage) []string {
 	var lines []string
-	w := m.width - 4
 	indent := "  " // 2-space indent for continuation lines
 
 	switch msg.role {
@@ -625,10 +645,15 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		lines = append(lines, "")
 
 	case "assistant":
-		// ◆ first line, indented continuation
-		wrapped := wrapText(msg.content, w-2)
-		wLines := strings.Split(wrapped, "\n")
-		for i, line := range wLines {
+		// Render markdown with glamour
+		rendered := msg.content
+		if m.mdRenderer != nil {
+			if md, err := m.mdRenderer.Render(msg.content); err == nil {
+				rendered = strings.TrimSpace(md)
+			}
+		}
+		renderedLines := strings.Split(rendered, "\n")
+		for i, line := range renderedLines {
 			if i == 0 {
 				lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
 			} else {
