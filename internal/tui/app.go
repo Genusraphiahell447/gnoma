@@ -21,6 +21,7 @@ const version = "v0.1.0-dev"
 
 type streamEventMsg struct{ event stream.Event }
 type turnDoneMsg struct{ err error }
+type permReqMsg struct{ toolName string }
 
 type chatMessage struct {
 	role    string
@@ -32,6 +33,8 @@ type Config struct {
 	Firewall    *security.Firewall    // for incognito toggle
 	Engine      *engine.Engine        // for model switching
 	Permissions *permission.Checker   // for mode switching
+	PermCh      chan bool             // TUI → engine: y/n response
+	PermReqCh   <-chan string         // engine → TUI: tool name needing approval
 }
 
 type Model struct {
@@ -45,11 +48,13 @@ type Model struct {
 	streamBuf   strings.Builder
 	currentRole string
 
-	input        textinput.Model
-	cwd          string
-	gitBranch    string
-	scrollOffset int
-	incognito    bool
+	input          textinput.Model
+	cwd            string
+	gitBranch      string
+	scrollOffset   int
+	incognito      bool
+	permPending    bool   // waiting for user to approve/deny a tool
+	permToolName   string // which tool is asking
 }
 
 func New(sess session.Session, cfg Config) Model {
@@ -86,6 +91,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle permission prompt Y/N
+		if m.permPending {
+			switch strings.ToLower(msg.String()) {
+			case "y":
+				m.permPending = false
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: fmt.Sprintf("✓ %s approved", m.permToolName)})
+				m.config.PermCh <- true
+				return m, m.listenForEvents() // continue listening
+			case "n", "escape":
+				m.permPending = false
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: fmt.Sprintf("✗ %s denied", m.permToolName)})
+				m.config.PermCh <- false
+				return m, m.listenForEvents() // continue listening
+			}
+			return m, nil // ignore other keys while prompting
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			if m.streaming {
@@ -98,7 +122,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.session.Cancel()
 				return m, nil
 			}
-		case "ctrl+i":
+		case "ctrl+x":
 			// Toggle incognito
 			if m.config.Firewall != nil {
 				m.incognito = m.config.Firewall.Incognito().Toggle()
@@ -167,6 +191,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollOffset = 0
 			}
 		}
+		return m, nil
+
+	case permReqMsg:
+		m.permPending = true
+		m.permToolName = msg.toolName
+		m.messages = append(m.messages, chatMessage{role: "system",
+			content: fmt.Sprintf("⚠ %s wants to execute. Allow? [y/n]", msg.toolName)})
+		m.scrollOffset = 0
 		return m, nil
 
 	case streamEventMsg:
@@ -331,7 +363,23 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 
 func (m Model) listenForEvents() tea.Cmd {
 	ch := m.session.Events()
+	permReqCh := m.config.PermReqCh
+
 	return func() tea.Msg {
+		// Listen for both stream events and permission requests
+		if permReqCh != nil {
+			select {
+			case evt, ok := <-ch:
+				if !ok {
+					_, err := m.session.TurnResult()
+					return turnDoneMsg{err: err}
+				}
+				return streamEventMsg{event: evt}
+			case toolName := <-permReqCh:
+				return permReqMsg{toolName: toolName}
+			}
+		}
+
 		evt, ok := <-ch
 		if !ok {
 			_, err := m.session.TurnResult()
@@ -517,10 +565,16 @@ func (m Model) renderSeparators() (string, string) {
 		modeLabel = string(mode)
 	}
 
-	// Incognito overrides everything with amber
+	// Incognito adds amber overlay but keeps mode visible
 	if m.incognito {
 		lineColor = cYellow
-		modeLabel = "🔒 incognito"
+		modeLabel = "🔒 " + modeLabel
+	}
+
+	// Permission pending — flash the line
+	if m.permPending {
+		lineColor = cRed
+		modeLabel = "⚠ " + m.permToolName + " [y/n]"
 	}
 
 	lineStyle := lipgloss.NewStyle().Foreground(lineColor)

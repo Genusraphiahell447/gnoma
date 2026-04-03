@@ -199,15 +199,22 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		// TUI mode: replace permission prompt with channel-based one
+		// TUI mode: permission prompts via channels
+		permCh := make(chan bool)                      // TUI → engine: y/n response
+		permReqCh := make(chan string, 1)              // engine → TUI: tool name requesting permission
 		permChecker.SetPromptFunc(func(ctx context.Context, toolName string, args json.RawMessage) (bool, error) {
-			// Send permission request through a channel, block until TUI responds
-			respCh := make(chan bool, 1)
-			// The engine callback will emit this as an event
-			// For now, auto-approve in TUI (proper overlay is M5+)
-			// TODO: wire to TUI overlay
-			respCh <- true
-			return <-respCh, nil
+			// Notify TUI that a permission prompt is needed
+			select {
+			case permReqCh <- toolName:
+			default:
+			}
+			// Block until TUI responds
+			select {
+			case approved := <-permCh:
+				return approved, nil
+			case <-ctx.Done():
+				return false, ctx.Err()
+			}
 		})
 
 		armModel := *model
@@ -221,6 +228,8 @@ func main() {
 			Firewall:    fw,
 			Engine:      eng,
 			Permissions: permChecker,
+			PermCh:      permCh,
+			PermReqCh:   permReqCh,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
