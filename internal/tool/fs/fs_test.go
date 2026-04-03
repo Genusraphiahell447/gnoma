@@ -186,7 +186,7 @@ func TestEditTool_SingleReplace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(result.Output, "1 occurrence") {
+	if !strings.Contains(result.Output, "Edit(") && !strings.Contains(result.Output, "Replaced") {
 		t.Errorf("Output = %q", result.Output)
 	}
 
@@ -206,7 +206,7 @@ func TestEditTool_ReplaceAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(result.Output, "3 occurrence") {
+	if !strings.Contains(result.Output, "Edit(") && !strings.Contains(result.Output, "3 occurrence") {
 		t.Errorf("Output = %q", result.Output)
 	}
 

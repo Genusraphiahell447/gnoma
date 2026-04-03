@@ -679,8 +679,24 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		lines = append(lines, indent+sToolOutput.Render(msg.content))
 
 	case "toolresult":
-		for _, line := range strings.Split(msg.content, "\n") {
-			lines = append(lines, indent+indent+sToolResult.Render(line))
+		resultLines := strings.Split(msg.content, "\n")
+		maxShow := 10
+		for i, line := range resultLines {
+			if i >= maxShow {
+				remaining := len(resultLines) - maxShow
+				lines = append(lines, indent+indent+sHint.Render(
+					fmt.Sprintf("+%d lines (Ctrl+O to expand)", remaining)))
+				break
+			}
+			// Diff coloring for edit results
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "++") && len(trimmed) > 1 {
+				lines = append(lines, indent+indent+sDiffAdd.Render(line))
+			} else if strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "--") && len(trimmed) > 1 {
+				lines = append(lines, indent+indent+sDiffRemove.Render(line))
+			} else {
+				lines = append(lines, indent+indent+sToolResult.Render(line))
+			}
 		}
 		lines = append(lines, "")
 

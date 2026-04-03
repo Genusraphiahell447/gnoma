@@ -85,6 +85,12 @@ var (
 
 	sCursor = lipgloss.NewStyle().
 		Foreground(cPurple)
+
+	sDiffAdd = lipgloss.NewStyle().
+		Foreground(cGreen)
+
+	sDiffRemove = lipgloss.NewStyle().
+			Foreground(cRed)
 )
 
 // Status bar

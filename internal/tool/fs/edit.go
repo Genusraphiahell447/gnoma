@@ -102,8 +102,68 @@ func (t *EditTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 		replacements = count
 	}
 
+	// Generate diff-style output with context
+	diff := buildEditDiff(content, a.OldString, a.NewString, a.Path, replacements)
+
 	return tool.Result{
-		Output:   fmt.Sprintf("Replaced %d occurrence(s) in %s", replacements, a.Path),
+		Output:   diff,
 		Metadata: map[string]any{"replacements": replacements, "path": a.Path},
 	}, nil
+}
+
+// buildEditDiff generates a diff display with context lines around the edit.
+func buildEditDiff(original, oldStr, newStr, path string, replacements int) string {
+	contextLines := 3
+	lines := strings.Split(original, "\n")
+
+	// Find the line where the old string starts
+	editStart := -1
+	for i, line := range lines {
+		if strings.Contains(line, strings.Split(oldStr, "\n")[0]) {
+			editStart = i
+			break
+		}
+	}
+
+	if editStart == -1 {
+		return fmt.Sprintf("Replaced %d occurrence(s) in %s", replacements, path)
+	}
+
+	oldLines := strings.Split(oldStr, "\n")
+	newLines := strings.Split(newStr, "\n")
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Edit(%s)\n", path)
+	fmt.Fprintf(&b, "  Added %d lines, removed %d lines\n", len(newLines), len(oldLines))
+
+	// Context before
+	start := editStart - contextLines
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < editStart; i++ {
+		fmt.Fprintf(&b, "  %4d   %s\n", i+1, lines[i])
+	}
+
+	// Removed lines (old)
+	for i, line := range oldLines {
+		fmt.Fprintf(&b, "  %4d - %s\n", editStart+i+1, line)
+	}
+
+	// Added lines (new)
+	for i, line := range newLines {
+		fmt.Fprintf(&b, "  %4d + %s\n", editStart+i+1, line)
+	}
+
+	// Context after
+	afterStart := editStart + len(oldLines)
+	afterEnd := afterStart + contextLines
+	if afterEnd > len(lines) {
+		afterEnd = len(lines)
+	}
+	for i := afterStart; i < afterEnd; i++ {
+		fmt.Fprintf(&b, "  %4d   %s\n", i+1, lines[i])
+	}
+
+	return b.String()
 }

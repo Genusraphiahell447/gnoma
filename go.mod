@@ -8,7 +8,7 @@ require (
 	charm.land/glamour/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.2
 	github.com/BurntSushi/toml v0.3.1
-	github.com/VikingOwl91/mistral-go-sdk v1.2.1
+	github.com/VikingOwl91/mistral-go-sdk v1.3.0
 	github.com/anthropics/anthropic-sdk-go v1.29.0
 	github.com/openai/openai-go v1.12.0
 	golang.org/x/text v0.27.0
