@@ -116,9 +116,13 @@ depends_on: [vision]
 - [ ] Model picker overlay
 - [ ] In-app config editor (`/config` command)
 - [ ] Incognito toggle (`/incognito` command)
+- [ ] Interactive shell pane: `/shell` command or keybinding opens PTY-connected shell
+  - For commands needing user input (sudo, ssh, git push with auth, passwd prompts)
+  - Bash tool detects potentially interactive commands and suggests take-over
+  - PTY-based execution for flagged commands
 - [ ] Session management (channel-based)
 
-**Exit criteria:** Launch TUI, chat interactively, 6 permission modes work, config editable in-app, incognito toggleable.
+**Exit criteria:** Launch TUI, chat interactively, 6 permission modes work, config editable in-app, incognito toggleable, `/shell` opens interactive terminal for password prompts.
 
 ## M6: Context Intelligence
 
@@ -219,7 +223,7 @@ depends_on: [vision]
 
 **Exit criteria:** gnoma suggests a persistent task after 3+ repetitions. `/task release v1.2.0` executes a saved workflow.
 
-## M12: Thinking & Structured Output
+## M12: Thinking, Structured Output & Notebook
 
 **Deliverables:**
 
@@ -227,6 +231,7 @@ depends_on: [vision]
 - [ ] Thinking block streaming and TUI display
 - [ ] Structured output with JSON schema validation
 - [ ] Retry logic for schema validation failures
+- [ ] NotebookEdit tool: read/write/edit Jupyter notebook cells (.ipynb)
 
 ## M13: Auth
 

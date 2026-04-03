@@ -68,14 +68,19 @@ func (a *Accumulator) Apply(e Event) {
 		}
 
 	case EventToolCallDone:
-		if tc, ok := a.toolCalls[e.ToolCallID]; ok {
-			if e.Args != nil {
-				// Done event carries authoritative complete args
-				tc.args = e.Args
-			} else {
-				// Fall back to accumulated deltas
-				tc.args = []byte(tc.argsBuf.String())
-			}
+		tc, ok := a.toolCalls[e.ToolCallID]
+		if !ok {
+			// Done without prior Start (e.g., Mistral sends complete tool calls in one chunk)
+			tc = &toolCallAccum{id: e.ToolCallID, name: e.ToolCallName}
+			a.toolCalls[e.ToolCallID] = tc
+			a.toolCallOrder = append(a.toolCallOrder, e.ToolCallID)
+		}
+		if e.Args != nil {
+			// Done event carries authoritative complete args
+			tc.args = e.Args
+		} else {
+			// Fall back to accumulated deltas
+			tc.args = []byte(tc.argsBuf.String())
 		}
 
 	case EventUsage:
