@@ -55,9 +55,12 @@ func ValidateCommand(cmd string) *SecurityViolation {
 	if v := checkDangerousVars(cmd); v != nil {
 		return v
 	}
-	// Metacharacters and redirection are warnings, not blocks in M1.
-	// The LLM legitimately uses pipes and redirects.
-	// Full compound command parsing (mvdan.cc/sh) comes in M5.
+	if v := checkStandaloneSemicolon(cmd); v != nil {
+		return v
+	}
+	if v := checkSensitiveRedirection(cmd); v != nil {
+		return v
+	}
 	return nil
 }
 
@@ -175,6 +178,60 @@ func checkCmdSubstitution(cmd string) *SecurityViolation {
 					Check:   CheckCmdSubstitution,
 					Message: "${} variable expansion",
 				}
+			}
+		}
+	}
+	return nil
+}
+
+// checkStandaloneSemicolon blocks standalone semicolons used to chain commands.
+// Pipes (|) and && / || are allowed (handled by compound command parsing).
+func checkStandaloneSemicolon(cmd string) *SecurityViolation {
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	for _, r := range cmd {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if !inSingle && !inDouble && r == ';' {
+			return &SecurityViolation{
+				Check:   CheckMetacharacters,
+				Message: "standalone semicolon (use && for chaining)",
+			}
+		}
+	}
+	return nil
+}
+
+// checkSensitiveRedirection blocks output redirection to sensitive paths.
+func checkSensitiveRedirection(cmd string) *SecurityViolation {
+	sensitiveTargets := []string{
+		"/etc/passwd", "/etc/shadow", "/etc/sudoers",
+		".bashrc", ".zshrc", ".profile", ".bash_profile",
+		".ssh/authorized_keys", ".ssh/config",
+		".env",
+	}
+
+	for _, target := range sensitiveTargets {
+		if strings.Contains(cmd, "> "+target) || strings.Contains(cmd, ">>"+target) {
+			return &SecurityViolation{
+				Check:   CheckRedirection,
+				Message: fmt.Sprintf("redirection to sensitive path: %s", target),
 			}
 		}
 	}
