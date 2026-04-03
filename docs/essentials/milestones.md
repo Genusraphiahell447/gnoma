@@ -17,13 +17,13 @@ depends_on: [vision]
 | M3 | Security Firewall | Request/response scanning, redaction, incognito | M2 |
 | M4 | Router Foundation | Arm registry, pools, task classifier, heuristic selection | M2 |
 | M5 | TUI | Bubble Tea, 6 permission modes, config screen | M3, M4 |
-| M6 | Context Intelligence | Local tokenizer, full compaction (truncate + summarize) | M5 |
+| M6 | Context Intelligence | Local tokenizer, fixed context prefix, full compaction | M5 |
 | M7 | Elfs | Router-integrated sub-agents, parallel work | M4, M6 |
 | M8 | Extensibility | Hooks, skills, MCP client, MCP tool replaceability, plugins | M7 |
 | M9 | Router Advanced | Bandit core, feedback, ensemble strategies, state persistence | M7 |
 | M10 | Persistence & Serve | SQLite sessions, serve mode, coordinator | M7 |
 | M11 | Task Learning | Pattern recognition, task suggestions, persistent tasks | M9 |
-| M12 | Thinking & Structured Output | Thinking modes, schema validation | M2 |
+| M12 | Thinking, Multimodality & Structured Output | Thinking, multimodal I/O, schema validation | M2 |
 | M13 | Auth | OAuth PKCE, keyring, multi-account | M5 |
 | M14 | Observability | Feature flags, telemetry, cost dashboards | M10 |
 | M15 | Web UI | `gnoma web` CLI flag, browser UI via serve mode | M10 |
@@ -43,6 +43,7 @@ depends_on: [vision]
 - [ ] Tool system: bash (with security checks), fs.read, fs.write, fs.edit, fs.glob, fs.grep
 - [ ] Engine agentic loop (stream → tool → re-query → done)
 - [ ] CLI pipe mode (`echo "list files" | gnoma`)
+- [ ] System package inventory: detect installed tools/packages at startup, include in system prompt so the LLM knows what's available
 
 **Exit criteria:** Pipe a coding question in, get a response that uses tools, answer on stdout.
 
@@ -132,7 +133,8 @@ depends_on: [vision]
 
 - [ ] Local tokenizer for accurate token counting
 - [ ] Token tracker with warning states (OK / Warning / Critical)
-- [ ] TruncateStrategy: drop oldest, preserve system + recent
+- [ ] Fixed context prefix: system prompt + loaded md files (CLAUDE.md, project docs) pinned as immutable prefix. Only conversation history after the prefix gets compacted.
+- [ ] TruncateStrategy: drop oldest, preserve system + fixed prefix + recent
 - [ ] SummarizeStrategy: spawn compaction elf, LLM-powered summary, image stripping, boundary messages
 - [ ] Auto-compaction triggers (threshold-based, reactive on 413, circuit breaker after 3 failures)
 - [ ] Pre/post compact hooks
@@ -223,7 +225,7 @@ depends_on: [vision]
 
 **Exit criteria:** gnoma suggests a persistent task after 3+ repetitions. `/task release v1.2.0` executes a saved workflow.
 
-## M12: Thinking, Structured Output & Notebook
+## M12: Thinking, Structured Output, Notebook & Multimodality
 
 **Deliverables:**
 
@@ -232,6 +234,9 @@ depends_on: [vision]
 - [ ] Structured output with JSON schema validation
 - [ ] Retry logic for schema validation failures
 - [ ] NotebookEdit tool: read/write/edit Jupyter notebook cells (.ipynb)
+- [ ] Multimodal input: image support (Anthropic image blocks, OpenAI content parts, Google inline data)
+- [ ] Multimodal input: audio support (where provider supports it)
+- [ ] Multimodal output: image rendering in TUI (sixel/kitty protocol)
 
 ## M13: Auth
 

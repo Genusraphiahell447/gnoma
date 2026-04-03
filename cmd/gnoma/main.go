@@ -79,6 +79,13 @@ func main() {
 		logger.Debug("harvested aliases", "count", aliases.Len())
 	}
 
+	// Harvest system inventory
+	inventory := bash.HarvestInventory(context.Background())
+	logger.Debug("system inventory",
+		"tools", len(inventory.Tools),
+		"runtimes", len(inventory.Runtimes),
+	)
+
 	// Re-register bash tool with aliases
 	reg.Register(bash.New(bash.WithAliases(aliases)))
 
@@ -107,13 +114,19 @@ func main() {
 		Logger:           logger,
 	})
 
+	// Build system prompt with inventory
+	systemPrompt := *system
+	if invStr := inventory.String(); invStr != "" {
+		systemPrompt = systemPrompt + "\n\n" + invStr
+	}
+
 	// Create engine
 	eng, err := engine.New(engine.Config{
 		Provider: prov,
 		Router:   rtr,
 		Tools:    reg,
 		Firewall: fw,
-		System:   *system,
+		System:   systemPrompt,
 		Model:    *model,
 		MaxTurns: *maxTurns,
 		Logger:   logger,
