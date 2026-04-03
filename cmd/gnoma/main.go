@@ -12,6 +12,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	anthropicprov "somegit.dev/Owlibou/gnoma/internal/provider/anthropic"
 	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
 	googleprov "somegit.dev/Owlibou/gnoma/internal/provider/google"
@@ -80,10 +81,19 @@ func main() {
 	// Re-register bash tool with aliases
 	reg.Register(bash.New(bash.WithAliases(aliases)))
 
+	// Create firewall
+	fw := security.NewFirewall(security.FirewallConfig{
+		ScanOutgoing:     true,
+		ScanToolResults:  true,
+		EntropyThreshold: 4.5,
+		Logger:           logger,
+	})
+
 	// Create engine
 	eng, err := engine.New(engine.Config{
 		Provider: prov,
 		Tools:    reg,
+		Firewall: fw,
 		System:   *system,
 		Model:    *model,
 		MaxTurns: *maxTurns,

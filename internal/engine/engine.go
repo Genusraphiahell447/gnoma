@@ -7,6 +7,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
 
@@ -14,9 +15,10 @@ import (
 type Config struct {
 	Provider provider.Provider
 	Tools    *tool.Registry
-	System   string // system prompt
-	Model    string // override model (empty = provider default)
-	MaxTurns int    // safety limit on tool loops (0 = unlimited)
+	Firewall *security.Firewall // nil = no scanning
+	System   string             // system prompt
+	Model    string             // override model (empty = provider default)
+	MaxTurns int                // safety limit on tool loops (0 = unlimited)
 	Logger   *slog.Logger
 }
 

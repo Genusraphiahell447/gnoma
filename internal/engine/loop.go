@@ -115,10 +115,18 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 }
 
 func (e *Engine) buildRequest(ctx context.Context) provider.Request {
+	// Scan messages through firewall if configured
+	messages := e.history
+	systemPrompt := e.cfg.System
+	if e.cfg.Firewall != nil {
+		messages = e.cfg.Firewall.ScanOutgoingMessages(messages)
+		systemPrompt = e.cfg.Firewall.ScanSystemPrompt(systemPrompt)
+	}
+
 	req := provider.Request{
 		Model:        e.cfg.Model,
-		SystemPrompt: e.cfg.System,
-		Messages:     e.history,
+		SystemPrompt: systemPrompt,
+		Messages:     messages,
 	}
 
 	// Only include tools if the model supports them
@@ -169,17 +177,23 @@ func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb 
 			continue
 		}
 
+		// Scan tool result through firewall
+		output := result.Output
+		if e.cfg.Firewall != nil {
+			output = e.cfg.Firewall.ScanToolResult(output)
+		}
+
 		// Emit tool result as a text delta event so the UI can show it
 		if cb != nil {
 			cb(stream.Event{
 				Type: stream.EventTextDelta,
-				Text: fmt.Sprintf("\n[tool:%s] %s\n", call.Name, truncate(result.Output, 500)),
+				Text: fmt.Sprintf("\n[tool:%s] %s\n", call.Name, truncate(output, 500)),
 			})
 		}
 
 		results = append(results, message.ToolResult{
 			ToolCallID: call.ID,
-			Content:    result.Output,
+			Content:    output,
 		})
 	}
 
