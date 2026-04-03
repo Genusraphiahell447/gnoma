@@ -212,10 +212,12 @@ func main() {
 		systemPrompt = systemPrompt + "\n\n" + summary
 	}
 
-	// Create context window with truncation compaction
+	// Create context window with summarize strategy (falls back to truncation)
+	var compactStrategy gnomactx.Strategy
+	compactStrategy = gnomactx.NewSummarizeStrategy(prov)
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{
 		MaxTokens: cfg.Provider.MaxTokens * 20, // rough: max_tokens is per-turn, context window ~20x
-		Strategy:  gnomactx.NewTruncateStrategy(),
+		Strategy:  compactStrategy,
 		Logger:    logger,
 	})
 

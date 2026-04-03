@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
@@ -246,6 +247,12 @@ func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb 
 		output := result.Output
 		if e.cfg.Firewall != nil {
 			output = e.cfg.Firewall.ScanToolResult(output)
+		}
+
+		// Persist large results to disk
+		if persisted, ok := gnomactx.PersistLargeResult(output, call.ID, ".gnoma/sessions"); ok {
+			e.logger.Debug("tool result persisted to disk", "name", call.Name, "size", len(output))
+			output = persisted
 		}
 
 		// Emit tool result event for the UI

@@ -298,6 +298,25 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/clear":
 		m.messages = nil
 		m.scrollOffset = 0
+		if m.config.Engine != nil {
+			m.config.Engine.Reset()
+		}
+		return m, nil
+
+	case "/compact":
+		if m.config.Engine != nil {
+			if w := m.config.Engine.ContextWindow(); w != nil {
+				compacted, err := w.CompactIfNeeded()
+				if err != nil {
+					m.messages = append(m.messages, chatMessage{role: "error", content: "compaction failed: " + err.Error()})
+				} else if compacted {
+					m.messages = append(m.messages, chatMessage{role: "system", content: "context compacted — older messages summarized"})
+				} else {
+					// Force compaction even if not at threshold
+					m.messages = append(m.messages, chatMessage{role: "system", content: "context usage within budget, no compaction needed"})
+				}
+			}
+		}
 		return m, nil
 
 	case "/incognito":
