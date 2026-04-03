@@ -177,9 +177,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle incognito
 			if m.config.Firewall != nil {
 				m.incognito = m.config.Firewall.Incognito().Toggle()
+				if m.config.Router != nil {
+					m.config.Router.SetLocalOnly(m.incognito)
+				}
 				var msg string
 				if m.incognito {
-					msg = "🔒 incognito ON — no persistence, no learning, no logging"
+					msg = "🔒 incognito ON — no persistence, no learning, local-only routing"
 				} else {
 					msg = "🔓 incognito OFF"
 				}
@@ -352,9 +355,12 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/incognito":
 		if m.config.Firewall != nil {
 			m.incognito = m.config.Firewall.Incognito().Toggle()
+			if m.config.Router != nil {
+				m.config.Router.SetLocalOnly(m.incognito)
+			}
 			if m.incognito {
 				m.messages = append(m.messages, chatMessage{role: "system",
-					content: "🔒 incognito mode ON — no persistence, no learning, no content logging"})
+					content: "🔒 incognito mode ON — no persistence, no learning, local-only routing"})
 			} else {
 				m.messages = append(m.messages, chatMessage{role: "system",
 					content: "🔓 incognito mode OFF"})

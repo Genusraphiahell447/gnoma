@@ -169,33 +169,69 @@ func defaultPatterns() []SecretPattern {
 		name  string
 		regex string
 	}{
-		// Anthropic
+		// --- AI/LLM Providers ---
 		{"anthropic_api_key", `sk-ant-(?:api)?[a-zA-Z0-9_-]{20,}`},
-		// OpenAI
+		{"anthropic_admin_key", `sk-ant-admin[a-zA-Z0-9_-]{20,}`},
 		{"openai_api_key", `sk-(?:proj-)?[a-zA-Z0-9_-]{20,}`},
-		// Google
+		{"openai_svcacct_key", `sk-svcacct-[a-zA-Z0-9_-]{20,}`},
+		{"openai_admin_key", `sk-admin-[a-zA-Z0-9_-]{20,}`},
+		{"mistral_api_key", `[a-zA-Z0-9]{32}(?:[a-zA-Z0-9]{0})`}, // 32-char; entropy-gated
+		{"huggingface_token", `hf_[a-zA-Z0-9]{34,}`},
+
+		// --- Cloud Providers ---
 		{"google_api_key", `AIza[a-zA-Z0-9_-]{35}`},
-		// AWS
 		{"aws_access_key", `(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}`},
 		{"aws_secret_key", `(?i)aws_secret_access_key\s*=\s*[a-zA-Z0-9/+=]{40}`},
-		// GitHub
+		{"azure_storage_key", `(?i)AccountKey=[a-zA-Z0-9+/=]{88}`},
+		{"digitalocean_pat", `dop_v1_[a-f0-9]{64}`},
+		{"digitalocean_oauth", `doo_v1_[a-f0-9]{64}`},
+		{"digitalocean_refresh", `dor_v1_[a-f0-9]{64}`},
+		{"vault_token", `hvs\.[a-zA-Z0-9_-]{24,}`},
+		{"supabase_key", `sbp_[a-f0-9]{40}`},
+
+		// --- Version Control ---
 		{"github_pat", `gh[pousr]_[a-zA-Z0-9]{36,}`},
 		{"github_fine_grained", `github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}`},
-		// GitLab
+		{"github_app_token", `ghs_[a-zA-Z0-9]{36}`},
+		{"github_oauth_token", `gho_[a-zA-Z0-9]{36}`},
+		{"github_refresh_token", `ghr_[a-zA-Z0-9]{36}`},
 		{"gitlab_pat", `glpat-[a-zA-Z0-9_-]{20,}`},
-		// Slack
+
+		// --- Communication & Collaboration ---
 		{"slack_token", `xox[bpears]-[a-zA-Z0-9-]{10,}`},
-		// Stripe
-		{"stripe_key", `(?:sk|pk)_(?:live|test)_[a-zA-Z0-9]{24,}`},
-		// Private keys
+		{"twilio_api_key", `SK[a-f0-9]{32}`},
+		{"sendgrid_api_key", `SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}`},
+		{"telegram_bot_token", `\d{8,10}:[a-zA-Z0-9_-]{35}`},
+		{"discord_bot_token", `[MN][A-Za-z\d]{23,}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}`},
+
+		// --- Payment & Commerce ---
+		{"stripe_key", `(?:sk|pk|rk)_(?:live|test)_[a-zA-Z0-9]{24,}`},
+		{"shopify_access_token", `shpat_[a-fA-F0-9]{32}`},
+		{"shopify_shared_secret", `shpss_[a-fA-F0-9]{32}`},
+
+		// --- Package Registries & Dev Tools ---
+		{"npm_token", `npm_[a-zA-Z0-9]{36}`},
+		{"pypi_api_token", `pypi-[a-zA-Z0-9_-]{100,}`},
+		{"databricks_token", `dapi[a-f0-9]{32}`},
+		{"pulumi_access_token", `pul-[a-f0-9]{40}`},
+		{"postman_api_key", `PMAK-[a-f0-9]{24}-[a-f0-9]{34}`},
+		{"hashicorp_tf_token", `[a-zA-Z0-9]{14}\.atlasv1\.[a-zA-Z0-9_-]{60,}`},
+		{"figma_pat", `figd_[a-zA-Z0-9_-]{40,}`},
+
+		// --- Observability & Monitoring ---
+		{"grafana_api_key", `eyJr[a-zA-Z0-9+/=]{60,}`},
+		{"grafana_service_account", `glsa_[a-zA-Z0-9_]{32,}`},
+		{"sentry_auth_token", `sntrys_[a-zA-Z0-9_]{50,}`},
+
+		// --- Infrastructure ---
 		{"private_key", `-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`},
-		// Generic secrets in assignments
-		{"generic_secret_assign", `(?i)(?:password|secret|token|api_key|apikey|auth)\s*[:=]\s*['"][a-zA-Z0-9_/+=\-]{8,}['"]`},
-		// Mistral
-		{"mistral_api_key", `[a-zA-Z0-9]{32}` + `(?:` + `[a-zA-Z0-9]{0}` + `)`}, // 32-char hex-like strings caught by entropy
-		// Database URLs with credentials
 		{"database_url", `(?i)(?:postgres|mysql|mongodb|redis)://[^:]+:[^@]+@`},
-		// .env file patterns
+		{"heroku_api_key", `(?i)HEROKU_API_KEY\s*=\s*[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`},
+		{"mailgun_api_key", `key-[a-f0-9]{32}`},
+		{"jwt_token", `eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}`},
+
+		// --- Generic ---
+		{"generic_secret_assign", `(?i)(?:password|secret|token|api_key|apikey|auth)\s*[:=]\s*['"][a-zA-Z0-9_/+=\-]{8,}['"]`},
 		{"env_secret", `(?i)^[A-Z_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWORD)\s*=\s*.{8,}$`},
 	}
 

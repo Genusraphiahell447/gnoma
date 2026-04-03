@@ -137,6 +137,49 @@ func DiscoverLocalModels(ctx context.Context, logger *slog.Logger, ollamaURL, ll
 	return all
 }
 
+// StartDiscoveryLoop periodically polls for local models and reconciles with the router.
+func StartDiscoveryLoop(ctx context.Context, r *Router, logger *slog.Logger,
+	ollamaURL, llamacppURL string,
+	providerFactory func(name, model string) provider.Provider,
+	interval time.Duration,
+) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				models := DiscoverLocalModels(ctx, logger, ollamaURL, llamacppURL)
+				reconcileArms(r, models, providerFactory, logger)
+			}
+		}
+	}()
+}
+
+// reconcileArms adds newly discovered models and removes disappeared ones.
+func reconcileArms(r *Router, discovered []DiscoveredModel, providerFactory func(name, model string) provider.Provider, logger *slog.Logger) {
+	discoveredSet := make(map[ArmID]bool, len(discovered))
+	for _, m := range discovered {
+		discoveredSet[NewArmID(m.Provider, m.ID)] = true
+	}
+
+	// Register new models
+	RegisterDiscoveredModels(r, discovered, providerFactory)
+
+	// Remove arms whose models have disappeared (only local arms)
+	for _, arm := range r.Arms() {
+		if !arm.IsLocal {
+			continue
+		}
+		if !discoveredSet[arm.ID] {
+			logger.Debug("removing disappeared local arm", "id", arm.ID)
+			r.RemoveArm(arm.ID)
+		}
+	}
+}
+
 // RegisterDiscoveredModels registers discovered local models as arms in the router.
 func RegisterDiscoveredModels(r *Router, models []DiscoveredModel, providerFactory func(name, model string) provider.Provider) {
 	for _, m := range models {

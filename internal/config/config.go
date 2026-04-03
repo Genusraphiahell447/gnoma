@@ -8,6 +8,29 @@ type Config struct {
 	Permission PermissionSection `toml:"permission"`
 	Tools      ToolsSection      `toml:"tools"`
 	RateLimits RateLimitSection  `toml:"rate_limits"`
+	Security   SecuritySection   `toml:"security"`
+}
+
+// SecuritySection configures the secret scanner and firewall.
+//
+// Example config:
+//
+//	[security]
+//	entropy_threshold = 4.5
+//
+//	[[security.patterns]]
+//	name = "internal_token"
+//	regex = "mycompany_[a-zA-Z0-9]{32}"
+//	action = "redact"
+type SecuritySection struct {
+	EntropyThreshold float64         `toml:"entropy_threshold"`
+	Patterns         []PatternConfig `toml:"patterns"`
+}
+
+type PatternConfig struct {
+	Name   string `toml:"name"`
+	Regex  string `toml:"regex"`
+	Action string `toml:"action"` // "redact" (default), "block", "warn"
 }
 
 type PermissionSection struct {

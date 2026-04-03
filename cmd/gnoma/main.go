@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"encoding/json"
@@ -184,6 +185,22 @@ func main() {
 		logger.Debug("local models discovered", "count", len(localModels))
 	}
 
+	// Start background discovery polling (30s interval)
+	discoveryCtx, discoveryCancel := context.WithCancel(context.Background())
+	defer discoveryCancel()
+	providerFactory := func(provName, model string) provider.Provider {
+		p, err := createProvider(provName, "", model, cfg.Provider.Endpoints[provName])
+		if err != nil {
+			return nil
+		}
+		return p
+	}
+	router.StartDiscoveryLoop(discoveryCtx, rtr, logger,
+		cfg.Provider.Endpoints["ollama"],
+		cfg.Provider.Endpoints["llamacpp"],
+		providerFactory, 30*time.Second,
+	)
+
 	// Create elf manager and register agent tool
 	elfMgr := elf.NewManager(elf.ManagerConfig{
 		Router: rtr,
@@ -199,12 +216,29 @@ func main() {
 	reg.Register(batchTool)
 
 	// Create firewall
+	entropyThreshold := 4.5
+	if cfg.Security.EntropyThreshold > 0 {
+		entropyThreshold = cfg.Security.EntropyThreshold
+	}
 	fw := security.NewFirewall(security.FirewallConfig{
 		ScanOutgoing:     true,
 		ScanToolResults:  true,
-		EntropyThreshold: 4.5,
+		EntropyThreshold: entropyThreshold,
 		Logger:           logger,
 	})
+	// Wire custom scanner patterns from config
+	for _, p := range cfg.Security.Patterns {
+		action := security.ActionRedact
+		switch p.Action {
+		case "block":
+			action = security.ActionBlock
+		case "warn":
+			action = security.ActionWarn
+		}
+		if err := fw.Scanner().AddPattern(p.Name, p.Regex, action); err != nil {
+			logger.Warn("invalid security pattern", "name", p.Name, "error", err)
+		}
+	}
 
 	// Incognito mode
 	if *incognito {

@@ -108,7 +108,11 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				return e.cfg.Provider.Stream(ctx, req)
 			})
 			if err != nil {
-				return nil, fmt.Errorf("provider stream: %w", err)
+				// Try reactive compaction on 413 (request too large)
+				s, err = e.handleRequestTooLarge(ctx, err, req)
+				if err != nil {
+					return nil, fmt.Errorf("provider stream: %w", err)
+				}
 			}
 		}
 
@@ -339,6 +343,42 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// handleRequestTooLarge attempts compaction on 413 and retries once.
+func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req provider.Request) (stream.Stream, error) {
+	var provErr *provider.ProviderError
+	if !errors.As(origErr, &provErr) || provErr.StatusCode != 413 {
+		return nil, origErr
+	}
+
+	if e.cfg.Context == nil {
+		return nil, origErr
+	}
+
+	e.logger.Warn("413 received, forcing emergency compaction")
+	compacted, compactErr := e.cfg.Context.ForceCompact()
+	if compactErr != nil || !compacted {
+		return nil, origErr
+	}
+
+	e.history = e.cfg.Context.Messages()
+	req = e.buildRequest(ctx)
+
+	if e.cfg.Router != nil {
+		prompt := ""
+		for i := len(e.history) - 1; i >= 0; i-- {
+			if e.history[i].Role == message.RoleUser {
+				prompt = e.history[i].TextContent()
+				break
+			}
+		}
+		task := router.ClassifyTask(prompt)
+		task.EstimatedTokens = 4000
+		s, _, err := e.cfg.Router.Stream(ctx, task, req)
+		return s, err
+	}
+	return e.cfg.Provider.Stream(ctx, req)
 }
 
 // retryOnTransient retries the stream call on 429/5xx with exponential backoff.

@@ -110,18 +110,55 @@ func (w *Window) CompactIfNeeded() (bool, error) {
 	}
 
 	w.consecutiveFailures = 0
+	originalLen := len(w.messages)
 	w.messages = compacted
 
 	// Rough estimate: reduce tracked tokens proportionally
-	ratio := float64(len(compacted)) / float64(len(w.messages)+1)
+	ratio := float64(len(compacted)) / float64(originalLen+1)
 	w.tracker.Set(int64(float64(w.tracker.Used()) * ratio))
 
 	w.logger.Info("compaction complete",
-		"messages_before", len(w.messages),
+		"messages_before", originalLen,
 		"messages_after", len(compacted),
 		"tokens_after", w.tracker.Used(),
 	)
 
+	return true, nil
+}
+
+// ForceCompact runs compaction regardless of the token threshold.
+// Used for reactive compaction (e.g., after a 413 response).
+func (w *Window) ForceCompact() (bool, error) {
+	if w.strategy == nil {
+		return false, fmt.Errorf("no compaction strategy configured")
+	}
+	if len(w.messages) <= 2 {
+		return false, nil // nothing to compact
+	}
+
+	budget := w.tracker.MaxTokens() / 2
+
+	w.logger.Info("forced compaction",
+		"messages", len(w.messages),
+		"used", w.tracker.Used(),
+		"budget", budget,
+	)
+
+	compacted, err := w.strategy.Compact(w.messages, budget)
+	if err != nil {
+		return false, err
+	}
+
+	originalLen := len(w.messages)
+	w.messages = compacted
+	ratio := float64(len(compacted)) / float64(originalLen+1)
+	w.tracker.Set(int64(float64(w.tracker.Used()) * ratio))
+
+	w.logger.Info("forced compaction complete",
+		"messages_before", originalLen,
+		"messages_after", len(compacted),
+		"tokens_after", w.tracker.Used(),
+	)
 	return true, nil
 }
 

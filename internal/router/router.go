@@ -19,6 +19,8 @@ type Router struct {
 
 	// Optional: force a specific arm (--provider flag override)
 	forcedArm ArmID
+	// When true, only local arms are considered (incognito mode)
+	localOnly bool
 }
 
 type Config struct {
@@ -66,9 +68,12 @@ func (r *Router) Select(task Task) RoutingDecision {
 		return RoutingDecision{Strategy: StrategySingleArm, Arm: arm}
 	}
 
-	// Collect all arms
+	// Collect all arms (filtered to local-only if incognito)
 	allArms := make([]*Arm, 0, len(r.arms))
 	for _, arm := range r.arms {
+		if r.localOnly && !arm.IsLocal {
+			continue
+		}
 		allArms = append(allArms, arm)
 	}
 
@@ -95,6 +100,27 @@ func (r *Router) Select(task Task) RoutingDecision {
 	)
 
 	return RoutingDecision{Strategy: StrategySingleArm, Arm: best}
+}
+
+// SetLocalOnly constrains routing to local arms only (for incognito mode).
+func (r *Router) SetLocalOnly(v bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.localOnly = v
+}
+
+// LocalOnly returns whether routing is constrained to local arms.
+func (r *Router) LocalOnly() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.localOnly
+}
+
+// RemoveArm removes an arm from the router.
+func (r *Router) RemoveArm(id ArmID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.arms, id)
 }
 
 // Arms returns all registered arms.
