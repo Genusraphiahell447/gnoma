@@ -14,6 +14,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	anthropicprov "somegit.dev/Owlibou/gnoma/internal/provider/anthropic"
 	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
+	googleprov "somegit.dev/Owlibou/gnoma/internal/provider/google"
 	oaiprov "somegit.dev/Owlibou/gnoma/internal/provider/openai"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
@@ -172,6 +173,7 @@ func resolveAPIKey(providerName string) string {
 	// Try common alternatives
 	alternatives := map[string][]string{
 		"anthropic": {"ANTHROPICS_API_KEY"},
+		"google":    {"GOOGLE_API_KEY"},
 	}
 	for _, alt := range alternatives[providerName] {
 		if key := os.Getenv(alt); key != "" {
@@ -194,8 +196,10 @@ func createProvider(name, apiKey, model string) (provider.Provider, error) {
 		return anthropicprov.New(cfg)
 	case "openai":
 		return oaiprov.New(cfg)
+	case "google":
+		return googleprov.New(cfg)
 	default:
-		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic, openai)", name)
+		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic, openai, google)", name)
 	}
 }
 
