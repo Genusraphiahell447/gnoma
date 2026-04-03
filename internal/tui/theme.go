@@ -1,6 +1,11 @@
 package tui
 
-import "charm.land/lipgloss/v2"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+	"somegit.dev/Owlibou/gnoma/internal/permission"
+)
 
 // Color palette — catppuccin mocha inspired
 var (
@@ -9,6 +14,8 @@ var (
 	cGreen   = lipgloss.Color("#A6E3A1") // green
 	cRed     = lipgloss.Color("#F38BA8") // red
 	cYellow  = lipgloss.Color("#F9E2AF") // yellow
+	cPeach   = lipgloss.Color("#FAB387") // peach
+	cTeal    = lipgloss.Color("#94E2D5") // teal
 	cText    = lipgloss.Color("#CDD6F4") // text
 	cSubtext = lipgloss.Color("#A6ADC8") // subtext0
 	cOverlay = lipgloss.Color("#6C7086") // overlay0
@@ -16,6 +23,24 @@ var (
 	cBase    = lipgloss.Color("#1E1E2E") // base
 	cMantle  = lipgloss.Color("#181825") // mantle
 )
+
+// Permission mode colors — each mode has a distinct color
+var modeColors = map[permission.Mode]color.Color{
+	permission.ModeBypass:      cGreen,  // green = all allowed
+	permission.ModeDefault:     cBlue,   // blue = prompting
+	permission.ModePlan:        cTeal,   // teal = read-only
+	permission.ModeAcceptEdits: cPurple, // purple = edits ok
+	permission.ModeAuto:        cPeach,  // peach = smart
+	permission.ModeDeny:        cRed,    // red = locked down
+}
+
+// ModeColor returns the color for a permission mode.
+func ModeColor(mode permission.Mode) color.Color {
+	if c, ok := modeColors[mode]; ok {
+		return c
+	}
+	return cOverlay
+}
 
 // Header
 var (
@@ -79,7 +104,4 @@ var (
 
 	sStatusIncognito = lipgloss.NewStyle().
 				Foreground(cYellow)
-
-	sLine = lipgloss.NewStyle().
-		Foreground(cSurface)
 )

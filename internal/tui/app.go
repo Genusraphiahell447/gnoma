@@ -336,7 +336,7 @@ func (m Model) View() tea.View {
 
 	status := m.renderStatus()
 	input := m.renderInput()
-	sepLine := sLine.Width(m.width).Render(strings.Repeat("─", m.width))
+	topLine, bottomLine := m.renderSeparators()
 
 	// Fixed: status bar + separator + input + separator = bottom area
 	statusH := lipgloss.Height(status)
@@ -347,9 +347,9 @@ func (m Model) View() tea.View {
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left,
 		chat,
-		sepLine,
+		topLine,
 		input,
-		sepLine,
+		bottomLine,
 		status,
 	))
 	v.MouseMode = tea.MouseModeCellMotion
@@ -491,6 +491,40 @@ func (m Model) renderMessage(msg chatMessage) []string {
 	}
 
 	return lines
+}
+
+func (m Model) renderSeparators() (string, string) {
+	// Get mode color
+	lineColor := cSurface // default dim
+	modeLabel := ""
+
+	if m.config.Permissions != nil {
+		mode := m.config.Permissions.Mode()
+		lineColor = ModeColor(mode)
+		modeLabel = string(mode)
+	}
+
+	lineStyle := lipgloss.NewStyle().Foreground(lineColor)
+	labelStyle := lipgloss.NewStyle().Foreground(lineColor).Bold(true)
+
+	// Top line: ─── with mode label on right ─── bypass ───
+	label := " " + modeLabel + " "
+	labelW := lipgloss.Width(labelStyle.Render(label))
+	lineW := m.width - labelW
+	if lineW < 4 {
+		lineW = 4
+	}
+	leftW := lineW - 2
+	rightW := 2
+
+	topLine := lineStyle.Render(strings.Repeat("─", leftW)) +
+		labelStyle.Render(label) +
+		lineStyle.Render(strings.Repeat("─", rightW))
+
+	// Bottom line: plain colored line
+	bottomLine := lineStyle.Render(strings.Repeat("─", m.width))
+
+	return topLine, bottomLine
 }
 
 func (m Model) renderInput() string {
