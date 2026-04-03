@@ -13,6 +13,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
+	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
@@ -34,6 +35,7 @@ type Config struct {
 	Firewall    *security.Firewall    // for incognito toggle
 	Engine      *engine.Engine        // for model switching
 	Permissions *permission.Checker   // for mode switching
+	Router      *router.Router       // for model listing
 	PermCh      chan bool             // TUI → engine: y/n response
 	PermReqCh   <-chan string         // engine → TUI: tool name needing approval
 }
@@ -284,8 +286,34 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/model":
 		if args == "" {
 			status := m.session.Status()
-			m.messages = append(m.messages, chatMessage{role: "system",
-				content: fmt.Sprintf("current model: %s/%s\nUsage: /model <model-name>", status.Provider, status.Model)})
+			var b strings.Builder
+			fmt.Fprintf(&b, "current: %s/%s\n", status.Provider, status.Model)
+			if m.config.Router != nil {
+				b.WriteString("\nAvailable arms:\n")
+				for _, arm := range m.config.Router.Arms() {
+					marker := "  "
+					if string(arm.ID) == status.Provider+"/"+status.Model {
+						marker = "→ "
+					}
+					caps := ""
+					if arm.Capabilities.ToolUse {
+						caps += "tools "
+					}
+					if arm.Capabilities.Thinking {
+						caps += "thinking "
+					}
+					if arm.Capabilities.Vision {
+						caps += "vision "
+					}
+					local := ""
+					if arm.IsLocal {
+						local = " (local)"
+					}
+					fmt.Fprintf(&b, "%s%s  [%s]%s\n", marker, arm.ID, strings.TrimSpace(caps), local)
+				}
+			}
+			b.WriteString("\nUsage: /model <model-name>")
+			m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 			return m, nil
 		}
 		if m.config.Engine != nil {
@@ -293,6 +321,29 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, chatMessage{role: "system",
 				content: fmt.Sprintf("model switched to: %s", args)})
 		}
+		return m, nil
+
+	case "/config":
+		status := m.session.Status()
+		var b strings.Builder
+		b.WriteString("Current configuration:\n")
+		fmt.Fprintf(&b, "  provider: %s\n", status.Provider)
+		fmt.Fprintf(&b, "  model: %s\n", status.Model)
+		if m.config.Permissions != nil {
+			fmt.Fprintf(&b, "  permission: %s\n", m.config.Permissions.Mode())
+		}
+		fmt.Fprintf(&b, "  incognito: %v\n", m.incognito)
+		fmt.Fprintf(&b, "  cwd: %s\n", m.cwd)
+		if m.gitBranch != "" {
+			fmt.Fprintf(&b, "  git branch: %s\n", m.gitBranch)
+		}
+		b.WriteString("\nConfig files: ~/.config/gnoma/config.toml, .gnoma/config.toml")
+		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
+		return m, nil
+
+	case "/shell":
+		m.messages = append(m.messages, chatMessage{role: "system",
+			content: "interactive shell not yet implemented\nFor now, use ! prefix in your terminal: ! sudo command"})
 		return m, nil
 
 	case "/permission", "/perm":
@@ -330,7 +381,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /clear            clear chat\n  /incognito        toggle incognito mode\n  /model <name>     switch model\n  /provider <name>  show/switch provider\n  /help             show this help\n  /quit             exit gnoma"})
+			content: "Commands:\n  /clear              clear chat\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma"})
 		return m, nil
 
 	default:

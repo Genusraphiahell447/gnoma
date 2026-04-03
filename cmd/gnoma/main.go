@@ -292,6 +292,7 @@ func main() {
 			Firewall:    fw,
 			Engine:      eng,
 			Permissions: permChecker,
+			Router:      rtr,
 			PermCh:      permCh,
 			PermReqCh:   permReqCh,
 		})
