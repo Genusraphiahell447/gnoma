@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ const version = "v0.1.0-dev"
 type streamEventMsg struct{ event stream.Event }
 type turnDoneMsg struct{ err error }
 type permReqMsg struct{ toolName string }
+type elfProgressMsg struct{ text string }
 
 type chatMessage struct {
 	role    string
@@ -40,6 +42,7 @@ type Config struct {
 	Router      *router.Router       // for model listing
 	PermCh      chan bool             // TUI → engine: y/n response
 	PermReqCh   <-chan string         // engine → TUI: tool name needing approval
+	ElfProgress <-chan string         // elf → TUI: progress updates
 }
 
 type Model struct {
@@ -55,7 +58,8 @@ type Model struct {
 
 	input          textarea.Model
 	mdRenderer     *glamour.TermRenderer
-	expandOutput   bool // ctrl+o toggles expanded tool output
+	expandOutput   bool   // ctrl+o toggles expanded tool output
+	elfProgress    string // last 2 lines from active elf
 	cwd            string
 	gitBranch      string
 	scrollOffset   int
@@ -235,6 +239,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case elfProgressMsg:
+		m.elfProgress = msg.text
+		return m, m.listenForEvents()
+
 	case permReqMsg:
 		m.permPending = true
 		m.permToolName = msg.toolName
@@ -248,7 +256,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case turnDoneMsg:
 		m.streaming = false
-		m.scrollOffset = 0 // snap to bottom on turn complete
+		m.scrollOffset = 0
+		m.elfProgress = "" // clear elf progress
 		if m.streamBuf.Len() > 0 {
 			m.messages = append(m.messages, chatMessage{
 				role: m.currentRole, content: m.streamBuf.String(),
@@ -468,9 +477,26 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 			m.streamBuf.Reset()
 		}
 	case stream.EventToolCallDone:
-		m.messages = append(m.messages, chatMessage{
-			role: "tool", content: fmt.Sprintf("⚙ [%s] running...", evt.ToolCallName),
-		})
+		if evt.ToolCallName == "agent" {
+			// Extract prompt from args for elf display
+			prompt := "working..."
+			if evt.Args != nil {
+				var a struct{ Prompt string }
+				if json.Unmarshal(evt.Args, &a) == nil && a.Prompt != "" {
+					prompt = a.Prompt
+					if len(prompt) > 60 {
+						prompt = prompt[:60] + "..."
+					}
+				}
+			}
+			m.messages = append(m.messages, chatMessage{
+				role: "tool", content: fmt.Sprintf("🦉 [elf] %s", prompt),
+			})
+		} else {
+			m.messages = append(m.messages, chatMessage{
+				role: "tool", content: fmt.Sprintf("⚙ [%s] running...", evt.ToolCallName),
+			})
+		}
 	case stream.EventToolResult:
 		m.messages = append(m.messages, chatMessage{
 			role: "toolresult", content: evt.ToolOutput,
@@ -483,9 +509,12 @@ func (m Model) listenForEvents() tea.Cmd {
 	ch := m.session.Events()
 	permReqCh := m.config.PermReqCh
 
+	elfProgressCh := m.config.ElfProgress
+
 	return func() tea.Msg {
-		// Listen for both stream events and permission requests
-		if permReqCh != nil {
+		// Listen for stream events, permission requests, and elf progress
+		if permReqCh != nil || elfProgressCh != nil {
+			// Build select dynamically — always listen on ch
 			select {
 			case evt, ok := <-ch:
 				if !ok {
@@ -493,8 +522,16 @@ func (m Model) listenForEvents() tea.Cmd {
 					return turnDoneMsg{err: err}
 				}
 				return streamEventMsg{event: evt}
-			case toolName := <-permReqCh:
-				return permReqMsg{toolName: toolName}
+			case toolName, ok := <-permReqCh:
+				if ok {
+					return permReqMsg{toolName: toolName}
+				}
+				return nil
+			case progress, ok := <-elfProgressCh:
+				if ok {
+					return elfProgressMsg{text: progress}
+				}
+				return nil
 			}
 		}
 
@@ -688,6 +725,12 @@ func (m Model) renderMessage(msg chatMessage) []string {
 
 	case "tool":
 		lines = append(lines, indent+sToolOutput.Render(msg.content))
+		// Show elf progress under elf tool messages
+		if strings.HasPrefix(msg.content, "🦉") && m.streaming && m.elfProgress != "" {
+			for _, pLine := range strings.Split(m.elfProgress, "\n") {
+				lines = append(lines, indent+indent+sToolResult.Render(pLine))
+			}
+		}
 
 	case "toolresult":
 		resultLines := strings.Split(msg.content, "\n")

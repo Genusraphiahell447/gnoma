@@ -185,7 +185,10 @@ func main() {
 		Tools:  reg,
 		Logger: logger,
 	})
-	reg.Register(agent.New(elfMgr))
+	elfProgressCh := make(chan string, 1)
+	agentTool := agent.New(elfMgr)
+	agentTool.SetProgressCh(elfProgressCh)
+	reg.Register(agentTool)
 
 	// Create firewall
 	fw := security.NewFirewall(security.FirewallConfig{
@@ -319,6 +322,7 @@ func main() {
 			Router:      rtr,
 			PermCh:      permCh,
 			PermReqCh:   permReqCh,
+			ElfProgress: elfProgressCh,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {

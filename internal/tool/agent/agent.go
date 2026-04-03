@@ -9,6 +9,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/router"
+	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
 
@@ -34,11 +35,17 @@ var paramSchema = json.RawMessage(`{
 
 // Tool allows the LLM to spawn sub-agents (elfs).
 type Tool struct {
-	manager *elf.Manager
+	manager    *elf.Manager
+	ProgressCh chan<- string // optional: sends 2-line progress to TUI
 }
 
 func New(mgr *elf.Manager) *Tool {
 	return &Tool{manager: mgr}
+}
+
+// SetProgressCh sets the channel for forwarding elf progress to the TUI.
+func (t *Tool) SetProgressCh(ch chan<- string) {
+	t.ProgressCh = ch
 }
 
 func (t *Tool) Name() string               { return "agent" }
@@ -82,9 +89,38 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 		}, nil
 	}
 
-	// Wait with timeout
+	// Drain elf events while waiting, forward progress to TUI
 	done := make(chan elf.Result, 1)
 	go func() { done <- e.Wait() }()
+
+	// Forward elf streaming events as progress
+	go func() {
+		var lastLines [2]string
+		for evt := range e.Events() {
+			if evt.Type == stream.EventTextDelta && evt.Text != "" {
+				// Accumulate and keep last 2 lines
+				text := lastLines[0] + lastLines[1] + evt.Text
+				lines := strings.Split(text, "\n")
+				if len(lines) >= 2 {
+					lastLines[0] = lines[len(lines)-2]
+					lastLines[1] = lines[len(lines)-1]
+				} else if len(lines) == 1 {
+					lastLines[0] = lastLines[1]
+					lastLines[1] = lines[0]
+				}
+				if t.ProgressCh != nil {
+					progress := strings.TrimSpace(lastLines[0])
+					if l1 := strings.TrimSpace(lastLines[1]); l1 != "" {
+						progress += "\n" + l1
+					}
+					select {
+					case t.ProgressCh <- progress:
+					default: // don't block
+					}
+				}
+			}
+		}
+	}()
 
 	var result elf.Result
 	select {
@@ -95,6 +131,14 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	case <-time.After(5 * time.Minute):
 		e.Cancel()
 		return tool.Result{Output: "Elf timed out after 5 minutes"}, nil
+	}
+
+	// Clear progress
+	if t.ProgressCh != nil {
+		select {
+		case t.ProgressCh <- "":
+		default:
+		}
 	}
 
 	var b strings.Builder
