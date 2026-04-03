@@ -19,8 +19,12 @@ import (
 	googleprov "somegit.dev/Owlibou/gnoma/internal/provider/google"
 	oaiprov "somegit.dev/Owlibou/gnoma/internal/provider/openai"
 	"somegit.dev/Owlibou/gnoma/internal/provider/openaicompat"
+	"somegit.dev/Owlibou/gnoma/internal/session"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/tui"
+
+	tea "charm.land/bubbletea/v2"
 	"somegit.dev/Owlibou/gnoma/internal/tool/bash"
 	"somegit.dev/Owlibou/gnoma/internal/tool/fs"
 	"somegit.dev/Owlibou/gnoma/internal/tool/sysinfo"
@@ -140,41 +144,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Read input
+	// Detect mode: TUI (interactive TTY) or pipe mode
 	input, err := readInput(flag.Args())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	if input == "" {
-		fmt.Fprintln(os.Stderr, "error: no input provided")
-		fmt.Fprintln(os.Stderr, "usage: echo 'prompt' | gnoma")
-		fmt.Fprintln(os.Stderr, "   or: gnoma 'prompt'")
-		os.Exit(1)
-	}
 
-	// Context with signal handling
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+	if input != "" {
+		// Pipe mode: single input → stream to stdout
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
 
-	// Callback: stream text deltas to stdout
-	cb := func(evt stream.Event) {
-		if evt.Type == stream.EventTextDelta && evt.Text != "" {
-			fmt.Print(evt.Text)
+		cb := func(evt stream.Event) {
+			if evt.Type == stream.EventTextDelta && evt.Text != "" {
+				fmt.Print(evt.Text)
+			}
 		}
-	}
 
-	// Submit and run
-	_, err = eng.Submit(ctx, input, cb)
-	fmt.Println() // final newline
+		_, err = eng.Submit(ctx, input, cb)
+		fmt.Println()
 
-	if err != nil {
-		if ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "\ninterrupted")
-			os.Exit(130)
+		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\ninterrupted")
+				os.Exit(130)
+			}
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+	} else {
+		// TUI mode: interactive terminal
+		armModel := *model
+		if armModel == "" {
+			armModel = prov.DefaultModel()
+		}
+		sess := session.NewLocal(eng, *providerName, armModel)
+		defer sess.Close()
+
+		m := tui.New(sess)
+		p := tea.NewProgram(m)
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
