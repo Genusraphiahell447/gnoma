@@ -14,6 +14,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	anthropicprov "somegit.dev/Owlibou/gnoma/internal/provider/anthropic"
 	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
+	oaiprov "somegit.dev/Owlibou/gnoma/internal/provider/openai"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 	"somegit.dev/Owlibou/gnoma/internal/tool/bash"
@@ -191,8 +192,10 @@ func createProvider(name, apiKey, model string) (provider.Provider, error) {
 		return mistral.New(cfg)
 	case "anthropic":
 		return anthropicprov.New(cfg)
+	case "openai":
+		return oaiprov.New(cfg)
 	default:
-		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic)", name)
+		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic, openai)", name)
 	}
 }
 

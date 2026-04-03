@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/VikingOwl91/mistral-go-sdk v1.2.1
 	github.com/anthropics/anthropic-sdk-go v1.29.0
+	github.com/openai/openai-go v1.12.0
 )
 
 require (
