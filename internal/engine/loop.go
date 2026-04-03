@@ -218,11 +218,12 @@ func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb 
 			output = e.cfg.Firewall.ScanToolResult(output)
 		}
 
-		// Emit tool result as a text delta event so the UI can show it
+		// Emit tool result event for the UI
 		if cb != nil {
 			cb(stream.Event{
-				Type: stream.EventTextDelta,
-				Text: fmt.Sprintf("\n[tool:%s] %s\n", call.Name, truncate(output, 500)),
+				Type:       stream.EventToolResult,
+				ToolName:   call.Name,
+				ToolOutput: truncate(output, 2000),
 			})
 		}
 

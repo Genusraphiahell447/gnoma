@@ -16,6 +16,7 @@ const (
 	EventToolCallStart
 	EventToolCallDelta
 	EventToolCallDone
+	EventToolResult // tool execution output
 	EventUsage
 	EventError
 )
@@ -32,6 +33,8 @@ func (et EventType) String() string {
 		return "tool_call_delta"
 	case EventToolCallDone:
 		return "tool_call_done"
+	case EventToolResult:
+		return "tool_result"
 	case EventUsage:
 		return "usage"
 	case EventError:
@@ -55,6 +58,10 @@ type Event struct {
 	ToolCallName string
 	ArgDelta     string          // partial JSON fragment
 	Args         json.RawMessage // complete arguments (on Done)
+
+	// ToolResult: tool name + output
+	ToolName   string
+	ToolOutput string
 
 	// Usage
 	Usage *message.Usage

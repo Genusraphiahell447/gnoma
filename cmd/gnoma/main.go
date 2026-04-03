@@ -157,8 +157,13 @@ func main() {
 		defer cancel()
 
 		cb := func(evt stream.Event) {
-			if evt.Type == stream.EventTextDelta && evt.Text != "" {
-				fmt.Print(evt.Text)
+			switch evt.Type {
+			case stream.EventTextDelta:
+				if evt.Text != "" {
+					fmt.Print(evt.Text)
+				}
+			case stream.EventToolResult:
+				fmt.Printf("\n[%s] %s\n", evt.ToolName, evt.ToolOutput)
 			}
 		}
 

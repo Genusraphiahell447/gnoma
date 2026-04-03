@@ -2,57 +2,81 @@ package tui
 
 import "charm.land/lipgloss/v2"
 
+// Color palette — catppuccin mocha inspired
 var (
-	// Colors
-	colorPrimary    = lipgloss.Color("#A78BFA") // light purple
-	colorUser       = lipgloss.Color("#60A5FA") // light blue
-	colorAssistant  = lipgloss.Color("#A78BFA") // light purple
-	colorTool       = lipgloss.Color("#34D399") // green
-	colorError      = lipgloss.Color("#F87171") // red
-	colorMuted      = lipgloss.Color("#6B7280") // gray
-	colorStreaming   = lipgloss.Color("#FBBF24") // amber
-	colorStatusBg   = lipgloss.Color("#1E1E2E") // dark bg
+	cPurple  = lipgloss.Color("#CBA6F7") // mauve
+	cBlue    = lipgloss.Color("#89B4FA") // blue
+	cGreen   = lipgloss.Color("#A6E3A1") // green
+	cRed     = lipgloss.Color("#F38BA8") // red
+	cYellow  = lipgloss.Color("#F9E2AF") // yellow
+	cText    = lipgloss.Color("#CDD6F4") // text
+	cSubtext = lipgloss.Color("#A6ADC8") // subtext0
+	cOverlay = lipgloss.Color("#6C7086") // overlay0
+	cSurface = lipgloss.Color("#313244") // surface0
+	cBase    = lipgloss.Color("#1E1E2E") // base
+	cMantle  = lipgloss.Color("#181825") // mantle
+)
 
-	// Chat styles
-	styleUserLabel = lipgloss.NewStyle().
-			Foreground(colorUser).
+// Header
+var (
+	sHeaderBrand = lipgloss.NewStyle().
+			Background(cPurple).
+			Foreground(cMantle).
+			Bold(true).
+			Padding(0, 1)
+
+	sHeaderModel = lipgloss.NewStyle().
+			Foreground(cGreen).
 			Bold(true)
 
-	styleUserText = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E5E7EB"))
+	sHeaderDim = lipgloss.NewStyle().
+			Foreground(cOverlay)
+)
 
-	styleAssistantLabel = lipgloss.NewStyle().
-				Foreground(colorAssistant).
+// Chat
+var (
+	sUserLabel = lipgloss.NewStyle().
+			Foreground(cBlue).
+			Bold(true)
+
+	sToolOutput = lipgloss.NewStyle().
+			Foreground(cGreen)
+
+	sToolResult = lipgloss.NewStyle().
+			Foreground(cOverlay)
+
+	sSystem = lipgloss.NewStyle().
+		Foreground(cYellow)
+
+	sError = lipgloss.NewStyle().
+		Foreground(cRed)
+
+	sHint = lipgloss.NewStyle().
+		Foreground(cOverlay)
+
+	sCursor = lipgloss.NewStyle().
+		Foreground(cPurple)
+)
+
+// Status bar
+var (
+	sStatusBar = lipgloss.NewStyle().
+			Foreground(cSubtext)
+
+	sStatusHighlight = lipgloss.NewStyle().
+				Foreground(cPurple).
 				Bold(true)
 
-	styleToolOutput = lipgloss.NewStyle().
-			Foreground(colorTool).
-			Italic(true)
+	sStatusDim = lipgloss.NewStyle().
+			Foreground(cOverlay)
 
-	styleError = lipgloss.NewStyle().
-			Foreground(colorError)
-
-	styleHint = lipgloss.NewStyle().
-			Foreground(colorMuted)
-
-	styleCursor = lipgloss.NewStyle().
-			Foreground(colorStreaming)
-
-	styleSeperator = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#374151"))
-
-	// Status bar
-	styleStatusBar = lipgloss.NewStyle().
-			Background(colorStatusBg).
-			Foreground(lipgloss.Color("#9CA3AF"))
-
-	styleStatusProvider = lipgloss.NewStyle().
-				Background(colorStatusBg).
-				Foreground(colorPrimary).
+	sStatusStreaming = lipgloss.NewStyle().
+				Foreground(cYellow).
 				Bold(true)
 
-	styleStatusStreaming = lipgloss.NewStyle().
-				Background(colorStatusBg).
-				Foreground(colorStreaming).
-				Bold(true)
+	sStatusBranch = lipgloss.NewStyle().
+			Foreground(cGreen)
+
+	sLine = lipgloss.NewStyle().
+		Foreground(cSurface)
 )

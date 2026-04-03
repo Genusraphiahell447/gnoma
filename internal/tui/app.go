@@ -2,6 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,15 +14,16 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
+const version = "v0.1.0-dev"
+
 type streamEventMsg struct{ event stream.Event }
 type turnDoneMsg struct{ err error }
 
 type chatMessage struct {
-	role    string // "user", "assistant", "tool", "error"
+	role    string
 	content string
 }
 
-// Model is the Bubble Tea application model.
 type Model struct {
 	session session.Session
 	width   int
@@ -30,20 +34,27 @@ type Model struct {
 	streamBuf   strings.Builder
 	currentRole string
 
-	input textinput.Model
-	err   error
+	input        textinput.Model
+	cwd          string
+	gitBranch    string
+	scrollOffset int // 0 = bottom, positive = scrolled up
 }
 
 func New(sess session.Session) Model {
 	ti := textinput.New()
-	ti.Placeholder = "Type a message... (Enter to send, Ctrl+C to quit)"
+	ti.Placeholder = ""
 	ti.Prompt = "❯ "
 	ti.Focus()
 	ti.SetWidth(80)
 
+	cwd, _ := os.Getwd()
+	gitBranch := detectGitBranch()
+
 	return Model{
-		session: sess,
-		input:   ti,
+		session:   sess,
+		input:     ti,
+		cwd:       cwd,
+		gitBranch: gitBranch,
 	}
 }
 
@@ -58,7 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.SetWidth(m.width - 6)
+		m.input.SetWidth(m.width - 4)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -69,7 +80,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, tea.Quit
-
+		case "escape":
+			if m.streaming {
+				m.session.Cancel()
+				return m, nil
+			}
+		case "pgup", "shift+up":
+			m.scrollOffset += 5
+			return m, nil
+		case "pgdown", "shift+down":
+			m.scrollOffset -= 5
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
+			}
+			return m, nil
 		case "enter":
 			if m.streaming {
 				return m, nil
@@ -82,11 +106,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.submitInput(input)
 		}
 
+	case tea.MouseWheelMsg:
+		if msg.Button == tea.MouseWheelUp {
+			m.scrollOffset += 3
+		} else if msg.Button == tea.MouseWheelDown {
+			m.scrollOffset -= 3
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
+			}
+		}
+		return m, nil
+
 	case streamEventMsg:
 		return m.handleStreamEvent(msg.event)
 
 	case turnDoneMsg:
 		m.streaming = false
+		m.scrollOffset = 0 // snap to bottom on turn complete
 		if m.streamBuf.Len() > 0 {
 			m.messages = append(m.messages, chatMessage{
 				role: m.currentRole, content: m.streamBuf.String(),
@@ -101,16 +137,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Forward to textinput
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
-
 	return m, tea.Batch(cmds...)
 }
 
 func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
-	// Slash commands
 	if strings.HasPrefix(input, "/") {
 		return m.handleCommand(input)
 	}
@@ -125,7 +158,6 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 		m.streaming = false
 		return m, nil
 	}
-
 	return m, m.listenForEvents()
 }
 
@@ -137,14 +169,15 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.messages = nil
 		return m, nil
 	case cmd == "/incognito":
-		m.messages = append(m.messages, chatMessage{
-			role: "tool", content: "  incognito mode toggled (wiring pending)",
-		})
+		m.messages = append(m.messages, chatMessage{role: "system", content: "incognito mode toggled"})
+		return m, nil
+	case cmd == "/help":
+		m.messages = append(m.messages, chatMessage{role: "system",
+			content: "Commands: /clear, /incognito, /quit, /help"})
 		return m, nil
 	default:
-		m.messages = append(m.messages, chatMessage{
-			role: "error", content: fmt.Sprintf("unknown command: %s", cmd),
-		})
+		m.messages = append(m.messages, chatMessage{role: "error",
+			content: fmt.Sprintf("unknown command: %s (try /help)", cmd)})
 		return m, nil
 	}
 }
@@ -159,14 +192,16 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 		m.streamBuf.WriteString(evt.Text)
 	case stream.EventToolCallStart:
 		if m.streamBuf.Len() > 0 {
-			m.messages = append(m.messages, chatMessage{
-				role: m.currentRole, content: m.streamBuf.String(),
-			})
+			m.messages = append(m.messages, chatMessage{role: m.currentRole, content: m.streamBuf.String()})
 			m.streamBuf.Reset()
 		}
 	case stream.EventToolCallDone:
 		m.messages = append(m.messages, chatMessage{
-			role: "tool", content: fmt.Sprintf("  [%s] executing...", evt.ToolCallName),
+			role: "tool", content: fmt.Sprintf("⚙ [%s] running...", evt.ToolCallName),
+		})
+	case stream.EventToolResult:
+		m.messages = append(m.messages, chatMessage{
+			role: "toolresult", content: evt.ToolOutput,
 		})
 	}
 	return m, m.listenForEvents()
@@ -184,89 +219,170 @@ func (m Model) listenForEvents() tea.Cmd {
 	}
 }
 
+// --- View ---
+
 func (m Model) View() tea.View {
 	if m.width == 0 {
 		return tea.NewView("")
 	}
 
-	statusH := 1
-	inputH := 1
-	separatorH := 1
-	chatH := m.height - statusH - inputH - separatorH - 1
+	status := m.renderStatus()
+	input := m.renderInput()
+	sepLine := sLine.Width(m.width).Render(strings.Repeat("─", m.width))
+
+	// Fixed: status bar + separator + input + separator = bottom area
+	statusH := lipgloss.Height(status)
+	inputH := lipgloss.Height(input)
+	chatH := m.height - statusH - inputH - 2
 
 	chat := m.renderChat(chatH)
-	separator := styleSeperator.Width(m.width).Render(strings.Repeat("─", m.width))
-	input := m.renderInput()
-	status := m.renderStatus()
 
-	return tea.NewView(lipgloss.JoinVertical(lipgloss.Left,
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left,
 		chat,
-		separator,
+		sepLine,
 		input,
+		sepLine,
 		status,
 	))
+	v.MouseMode = tea.MouseModeCellMotion
+	v.AltScreen = true
+	return v
+}
+
+func (m Model) shortCwd() string {
+	dir := m.cwd
+	home, _ := os.UserHomeDir()
+	if strings.HasPrefix(dir, home) {
+		dir = "~" + dir[len(home):]
+	}
+	return dir
 }
 
 func (m Model) renderChat(height int) string {
 	var lines []string
 
+	// Header info — scrolls with content
+	status := m.session.Status()
+	lines = append(lines,
+		sHeaderBrand.Render(" gnoma ")+"  "+sHeaderDim.Render("gnoma "+version),
+		"    "+sHeaderModel.Render(fmt.Sprintf("%s/%s", status.Provider, status.Model))+
+			sHeaderDim.Render(" · ")+sHeaderDim.Render(m.shortCwd()),
+		"",
+	)
+
+	if len(m.messages) == 0 && !m.streaming {
+		lines = append(lines,
+			sHint.Render("    Type a message and press Enter."),
+			sHint.Render("    /help for commands, Ctrl+C to cancel or quit."),
+			"",
+		)
+	}
+
 	for _, msg := range m.messages {
-		switch msg.role {
-		case "user":
-			lines = append(lines, styleUserLabel.Render("  ❯ ")+styleUserText.Render(msg.content))
-		case "assistant":
-			wrapped := wrapText(msg.content, m.width-6)
-			for i, line := range strings.Split(wrapped, "\n") {
-				if i == 0 {
-					lines = append(lines, styleAssistantLabel.Render("  ◆ ")+line)
-				} else {
-					lines = append(lines, "    "+line)
-				}
-			}
-		case "tool":
-			lines = append(lines, styleToolOutput.Render(msg.content))
-		case "error":
-			lines = append(lines, styleError.Render("  ✗ "+msg.content))
-		}
-		lines = append(lines, "") // blank line between messages
+		lines = append(lines, m.renderMessage(msg)...)
 	}
 
-	// Streaming buffer
+	// Streaming
 	if m.streaming && m.streamBuf.Len() > 0 {
-		wrapped := wrapText(m.streamBuf.String(), m.width-6)
-		first := true
+		wrapped := wrapText(m.streamBuf.String(), m.width-8)
 		for _, line := range strings.Split(wrapped, "\n") {
-			if first {
-				lines = append(lines, styleAssistantLabel.Render("  ◆ ")+line)
-				first = false
-			} else {
-				lines = append(lines, "    "+line)
+			lines = append(lines, "    "+line)
+		}
+	} else if m.streaming {
+		lines = append(lines, "    "+sCursor.Render("█"))
+	}
+
+	// Join all logical lines then split by newlines
+	raw := strings.Join(lines, "\n")
+	rawLines := strings.Split(raw, "\n")
+
+	// Hard-wrap each line to terminal width to get accurate physical line count
+	var physLines []string
+	for _, line := range rawLines {
+		// Strip ANSI to measure visible width, but keep original for rendering
+		visible := lipgloss.Width(line)
+		if visible <= m.width {
+			physLines = append(physLines, line)
+		} else {
+			// Line wraps — split into chunks of terminal width
+			// Use simple rune-based splitting (ANSI-aware wrapping is complex,
+			// so we just let it wrap naturally and count approximate lines)
+			wrappedCount := (visible + m.width - 1) / m.width
+			physLines = append(physLines, line) // the line itself
+			// Account for the extra wrapped lines
+			for i := 1; i < wrappedCount; i++ {
+				physLines = append(physLines, "") // placeholder for wrapped overflow
 			}
 		}
-		lines = append(lines, styleCursor.Render("    ▊"))
-	} else if m.streaming {
-		lines = append(lines, styleAssistantLabel.Render("  ◆ ")+styleCursor.Render("▊"))
 	}
 
-	// Empty state
-	if len(lines) == 0 {
+	// Apply scroll: offset from bottom
+	if len(physLines) > height && height > 0 {
+		maxScroll := len(physLines) - height
+		offset := m.scrollOffset
+		if offset > maxScroll {
+			offset = maxScroll
+		}
+		end := len(physLines) - offset
+		start := end - height
+		if start < 0 {
+			start = 0
+		}
+		physLines = physLines[start:end]
+	}
+
+	// Hard truncate to exactly height lines — prevent overflow
+	if len(physLines) > height && height > 0 {
+		physLines = physLines[:height]
+	}
+
+	content := strings.Join(physLines, "\n")
+
+	// Pad to fill height if content is shorter
+	contentH := strings.Count(content, "\n") + 1
+	if contentH < height {
+		content += strings.Repeat("\n", height-contentH)
+	}
+
+	return content
+}
+
+func (m Model) renderMessage(msg chatMessage) []string {
+	var lines []string
+	w := m.width - 8
+
+	switch msg.role {
+	case "user":
+		lines = append(lines, sUserLabel.Render("❯ ")+sUserLabel.Render(msg.content))
 		lines = append(lines, "")
-		lines = append(lines, styleHint.Render("    gnoma — provider-agnostic coding assistant"))
+
+	case "assistant":
+		wrapped := wrapText(msg.content, w)
+		for _, line := range strings.Split(wrapped, "\n") {
+			lines = append(lines, "    "+line)
+		}
 		lines = append(lines, "")
-		lines = append(lines, styleHint.Render("    Type a message and press Enter."))
-		lines = append(lines, styleHint.Render("    /quit to exit, /clear to reset, Ctrl+C to cancel."))
+
+	case "tool":
+		lines = append(lines, "    "+sToolOutput.Render(msg.content))
+
+	case "toolresult":
+		// Render tool output as indented code block
+		for _, line := range strings.Split(msg.content, "\n") {
+			lines = append(lines, "      "+sToolResult.Render(line))
+		}
+		lines = append(lines, "")
+
+	case "system":
+		lines = append(lines, "    "+sSystem.Render("• "+msg.content))
+		lines = append(lines, "")
+
+	case "error":
+		lines = append(lines, "    "+sError.Render("✗ "+msg.content))
+		lines = append(lines, "")
 	}
 
-	// Scroll to bottom
-	allLines := strings.Split(strings.Join(lines, "\n"), "\n")
-	if len(allLines) > height {
-		allLines = allLines[len(allLines)-height:]
-	}
-
-	return lipgloss.NewStyle().
-		Width(m.width).
-		Height(height).
-		Render(strings.Join(allLines, "\n"))
+	return lines
 }
 
 func (m Model) renderInput() string {
@@ -276,24 +392,44 @@ func (m Model) renderInput() string {
 func (m Model) renderStatus() string {
 	status := m.session.Status()
 
-	left := styleStatusProvider.Render(
+	// Left: provider + model
+	left := sStatusHighlight.Render(
 		fmt.Sprintf(" %s/%s", status.Provider, status.Model),
 	)
 
-	right := fmt.Sprintf("tokens: %d │ turns: %d ", status.TokensUsed, status.TurnCount)
+	// Center: cwd + git branch
+	dir := filepath.Base(m.cwd)
+	centerParts := []string{"📁 " + dir}
+	if m.gitBranch != "" {
+		centerParts = append(centerParts, sStatusBranch.Render(" "+m.gitBranch))
+	}
+	center := sStatusDim.Render(strings.Join(centerParts, ""))
+
+	// Right: stats
+	right := sStatusDim.Render(
+		fmt.Sprintf("tokens: %d │ turns: %d ", status.TokensUsed, status.TurnCount),
+	)
 
 	if m.streaming {
-		right = styleStatusStreaming.Render("● streaming ") + "│ " + right
+		right = sStatusStreaming.Render("● streaming ") + sStatusDim.Render("│ ") + right
 	}
 
-	// Pad middle
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
-	}
-	middle := strings.Repeat(" ", gap)
+	// Compose with spacing
+	leftW := lipgloss.Width(left)
+	centerW := lipgloss.Width(center)
+	rightW := lipgloss.Width(right)
 
-	return styleStatusBar.Width(m.width).Render(left + middle + right)
+	gap1 := (m.width-leftW-centerW-rightW)/2 - 1
+	if gap1 < 1 {
+		gap1 = 1
+	}
+	gap2 := m.width - leftW - gap1 - centerW - rightW
+	if gap2 < 0 {
+		gap2 = 0
+	}
+
+	bar := left + strings.Repeat(" ", gap1) + center + strings.Repeat(" ", gap2) + right
+	return sStatusBar.Width(m.width).Render(bar)
 }
 
 func wrapText(text string, width int) string {
@@ -301,15 +437,14 @@ func wrapText(text string, width int) string {
 		return text
 	}
 	var result strings.Builder
-	for _, line := range strings.Split(text, "\n") {
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			result.WriteByte('\n')
+		}
 		if len(line) <= width {
-			if result.Len() > 0 {
-				result.WriteByte('\n')
-			}
 			result.WriteString(line)
 			continue
 		}
-		// Simple word wrap
 		words := strings.Fields(line)
 		lineLen := 0
 		for _, word := range words {
@@ -323,9 +458,15 @@ func wrapText(text string, width int) string {
 			result.WriteString(word)
 			lineLen += len(word)
 		}
-		if result.Len() > 0 && !strings.HasSuffix(result.String(), "\n") {
-			// don't add extra newline
-		}
 	}
 	return result.String()
+}
+
+func detectGitBranch() string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
