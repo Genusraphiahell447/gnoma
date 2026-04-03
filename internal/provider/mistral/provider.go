@@ -6,8 +6,8 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
-	mistralgo "somegit.dev/vikingowl/mistral-go-sdk"
-	"somegit.dev/vikingowl/mistral-go-sdk/model"
+	mistralgo "github.com/VikingOwl91/mistral-go-sdk"
+	"github.com/VikingOwl91/mistral-go-sdk/model"
 )
 
 const defaultModel = "mistral-large-latest"

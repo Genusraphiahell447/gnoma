@@ -73,7 +73,7 @@ Need to pick one provider to implement first as the reference adapter. Candidate
 
 ## Decision
 
-Mistral first. The user maintains `somegit.dev/vikingowl/mistral-go-sdk` and knows its internals. The API shape is similar to OpenAI, making it a good baseline. Anthropic's unique features (thinking blocks, cache tokens) are better tested as M2 extensions.
+Mistral first. The user maintains `github.com/VikingOwl91/mistral-go-sdk` and knows its internals. The API shape is similar to OpenAI, making it a good baseline. Anthropic's unique features (thinking blocks, cache tokens) are better tested as M2 extensions.
 
 ## Alternatives Considered
 

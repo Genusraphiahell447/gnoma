@@ -48,7 +48,7 @@ Read INDEX.md before making architectural changes or adding new system boundarie
 - No co-signing
 
 ### Providers
-- Mistral: `somegit.dev/vikingowl/mistral-go-sdk` (user's own SDK)
+- Mistral: `github.com/VikingOwl91/mistral-go-sdk` (user's own SDK)
 - Anthropic: `github.com/anthropics/anthropic-sdk-go`
 - OpenAI: `github.com/openai/openai-go`
 - Google: `google.golang.org/genai`

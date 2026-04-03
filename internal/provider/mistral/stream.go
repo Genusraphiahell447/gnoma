@@ -5,8 +5,8 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
-	mistralgo "somegit.dev/vikingowl/mistral-go-sdk"
-	"somegit.dev/vikingowl/mistral-go-sdk/chat"
+	mistralgo "github.com/VikingOwl91/mistral-go-sdk"
+	"github.com/VikingOwl91/mistral-go-sdk/chat"
 )
 
 // mistralStream adapts mistral's Stream[CompletionChunk] to gnoma's stream.Stream.

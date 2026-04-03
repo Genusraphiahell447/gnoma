@@ -18,7 +18,7 @@ depends_on: []
 
 | Library | Module | Purpose |
 |---------|--------|---------|
-| Mistral SDK | `somegit.dev/vikingowl/mistral-go-sdk` | Mistral API client (user-maintained) |
+| Mistral SDK | `github.com/VikingOwl91/mistral-go-sdk` | Mistral API client (user-maintained) |
 | Anthropic SDK | `github.com/anthropics/anthropic-sdk-go` | Anthropic API client |
 | OpenAI SDK | `github.com/openai/openai-go` | OpenAI API client (+ compat endpoints) |
 | Google GenAI | `google.golang.org/genai` | Google Gemini API client |
