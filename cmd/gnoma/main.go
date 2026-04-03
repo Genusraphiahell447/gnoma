@@ -157,6 +157,22 @@ func main() {
 	})
 	rtr.ForceArm(armID)
 
+	// Discover local models (ollama + llama.cpp) and register as additional arms
+	localModels := router.DiscoverLocalModels(context.Background(), logger,
+		cfg.Provider.Endpoints["ollama"],
+		cfg.Provider.Endpoints["llamacpp"],
+	)
+	router.RegisterDiscoveredModels(rtr, localModels, func(provName, model string) provider.Provider {
+		p, err := createProvider(provName, "", model, cfg.Provider.Endpoints[provName])
+		if err != nil {
+			return nil
+		}
+		return p
+	})
+	if len(localModels) > 0 {
+		logger.Debug("local models discovered", "count", len(localModels))
+	}
+
 	// Create firewall
 	fw := security.NewFirewall(security.FirewallConfig{
 		ScanOutgoing:     true,
