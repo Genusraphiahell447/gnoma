@@ -49,7 +49,7 @@ type Model struct {
 
 	messages    []chatMessage
 	streaming   bool
-	streamBuf   strings.Builder
+	streamBuf   *strings.Builder
 	currentRole string
 
 	input          textarea.Model
@@ -87,6 +87,7 @@ func New(sess session.Session, cfg Config) Model {
 		input:     ti,
 		cwd:       cwd,
 		gitBranch: gitBranch,
+		streamBuf: &strings.Builder{},
 	}
 }
 
