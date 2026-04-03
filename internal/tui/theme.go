@@ -91,6 +91,9 @@ var (
 
 	sDiffRemove = lipgloss.NewStyle().
 			Foreground(cRed)
+
+	sText = lipgloss.NewStyle().
+		Foreground(cText)
 )
 
 // Status bar

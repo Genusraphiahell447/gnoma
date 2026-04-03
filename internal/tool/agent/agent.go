@@ -25,10 +25,6 @@ var paramSchema = json.RawMessage(`{
 			"description": "Task type hint for provider routing",
 			"enum": ["generation", "review", "refactor", "debug", "explain", "planning"]
 		},
-		"wait": {
-			"type": "boolean",
-			"description": "Wait for the elf to complete (default true)"
-		},
 		"max_turns": {
 			"type": "integer",
 			"description": "Maximum tool-calling rounds for the elf (default 30)"
@@ -40,7 +36,7 @@ var paramSchema = json.RawMessage(`{
 // Tool allows the LLM to spawn sub-agents (elfs).
 type Tool struct {
 	manager    *elf.Manager
-	ProgressCh chan<- string // optional: sends 2-line progress to TUI
+	ProgressCh chan<- elf.Progress // optional: sends structured progress to TUI
 }
 
 func New(mgr *elf.Manager) *Tool {
@@ -48,12 +44,12 @@ func New(mgr *elf.Manager) *Tool {
 }
 
 // SetProgressCh sets the channel for forwarding elf progress to the TUI.
-func (t *Tool) SetProgressCh(ch chan<- string) {
+func (t *Tool) SetProgressCh(ch chan<- elf.Progress) {
 	t.ProgressCh = ch
 }
 
 func (t *Tool) Name() string               { return "agent" }
-func (t *Tool) Description() string         { return "Spawn a sub-agent (elf) to handle a task independently. The elf gets its own conversation and tools." }
+func (t *Tool) Description() string         { return "Spawn a sub-agent (elf) to handle a task independently. The elf gets its own conversation and tools. IMPORTANT: To spawn multiple elfs in parallel, call this tool multiple times in the SAME response — do not wait for one to finish before spawning the next." }
 func (t *Tool) Parameters() json.RawMessage { return paramSchema }
 func (t *Tool) IsReadOnly() bool            { return true }
 func (t *Tool) IsDestructive() bool         { return false }
@@ -61,7 +57,6 @@ func (t *Tool) IsDestructive() bool         { return false }
 type agentArgs struct {
 	Prompt   string `json:"prompt"`
 	TaskType string `json:"task_type,omitempty"`
-	Wait     *bool  `json:"wait,omitempty"`
 	MaxTurns int    `json:"max_turns,omitempty"`
 }
 
@@ -75,13 +70,15 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	}
 
 	taskType := parseTaskType(a.TaskType)
-	wait := true
-	if a.Wait != nil {
-		wait = *a.Wait
-	}
 	maxTurns := a.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = 30 // default
+	}
+
+	// Truncate description for tree display
+	desc := a.Prompt
+	if len(desc) > 60 {
+		desc = desc[:60] + "…"
 	}
 
 	systemPrompt := "You are an elf — a focused sub-agent of gnoma. Complete the given task thoroughly and concisely. Use tools as needed."
@@ -91,66 +88,71 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 		return tool.Result{Output: fmt.Sprintf("Failed to spawn elf: %v", err)}, nil
 	}
 
-	if !wait {
-		return tool.Result{
-			Output:   fmt.Sprintf("Elf %s spawned in background (task: %s)", e.ID(), taskType),
-			Metadata: map[string]any{"elf_id": e.ID(), "background": true},
-		}, nil
-	}
+	// Send initial progress
+	t.sendProgress(elf.Progress{
+		ElfID:       e.ID(),
+		Description: desc,
+		Activity:    "starting…",
+	})
 
 	// Drain elf events while waiting, forward progress to TUI
 	done := make(chan elf.Result, 1)
 	go func() { done <- e.Wait() }()
 
-	// Forward elf streaming events as live progress
+	// Forward elf streaming events as structured progress
 	go func() {
-		var textBuf strings.Builder
+		toolUses := 0
+		tokens := 0
+		lastSend := time.Now()
+		textChars := 0
+
 		for evt := range e.Events() {
 			if t.ProgressCh == nil {
 				continue
 			}
 
-			var progress string
+			p := elf.Progress{
+				ElfID:       e.ID(),
+				Description: desc,
+				ToolUses:    toolUses,
+				Tokens:      tokens,
+			}
+
 			switch evt.Type {
 			case stream.EventTextDelta:
-				if evt.Text != "" {
-					textBuf.WriteString(evt.Text)
-					// Show last 2 non-empty lines of text
-					allLines := strings.Split(textBuf.String(), "\n")
-					var recent []string
-					for i := len(allLines) - 1; i >= 0 && len(recent) < 2; i-- {
-						line := strings.TrimSpace(allLines[i])
-						if line != "" {
-							if len(line) > 70 {
-								line = line[:70] + "…"
-							}
-							recent = append([]string{line}, recent...)
-						}
-					}
-					progress = strings.Join(recent, "\n")
+				textChars += len(evt.Text)
+				// Throttle text progress to every 500ms
+				if time.Since(lastSend) < 500*time.Millisecond {
+					continue
 				}
+				p.Activity = fmt.Sprintf("generating… (%d chars)", textChars)
 			case stream.EventToolCallDone:
 				name := evt.ToolCallName
 				if name == "" {
 					name = "tool"
 				}
-				progress = fmt.Sprintf("⚙ [%s] running...", name)
+				p.Activity = fmt.Sprintf("⚙ [%s] running…", name)
 			case stream.EventToolResult:
-				// Show truncated tool result
+				toolUses++
+				p.ToolUses = toolUses
 				out := evt.ToolOutput
-				if len(out) > 70 {
-					out = out[:70] + "…"
+				if len(out) > 60 {
+					out = out[:60] + "…"
 				}
 				out = strings.ReplaceAll(out, "\n", " ")
-				progress = fmt.Sprintf("  → %s", out)
+				p.Activity = fmt.Sprintf("→ %s", out)
+			case stream.EventUsage:
+				if evt.Usage != nil {
+					tokens = int(evt.Usage.TotalTokens())
+					p.Tokens = tokens
+				}
+				p.Activity = "" // no activity change on usage alone
+			default:
+				continue
 			}
 
-			if progress != "" {
-				select {
-				case t.ProgressCh <- progress:
-				default:
-				}
-			}
+			lastSend = time.Now()
+			t.sendProgress(p)
 		}
 	}()
 
@@ -159,27 +161,45 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	case result = <-done:
 	case <-ctx.Done():
 		e.Cancel()
+		t.sendProgress(elf.Progress{ElfID: e.ID(), Description: desc, Done: true, Error: "cancelled"})
 		return tool.Result{Output: "Elf cancelled"}, nil
 	case <-time.After(5 * time.Minute):
 		e.Cancel()
+		t.sendProgress(elf.Progress{ElfID: e.ID(), Description: desc, Done: true, Error: "timed out"})
 		return tool.Result{Output: "Elf timed out after 5 minutes"}, nil
 	}
 
-	// Clear progress
-	if t.ProgressCh != nil {
-		select {
-		case t.ProgressCh <- "":
-		default:
-		}
+	// Send done signal — stays in tree until turn completes
+	doneProgress := elf.Progress{
+		ElfID:       result.ID,
+		Description: desc,
+		Tokens:      int(result.Usage.TotalTokens()),
+		Done:        true,
+		Duration:    result.Duration,
 	}
+	if result.Error != nil {
+		doneProgress.Error = result.Error.Error()
+	}
+	t.sendProgress(doneProgress)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Elf %s completed (%s, %s)\n\n", result.ID, result.Status, result.Duration.Round(time.Millisecond))
+	fmt.Fprintf(&b, "Elf %s completed (%s, %s, %s)\n\n",
+		result.ID, result.Status,
+		result.Duration.Round(time.Millisecond),
+		formatTokens(int(result.Usage.TotalTokens())),
+	)
 	if result.Error != nil {
 		fmt.Fprintf(&b, "Error: %v\n", result.Error)
 	}
 	if result.Output != "" {
-		b.WriteString(result.Output)
+		// Truncate elf output to avoid flooding parent context.
+		// The parent LLM gets enough to summarize; full text stays in the elf.
+		output := result.Output
+		const maxOutputChars = 2000
+		if len(output) > maxOutputChars {
+			output = output[:maxOutputChars] + fmt.Sprintf("\n\n[truncated — full output was %d chars]", len(result.Output))
+		}
+		b.WriteString(output)
 	}
 
 	return tool.Result{
@@ -190,6 +210,26 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 			"duration": result.Duration.String(),
 		},
 	}, nil
+}
+
+func (t *Tool) sendProgress(p elf.Progress) {
+	if t.ProgressCh == nil {
+		return
+	}
+	select {
+	case t.ProgressCh <- p:
+	default:
+	}
+}
+
+func formatTokens(tokens int) string {
+	if tokens >= 1_000_000 {
+		return fmt.Sprintf("%.1fM tokens", float64(tokens)/1_000_000)
+	}
+	if tokens >= 1_000 {
+		return fmt.Sprintf("%.1fk tokens", float64(tokens)/1_000)
+	}
+	return fmt.Sprintf("%d tokens", tokens)
 }
 
 func parseTaskType(s string) router.TaskType {

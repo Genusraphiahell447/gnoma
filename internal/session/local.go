@@ -112,6 +112,13 @@ func (s *Local) Close() error {
 	return nil
 }
 
+// SetModel updates the displayed model name.
+func (s *Local) SetModel(model string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.model = model
+}
+
 func (s *Local) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()

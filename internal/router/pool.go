@@ -10,11 +10,14 @@ import (
 type PoolKind int
 
 const (
-	PoolRPM     PoolKind = iota // requests per minute
-	PoolRPD                     // requests per day
-	PoolTPD                     // tokens per day
-	PoolCostEUR                 // monetary cost cap
-	PoolCustom                  // arbitrary units
+	PoolRPM         PoolKind = iota // requests per minute
+	PoolRPS                         // requests per second
+	PoolRPD                         // requests per day
+	PoolTPM                         // tokens per minute
+	PoolTPD                         // tokens per day
+	PoolTokensMonth                 // tokens per month
+	PoolCostMonth                   // monetary cost cap per month
+	PoolCustom                      // arbitrary units
 )
 
 // LimitPool tracks a shared resource budget that arms draw from.

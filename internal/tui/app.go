@@ -7,12 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/glamour/v2"
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
@@ -26,8 +28,12 @@ const version = "v0.1.0-dev"
 
 type streamEventMsg struct{ event stream.Event }
 type turnDoneMsg struct{ err error }
-type permReqMsg struct{ toolName string }
-type elfProgressMsg struct{ text string }
+// PermReqMsg carries a permission request from engine to TUI.
+type PermReqMsg struct {
+	ToolName string
+	Args     json.RawMessage
+}
+type elfProgressMsg struct{ progress elf.Progress }
 
 type chatMessage struct {
 	role    string
@@ -41,8 +47,8 @@ type Config struct {
 	Permissions *permission.Checker   // for mode switching
 	Router      *router.Router       // for model listing
 	PermCh      chan bool             // TUI → engine: y/n response
-	PermReqCh   <-chan string         // engine → TUI: tool name needing approval
-	ElfProgress <-chan string         // elf → TUI: progress updates
+	PermReqCh   <-chan PermReqMsg    // engine → TUI: tool requesting approval
+	ElfProgress <-chan elf.Progress   // elf → TUI: structured progress updates
 }
 
 type Model struct {
@@ -59,13 +65,16 @@ type Model struct {
 	input          textarea.Model
 	mdRenderer     *glamour.TermRenderer
 	expandOutput   bool   // ctrl+o toggles expanded tool output
-	elfProgress    string // last 2 lines from active elf
+	elfStates      map[string]*elf.Progress // active elf states keyed by ID
+	elfOrder       []string                 // insertion-ordered elf IDs for tree rendering
+	elfToolActive  bool                     // suppresses next toolresult (elf output)
 	cwd            string
 	gitBranch      string
 	scrollOffset   int
 	incognito      bool
-	permPending    bool   // waiting for user to approve/deny a tool
-	permToolName   string // which tool is asking
+	permPending    bool            // waiting for user to approve/deny a tool
+	permToolName   string          // which tool is asking
+	permArgs       json.RawMessage // tool args for display
 }
 
 func New(sess session.Session, cfg Config) Model {
@@ -106,6 +115,7 @@ func New(sess session.Session, cfg Config) Model {
 		config:     cfg,
 		input:      ti,
 		mdRenderer: mdRenderer,
+		elfStates:  make(map[string]*elf.Progress),
 		cwd:        cwd,
 		gitBranch:  gitBranch,
 		streamBuf:  &strings.Builder{},
@@ -240,14 +250,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case elfProgressMsg:
-		m.elfProgress = msg.text
+		p := msg.progress
+		// Keep completed elfs in tree — only cleared on turnDoneMsg
+		if _, exists := m.elfStates[p.ElfID]; !exists {
+			m.elfOrder = append(m.elfOrder, p.ElfID)
+		}
+		m.elfStates[p.ElfID] = &p
 		return m, m.listenForEvents()
 
-	case permReqMsg:
+	case PermReqMsg:
 		m.permPending = true
-		m.permToolName = msg.toolName
+		m.permToolName = msg.ToolName
+		m.permArgs = msg.Args
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: fmt.Sprintf("⚠ %s wants to execute. Allow? [y/n]", msg.toolName)})
+			content: formatPermissionPrompt(msg.ToolName, msg.Args)})
 		m.scrollOffset = 0
 		return m, nil
 
@@ -257,7 +273,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnDoneMsg:
 		m.streaming = false
 		m.scrollOffset = 0
-		m.elfProgress = "" // clear elf progress
+		m.elfStates = make(map[string]*elf.Progress) // clear elf states
+		m.elfOrder = nil
 		if m.streamBuf.Len() > 0 {
 			m.messages = append(m.messages, chatMessage{
 				role: m.currentRole, content: m.streamBuf.String(),
@@ -383,6 +400,10 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		if m.config.Engine != nil {
 			m.config.Engine.SetModel(args)
+			// Update session status display
+			if ls, ok := m.session.(*session.Local); ok {
+				ls.SetModel(args)
+			}
 			m.messages = append(m.messages, chatMessage{role: "system",
 				content: fmt.Sprintf("model switched to: %s", args)})
 		}
@@ -478,29 +499,22 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 		}
 	case stream.EventToolCallDone:
 		if evt.ToolCallName == "agent" {
-			// Extract prompt from args for elf display
-			prompt := "working..."
-			if evt.Args != nil {
-				var a struct{ Prompt string }
-				if json.Unmarshal(evt.Args, &a) == nil && a.Prompt != "" {
-					prompt = a.Prompt
-					if len(prompt) > 60 {
-						prompt = prompt[:60] + "..."
-					}
-				}
-			}
-			m.messages = append(m.messages, chatMessage{
-				role: "tool", content: fmt.Sprintf("🦉 [elf] %s", prompt),
-			})
+			// Suppress tool message — elf tree view handles display
+			m.elfToolActive = true
 		} else {
 			m.messages = append(m.messages, chatMessage{
 				role: "tool", content: fmt.Sprintf("⚙ [%s] running...", evt.ToolCallName),
 			})
 		}
 	case stream.EventToolResult:
-		m.messages = append(m.messages, chatMessage{
-			role: "toolresult", content: evt.ToolOutput,
-		})
+		if m.elfToolActive {
+			// Suppress raw elf output — tree shows progress, LLM summarizes
+			m.elfToolActive = false
+		} else {
+			m.messages = append(m.messages, chatMessage{
+				role: "toolresult", content: evt.ToolOutput,
+			})
+		}
 	}
 	return m, m.listenForEvents()
 }
@@ -522,14 +536,14 @@ func (m Model) listenForEvents() tea.Cmd {
 					return turnDoneMsg{err: err}
 				}
 				return streamEventMsg{event: evt}
-			case toolName, ok := <-permReqCh:
+			case req, ok := <-permReqCh:
 				if ok {
-					return permReqMsg{toolName: toolName}
+					return req
 				}
 				return nil
 			case progress, ok := <-elfProgressCh:
 				if ok {
-					return elfProgressMsg{text: progress}
+					return elfProgressMsg{progress: progress}
 				}
 				return nil
 			}
@@ -615,6 +629,11 @@ func (m Model) renderChat(height int) string {
 
 	for _, msg := range m.messages {
 		lines = append(lines, m.renderMessage(msg)...)
+	}
+
+	// Elf tree view — shows active elfs with structured progress
+	if m.streaming && len(m.elfStates) > 0 {
+		lines = append(lines, m.renderElfTree()...)
 	}
 
 	// Streaming
@@ -725,12 +744,6 @@ func (m Model) renderMessage(msg chatMessage) []string {
 
 	case "tool":
 		lines = append(lines, indent+sToolOutput.Render(msg.content))
-		// Show elf progress under elf tool messages
-		if strings.HasPrefix(msg.content, "🦉") && m.streaming && m.elfProgress != "" {
-			for _, pLine := range strings.Split(m.elfProgress, "\n") {
-				lines = append(lines, indent+indent+sToolResult.Render(pLine))
-			}
-		}
 
 	case "toolresult":
 		resultLines := strings.Split(msg.content, "\n")
@@ -775,6 +788,102 @@ func (m Model) renderMessage(msg chatMessage) []string {
 	return lines
 }
 
+func (m Model) renderElfTree() []string {
+	if len(m.elfOrder) == 0 {
+		return nil
+	}
+
+	var lines []string
+
+	// Count running vs done
+	running := 0
+	for _, id := range m.elfOrder {
+		if p, ok := m.elfStates[id]; ok && !p.Done {
+			running++
+		}
+	}
+
+	// Header
+	if running > 0 {
+		header := fmt.Sprintf("● Running %d elf", len(m.elfOrder))
+		if len(m.elfOrder) != 1 {
+			header += "s"
+		}
+		header += "…"
+		lines = append(lines, sStatusStreaming.Render(header))
+	} else {
+		header := fmt.Sprintf("● %d elf", len(m.elfOrder))
+		if len(m.elfOrder) != 1 {
+			header += "s"
+		}
+		header += " completed"
+		lines = append(lines, sToolOutput.Render(header))
+	}
+
+	for i, elfID := range m.elfOrder {
+		p, ok := m.elfStates[elfID]
+		if !ok {
+			continue
+		}
+
+		isLast := i == len(m.elfOrder)-1
+
+		// Branch character
+		branch := "├─"
+		childPrefix := "│  "
+		if isLast {
+			branch = "└─"
+			childPrefix = "   "
+		}
+
+		// Main line: branch + description + stats
+		var stats []string
+		if p.ToolUses > 0 {
+			stats = append(stats, fmt.Sprintf("%d tool uses", p.ToolUses))
+		}
+		if p.Tokens > 0 {
+			stats = append(stats, formatTokens(p.Tokens))
+		}
+
+		line := sToolOutput.Render(branch+" ") + sText.Render(p.Description)
+		if len(stats) > 0 {
+			line += sToolResult.Render(" · "+strings.Join(stats, " · "))
+		}
+		lines = append(lines, line)
+
+		// Activity sub-line
+		var activity string
+		if p.Done {
+			if p.Error != "" {
+				activity = sError.Render("Error: " + p.Error)
+			} else {
+				dur := p.Duration.Round(time.Millisecond)
+				activity = sToolOutput.Render(fmt.Sprintf("Done (%s)", dur))
+			}
+		} else {
+			activity = p.Activity
+			if activity == "" {
+				activity = "working…"
+			}
+			activity = sToolResult.Render(activity)
+		}
+		lines = append(lines, sToolResult.Render(childPrefix+"└─ ")+activity)
+	}
+
+	lines = append(lines, "") // spacing after tree
+	return lines
+}
+
+func formatTokens(tokens int) string {
+	if tokens >= 1_000_000 {
+		return fmt.Sprintf("%.1fM tokens", float64(tokens)/1_000_000)
+	}
+	if tokens >= 1_000 {
+		return fmt.Sprintf("%.1fk tokens", float64(tokens)/1_000)
+	}
+	return fmt.Sprintf("%d tokens", tokens)
+}
+
 func (m Model) renderSeparators() (string, string) {
 	lineColor := cSurface // default dim
 	modeLabel := ""
@@ -791,10 +900,11 @@ func (m Model) renderSeparators() (string, string) {
 		modeLabel = "🔒 " + modeLabel
 	}
 
-	// Permission pending — flash the line
+	// Permission pending — flash the line with command summary
 	if m.permPending {
 		lineColor = cRed
-		modeLabel = "⚠ " + m.permToolName + " [y/n]"
+		hint := shortPermHint(m.permToolName, m.permArgs)
+		modeLabel = "⚠ " + hint + " [y/n]"
 	}
 
 	lineStyle := lipgloss.NewStyle().Foreground(lineColor)
@@ -919,6 +1029,77 @@ func (m Model) injectSystemContext(text string) {
 		// so the conversation stays in user→assistant alternation
 		m.config.Engine.InjectMessage(message.NewAssistantText("Understood."))
 	}
+}
+
+// shortPermHint returns a compact string for the separator bar (e.g., "bash: find . -name '*.go'").
+func shortPermHint(toolName string, args json.RawMessage) string {
+	switch toolName {
+	case "bash":
+		var a struct{ Command string }
+		if json.Unmarshal(args, &a) == nil && a.Command != "" {
+			cmd := a.Command
+			if len(cmd) > 50 {
+				cmd = cmd[:50] + "…"
+			}
+			return "bash: " + cmd
+		}
+	case "fs.write", "fs_write":
+		var a struct {
+			Path string `json:"file_path"`
+		}
+		if json.Unmarshal(args, &a) == nil && a.Path != "" {
+			return "write: " + a.Path
+		}
+	case "fs.edit", "fs_edit":
+		var a struct {
+			Path string `json:"file_path"`
+		}
+		if json.Unmarshal(args, &a) == nil && a.Path != "" {
+			return "edit: " + a.Path
+		}
+	}
+	return toolName
+}
+
+// formatPermissionPrompt builds a readable prompt showing what the tool wants to do.
+func formatPermissionPrompt(toolName string, args json.RawMessage) string {
+	var detail string
+
+	switch toolName {
+	case "bash":
+		var a struct{ Command string }
+		if json.Unmarshal(args, &a) == nil && a.Command != "" {
+			cmd := a.Command
+			if len(cmd) > 120 {
+				cmd = cmd[:120] + "…"
+			}
+			detail = cmd
+		}
+	case "fs.write", "fs_write":
+		var a struct {
+			Path string `json:"file_path"`
+		}
+		if json.Unmarshal(args, &a) == nil && a.Path != "" {
+			detail = a.Path
+		}
+	case "fs.edit", "fs_edit":
+		var a struct {
+			Path string `json:"file_path"`
+		}
+		if json.Unmarshal(args, &a) == nil && a.Path != "" {
+			detail = a.Path
+		}
+	default:
+		// Generic: try to extract a readable summary from args
+		if len(args) > 0 && len(args) < 200 {
+			detail = string(args)
+		}
+	}
+
+	if detail != "" {
+		return fmt.Sprintf("⚠ %s wants to execute: %s [y/n]", toolName, detail)
+	}
+	return fmt.Sprintf("⚠ %s wants to execute [y/n]", toolName)
 }
 
 func detectGitBranch() string {

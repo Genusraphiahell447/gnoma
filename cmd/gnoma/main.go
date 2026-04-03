@@ -154,14 +154,19 @@ func main() {
 		armModel = prov.DefaultModel()
 	}
 	armID := router.NewArmID(*providerName, armModel)
-	rtr.RegisterArm(&router.Arm{
+	arm := &router.Arm{
 		ID:        armID,
 		Provider:  prov,
 		ModelName: armModel,
 		IsLocal:   localProviders[*providerName],
 		Capabilities: provider.Capabilities{ToolUse: true}, // trust CLI provider
-	})
+	}
+	arm.Pools = resolveRateLimitPools(armID, *providerName, armModel, cfg)
+	rtr.RegisterArm(arm)
 	rtr.ForceArm(armID)
+	if len(arm.Pools) > 0 {
+		logger.Debug("rate limit pools attached", "arm", armID, "pools", len(arm.Pools))
+	}
 
 	// Discover local models (ollama + llama.cpp) and register as additional arms
 	localModels := router.DiscoverLocalModels(context.Background(), logger,
@@ -185,7 +190,7 @@ func main() {
 		Tools:  reg,
 		Logger: logger,
 	})
-	elfProgressCh := make(chan string, 1)
+	elfProgressCh := make(chan elf.Progress, 16)
 	agentTool := agent.New(elfMgr)
 	agentTool.SetProgressCh(elfProgressCh)
 	reg.Register(agentTool)
@@ -291,12 +296,12 @@ func main() {
 		}
 	} else {
 		// TUI mode: permission prompts via channels
-		permCh := make(chan bool)                      // TUI → engine: y/n response
-		permReqCh := make(chan string, 1)              // engine → TUI: tool name requesting permission
+		permCh := make(chan bool)                               // TUI → engine: y/n response
+		permReqCh := make(chan tui.PermReqMsg, 1)              // engine → TUI: tool requesting permission
 		permChecker.SetPromptFunc(func(ctx context.Context, toolName string, args json.RawMessage) (bool, error) {
 			// Notify TUI that a permission prompt is needed
 			select {
-			case permReqCh <- toolName:
+			case permReqCh <- tui.PermReqMsg{ToolName: toolName, Args: args}:
 			default:
 			}
 			// Block until TUI responds
@@ -432,6 +437,45 @@ func buildToolRegistry() *tool.Registry {
 	return reg
 }
 
+// resolveRateLimitPools builds limit pools for an arm from provider defaults + config overrides.
+func resolveRateLimitPools(armID router.ArmID, provName, modelName string, cfg *gnomacfg.Config) []*router.LimitPool {
+	defaults := provider.DefaultRateLimits(provName)
+	rl, _ := defaults.LookupModel(modelName)
+
+	// Apply config overrides
+	if cfg.RateLimits != nil {
+		if override, ok := cfg.RateLimits[provName]; ok {
+			if override.RPS > 0 {
+				rl.RPS = override.RPS
+			}
+			if override.RPM > 0 {
+				rl.RPM = override.RPM
+			}
+			if override.RPD > 0 {
+				rl.RPD = override.RPD
+			}
+			if override.TPM > 0 {
+				rl.TPM = override.TPM
+			}
+			if override.ITPM > 0 {
+				rl.ITPM = override.ITPM
+			}
+			if override.OTPM > 0 {
+				rl.OTPM = override.OTPM
+			}
+			if override.TokensMonth > 0 {
+				rl.TokensMonth = override.TokensMonth
+			}
+			if override.SpendCap > 0 {
+				rl.SpendCap = override.SpendCap
+			}
+		}
+	}
+
+	return router.PoolsFromRateLimits(armID, rl)
+}
+
 const defaultSystem = `You are gnoma, a provider-agnostic agentic coding assistant.
 You help users with software engineering tasks by reading files, writing code, and executing commands.
-Be concise and direct. Use tools when needed to accomplish the task.`
+Be concise and direct. Use tools when needed to accomplish the task.
+When spawning multiple elfs (sub-agents), call ALL agent tools in a single response so they run in parallel. Do NOT spawn one elf, wait for its result, then spawn the next.`

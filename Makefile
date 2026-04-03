@@ -1,4 +1,4 @@
-.PHONY: build test lint cover clean fmt vet
+.PHONY: build run check install test lint cover clean fmt vet
 
 BINARY := gnoma
 BINDIR := ./bin
@@ -6,6 +6,15 @@ MODULE := somegit.dev/Owlibou/gnoma
 
 build:
 	go build -o $(BINDIR)/$(BINARY) ./cmd/gnoma
+
+run: build
+	$(BINDIR)/$(BINARY)
+
+check: fmt vet lint test
+	@echo "All checks passed!"
+
+install:
+	go install $(MODULE)/cmd/$(BINARY)
 
 test:
 	go test ./...
