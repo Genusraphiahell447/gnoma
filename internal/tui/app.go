@@ -157,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.config.Permissions.SetMode(next)
 				m.messages = append(m.messages, chatMessage{role: "system",
-					content: fmt.Sprintf("permission mode: %s", next)})
+					content: fmt.Sprintf("permission mode changed to: %s — previous tool denials no longer apply, retry if asked", next)})
 				m.scrollOffset = 0
 			}
 			return m, nil
@@ -310,7 +310,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		m.config.Permissions.SetMode(mode)
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: fmt.Sprintf("permission mode: %s", mode)})
+			content: fmt.Sprintf("permission mode changed to: %s — previous tool denials no longer apply, retry if asked", mode)})
 		return m, nil
 
 	case "/provider":
