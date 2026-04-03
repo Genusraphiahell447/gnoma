@@ -93,29 +93,29 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	done := make(chan elf.Result, 1)
 	go func() { done <- e.Wait() }()
 
-	// Forward elf streaming events as progress
+	// Forward elf streaming events as 2-line progress summary
 	go func() {
-		var lastLines [2]string
+		var buf strings.Builder
 		for evt := range e.Events() {
 			if evt.Type == stream.EventTextDelta && evt.Text != "" {
-				// Accumulate and keep last 2 lines
-				text := lastLines[0] + lastLines[1] + evt.Text
-				lines := strings.Split(text, "\n")
-				if len(lines) >= 2 {
-					lastLines[0] = lines[len(lines)-2]
-					lastLines[1] = lines[len(lines)-1]
-				} else if len(lines) == 1 {
-					lastLines[0] = lastLines[1]
-					lastLines[1] = lines[0]
-				}
+				buf.WriteString(evt.Text)
+
 				if t.ProgressCh != nil {
-					progress := strings.TrimSpace(lastLines[0])
-					if l1 := strings.TrimSpace(lastLines[1]); l1 != "" {
-						progress += "\n" + l1
+					// Extract last 2 non-empty lines, truncate to 70 chars each
+					allLines := strings.Split(buf.String(), "\n")
+					var recent []string
+					for i := len(allLines) - 1; i >= 0 && len(recent) < 2; i-- {
+						line := strings.TrimSpace(allLines[i])
+						if line != "" {
+							if len(line) > 70 {
+								line = line[:70] + "…"
+							}
+							recent = append([]string{line}, recent...)
+						}
 					}
 					select {
-					case t.ProgressCh <- progress:
-					default: // don't block
+					case t.ProgressCh <- strings.Join(recent, "\n"):
+					default:
 					}
 				}
 			}
