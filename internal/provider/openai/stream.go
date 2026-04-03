@@ -72,10 +72,11 @@ func (s *openaiStream) Next() bool {
 			for _, tc := range delta.ToolCalls {
 				existing, ok := s.toolCalls[tc.Index]
 				if !ok {
-					// New tool call
+					// New tool call — capture initial arguments too
 					existing = &toolCallState{
 						id:   tc.ID,
 						name: tc.Function.Name,
+						args: tc.Function.Arguments,
 					}
 					s.toolCalls[tc.Index] = existing
 					s.hadToolCalls = true
@@ -90,8 +91,8 @@ func (s *openaiStream) Next() bool {
 					}
 				}
 
-				// Accumulate arguments
-				if tc.Function.Arguments != "" {
+				// Accumulate arguments (subsequent chunks)
+				if tc.Function.Arguments != "" && ok {
 					existing.args += tc.Function.Arguments
 					s.cur = stream.Event{
 						Type:       stream.EventToolCallDelta,

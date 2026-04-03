@@ -16,6 +16,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
 	googleprov "somegit.dev/Owlibou/gnoma/internal/provider/google"
 	oaiprov "somegit.dev/Owlibou/gnoma/internal/provider/openai"
+	"somegit.dev/Owlibou/gnoma/internal/provider/openaicompat"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 	"somegit.dev/Owlibou/gnoma/internal/tool/bash"
@@ -46,12 +47,13 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
-	// Resolve API key
+	// Resolve API key (local providers don't need one)
 	key := *apiKey
 	if key == "" {
 		key = resolveAPIKey(*providerName)
 	}
-	if key == "" {
+	localProviders := map[string]bool{"ollama": true, "llamacpp": true}
+	if key == "" && !localProviders[*providerName] {
 		fmt.Fprintf(os.Stderr, "error: no API key for provider %q\nSet %s environment variable or use --api-key\n",
 			*providerName, envKeyFor(*providerName))
 		os.Exit(1)
@@ -198,8 +200,12 @@ func createProvider(name, apiKey, model string) (provider.Provider, error) {
 		return oaiprov.New(cfg)
 	case "google":
 		return googleprov.New(cfg)
+	case "ollama":
+		return openaicompat.NewOllama(cfg)
+	case "llamacpp":
+		return openaicompat.NewLlamaCpp(cfg)
 	default:
-		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic, openai, google)", name)
+		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic, openai, google, ollama, llamacpp)", name)
 	}
 }
 
