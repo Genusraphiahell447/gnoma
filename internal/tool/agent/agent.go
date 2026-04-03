@@ -28,6 +28,10 @@ var paramSchema = json.RawMessage(`{
 		"wait": {
 			"type": "boolean",
 			"description": "Wait for the elf to complete (default true)"
+		},
+		"max_turns": {
+			"type": "integer",
+			"description": "Maximum tool-calling rounds for the elf (default 30)"
 		}
 	},
 	"required": ["prompt"]
@@ -58,6 +62,7 @@ type agentArgs struct {
 	Prompt   string `json:"prompt"`
 	TaskType string `json:"task_type,omitempty"`
 	Wait     *bool  `json:"wait,omitempty"`
+	MaxTurns int    `json:"max_turns,omitempty"`
 }
 
 func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, error) {
@@ -74,10 +79,14 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	if a.Wait != nil {
 		wait = *a.Wait
 	}
+	maxTurns := a.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = 30 // default
+	}
 
 	systemPrompt := "You are an elf — a focused sub-agent of gnoma. Complete the given task thoroughly and concisely. Use tools as needed."
 
-	e, err := t.manager.Spawn(ctx, taskType, a.Prompt, systemPrompt)
+	e, err := t.manager.Spawn(ctx, taskType, a.Prompt, systemPrompt, maxTurns)
 	if err != nil {
 		return tool.Result{Output: fmt.Sprintf("Failed to spawn elf: %v", err)}, nil
 	}

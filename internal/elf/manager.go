@@ -42,7 +42,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 
 // Spawn creates a new background elf with a router-selected provider.
 // The elf gets its own engine, history, and tools — no shared state.
-func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, systemPrompt string) (Elf, error) {
+func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, systemPrompt string, maxTurns int) (Elf, error) {
 	// Ask router for the best arm for this task type
 	task := router.Task{
 		Type:            taskType,
@@ -69,7 +69,7 @@ func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, s
 		Tools:    m.tools,
 		System:   systemPrompt,
 		Model:    arm.ModelName,
-		MaxTurns: 20,
+		MaxTurns: maxTurns,
 		Logger:   m.logger,
 	})
 	if err != nil {
@@ -87,13 +87,13 @@ func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, s
 }
 
 // SpawnWithProvider creates an elf using a specific provider (bypasses router).
-func (m *Manager) SpawnWithProvider(prov provider.Provider, model, prompt, systemPrompt string) (Elf, error) {
+func (m *Manager) SpawnWithProvider(prov provider.Provider, model, prompt, systemPrompt string, maxTurns int) (Elf, error) {
 	eng, err := engine.New(engine.Config{
 		Provider: prov,
 		Tools:    m.tools,
 		System:   systemPrompt,
 		Model:    model,
-		MaxTurns: 20,
+		MaxTurns: maxTurns,
 		Logger:   m.logger,
 	})
 	if err != nil {

@@ -146,12 +146,12 @@ func TestManager_SpawnAndList(t *testing.T) {
 	})
 
 	// Spawn two elfs
-	e1, err := mgr.Spawn(context.Background(), router.TaskGeneration, "task 1", "you are elf 1")
+	e1, err := mgr.Spawn(context.Background(), router.TaskGeneration, "task 1", "you are elf 1", 30)
 	if err != nil {
 		t.Fatalf("Spawn 1: %v", err)
 	}
 
-	e2, err := mgr.Spawn(context.Background(), router.TaskReview, "task 2", "you are elf 2")
+	e2, err := mgr.Spawn(context.Background(), router.TaskReview, "task 2", "you are elf 2", 30)
 	if err != nil {
 		t.Fatalf("Spawn 2: %v", err)
 	}
@@ -202,9 +202,9 @@ func TestManager_WaitAll(t *testing.T) {
 
 	mgr := NewManager(ManagerConfig{Router: rtr, Tools: tool.NewRegistry()})
 
-	mgr.Spawn(context.Background(), router.TaskGeneration, "a", "")
-	mgr.Spawn(context.Background(), router.TaskGeneration, "b", "")
-	mgr.Spawn(context.Background(), router.TaskGeneration, "c", "")
+	mgr.Spawn(context.Background(), router.TaskGeneration, "a", "", 30)
+	mgr.Spawn(context.Background(), router.TaskGeneration, "b", "", 30)
+	mgr.Spawn(context.Background(), router.TaskGeneration, "c", "", 30)
 
 	results := mgr.WaitAll()
 	if len(results) != 3 {
