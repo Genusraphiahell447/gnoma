@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
 	"somegit.dev/Owlibou/gnoma/internal/message"
@@ -11,6 +12,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
+	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
 
 // Submit sends a user message and runs the agentic loop to completion.
@@ -198,79 +200,117 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 }
 
 func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb Callback) ([]message.ToolResult, error) {
-	results := make([]message.ToolResult, 0, len(calls))
+	// Partition into read-only (parallel) and write (serial) batches
+	type toolCallWithTool struct {
+		call message.ToolCall
+		tool tool.Tool
+	}
+
+	var readOnly []toolCallWithTool
+	var readWrite []toolCallWithTool
+	var unknownResults []message.ToolResult
 
 	for _, call := range calls {
 		t, ok := e.cfg.Tools.Get(call.Name)
 		if !ok {
 			e.logger.Warn("unknown tool", "name", call.Name)
-			results = append(results, message.ToolResult{
+			unknownResults = append(unknownResults, message.ToolResult{
 				ToolCallID: call.ID,
 				Content:    fmt.Sprintf("unknown tool: %s", call.Name),
 				IsError:    true,
 			})
 			continue
 		}
-
-		// Permission check
-		if e.cfg.Permissions != nil {
-			info := permission.ToolInfo{
-				Name:        call.Name,
-				IsReadOnly:  t.IsReadOnly(),
-				IsDestructive: t.IsDestructive(),
-			}
-			if err := e.cfg.Permissions.Check(ctx, info, call.Arguments); err != nil {
-				e.logger.Info("tool permission denied", "name", call.Name, "error", err)
-				results = append(results, message.ToolResult{
-					ToolCallID: call.ID,
-					Content:    fmt.Sprintf("permission denied: %v", err),
-					IsError:    true,
-				})
-				continue
-			}
+		tc := toolCallWithTool{call: call, tool: t}
+		if t.IsReadOnly() {
+			readOnly = append(readOnly, tc)
+		} else {
+			readWrite = append(readWrite, tc)
 		}
+	}
 
-		e.logger.Debug("executing tool", "name", call.Name, "id", call.ID)
+	results := make([]message.ToolResult, 0, len(calls))
+	results = append(results, unknownResults...)
 
-		result, err := t.Execute(ctx, call.Arguments)
-		if err != nil {
-			e.logger.Error("tool execution failed", "name", call.Name, "error", err)
-			results = append(results, message.ToolResult{
-				ToolCallID: call.ID,
-				Content:    err.Error(),
-				IsError:    true,
-			})
-			continue
+	// Execute read-only tools in parallel
+	if len(readOnly) > 0 {
+		e.logger.Debug("executing read-only tools in parallel", "count", len(readOnly))
+		parallelResults := make([]message.ToolResult, len(readOnly))
+		var wg sync.WaitGroup
+		for i, tc := range readOnly {
+			wg.Add(1)
+			go func(idx int, tc toolCallWithTool) {
+				defer wg.Done()
+				parallelResults[idx] = e.executeSingleTool(ctx, tc.call, tc.tool, cb)
+			}(i, tc)
 		}
+		wg.Wait()
+		results = append(results, parallelResults...)
+	}
 
-		// Scan tool result through firewall
-		output := result.Output
-		if e.cfg.Firewall != nil {
-			output = e.cfg.Firewall.ScanToolResult(output)
-		}
-
-		// Persist large results to disk
-		if persisted, ok := gnomactx.PersistLargeResult(output, call.ID, ".gnoma/sessions"); ok {
-			e.logger.Debug("tool result persisted to disk", "name", call.Name, "size", len(output))
-			output = persisted
-		}
-
-		// Emit tool result event for the UI
-		if cb != nil {
-			cb(stream.Event{
-				Type:       stream.EventToolResult,
-				ToolName:   call.Name,
-				ToolOutput: truncate(output, 2000),
-			})
-		}
-
-		results = append(results, message.ToolResult{
-			ToolCallID: call.ID,
-			Content:    output,
-		})
+	// Execute write tools sequentially
+	for _, tc := range readWrite {
+		results = append(results, e.executeSingleTool(ctx, tc.call, tc.tool, cb))
 	}
 
 	return results, nil
+}
+
+func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t tool.Tool, cb Callback) message.ToolResult {
+	// Permission check
+	if e.cfg.Permissions != nil {
+		info := permission.ToolInfo{
+			Name:          call.Name,
+			IsReadOnly:    t.IsReadOnly(),
+			IsDestructive: t.IsDestructive(),
+		}
+		if err := e.cfg.Permissions.Check(ctx, info, call.Arguments); err != nil {
+			e.logger.Info("tool permission denied", "name", call.Name, "error", err)
+			return message.ToolResult{
+				ToolCallID: call.ID,
+				Content:    fmt.Sprintf("permission denied: %v", err),
+				IsError:    true,
+			}
+		}
+	}
+
+	e.logger.Debug("executing tool", "name", call.Name, "id", call.ID)
+
+	result, err := t.Execute(ctx, call.Arguments)
+	if err != nil {
+		e.logger.Error("tool execution failed", "name", call.Name, "error", err)
+		return message.ToolResult{
+			ToolCallID: call.ID,
+			Content:    err.Error(),
+			IsError:    true,
+		}
+	}
+
+	// Scan tool result through firewall
+	output := result.Output
+	if e.cfg.Firewall != nil {
+		output = e.cfg.Firewall.ScanToolResult(output)
+	}
+
+	// Persist large results to disk
+	if persisted, ok := gnomactx.PersistLargeResult(output, call.ID, ".gnoma/sessions"); ok {
+		e.logger.Debug("tool result persisted to disk", "name", call.Name, "size", len(output))
+		output = persisted
+	}
+
+	// Emit tool result event for the UI
+	if cb != nil {
+		cb(stream.Event{
+			Type:       stream.EventToolResult,
+			ToolName:   call.Name,
+			ToolOutput: truncate(output, 2000),
+		})
+	}
+
+	return message.ToolResult{
+		ToolCallID: call.ID,
+		Content:    output,
+	}
 }
 
 func truncate(s string, maxLen int) string {

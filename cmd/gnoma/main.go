@@ -29,6 +29,8 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/tui"
 
 	tea "charm.land/bubbletea/v2"
+	"somegit.dev/Owlibou/gnoma/internal/elf"
+	"somegit.dev/Owlibou/gnoma/internal/tool/agent"
 	"somegit.dev/Owlibou/gnoma/internal/tool/bash"
 	"somegit.dev/Owlibou/gnoma/internal/tool/fs"
 	"somegit.dev/Owlibou/gnoma/internal/tool/sysinfo"
@@ -141,6 +143,9 @@ func main() {
 	// Register system_info tool backed by the inventory
 	reg.Register(sysinfo.New(inventory))
 
+	// Elf manager (created now, agent tool registered after router exists)
+	// We'll register the agent tool after the router is created below
+
 	// Create router and register the provider as a single arm
 	// (M4 foundation: one provider from CLI. Multi-provider routing comes with config.)
 	rtr := router.New(router.Config{Logger: logger})
@@ -173,6 +178,14 @@ func main() {
 	if len(localModels) > 0 {
 		logger.Debug("local models discovered", "count", len(localModels))
 	}
+
+	// Create elf manager and register agent tool
+	elfMgr := elf.NewManager(elf.ManagerConfig{
+		Router: rtr,
+		Tools:  reg,
+		Logger: logger,
+	})
+	reg.Register(agent.New(elfMgr))
 
 	// Create firewall
 	fw := security.NewFirewall(security.FirewallConfig{

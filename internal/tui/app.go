@@ -397,6 +397,13 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 		return m, nil
 
+	case "/elf", "/elfs":
+		if args == "" {
+			m.messages = append(m.messages, chatMessage{role: "system",
+				content: "Elfs are spawned by the LLM via the 'agent' tool.\nAsk the model to use sub-agents for parallel tasks.\n\nExample: \"Research these 3 files in parallel using sub-agents\""})
+		}
+		return m, nil
+
 	case "/shell":
 		m.messages = append(m.messages, chatMessage{role: "system",
 			content: "interactive shell not yet implemented\nFor now, use ! prefix in your terminal: ! sudo command"})
