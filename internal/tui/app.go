@@ -552,15 +552,9 @@ func (m Model) renderChat(height int) string {
 
 	// Streaming
 	if m.streaming && m.streamBuf.Len() > 0 {
-		// Live-render markdown while streaming
+		// Stream raw text — markdown rendered only after completion
 		raw := m.streamBuf.String()
-		rendered := raw
-		if m.mdRenderer != nil {
-			if md, err := m.mdRenderer.Render(raw); err == nil {
-				rendered = strings.TrimSpace(md)
-			}
-		}
-		rLines := strings.Split(rendered, "\n")
+		rLines := strings.Split(raw, "\n")
 		for i, line := range rLines {
 			if i == 0 {
 				lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
