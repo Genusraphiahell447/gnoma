@@ -1,0 +1,165 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Provider.Default != "mistral" {
+		t.Errorf("Provider.Default = %q, want mistral", cfg.Provider.Default)
+	}
+	if cfg.Provider.MaxTokens != 8192 {
+		t.Errorf("Provider.MaxTokens = %d", cfg.Provider.MaxTokens)
+	}
+	if cfg.Tools.BashTimeout.Duration() != 30*time.Second {
+		t.Errorf("Tools.BashTimeout = %v", cfg.Tools.BashTimeout)
+	}
+}
+
+func TestLoadTOML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	content := `
+[provider]
+default = "anthropic"
+model = "claude-sonnet-4"
+max_tokens = 16384
+
+[provider.api_keys]
+anthropic = "sk-test-123"
+
+[provider.endpoints]
+ollama = "http://myhost:11434/v1"
+
+[tools]
+bash_timeout = "60s"
+max_file_size = 2097152
+`
+	os.WriteFile(path, []byte(content), 0o644)
+
+	cfg := Defaults()
+	if err := loadTOML(&cfg, path); err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+
+	if cfg.Provider.Default != "anthropic" {
+		t.Errorf("Provider.Default = %q", cfg.Provider.Default)
+	}
+	if cfg.Provider.Model != "claude-sonnet-4" {
+		t.Errorf("Provider.Model = %q", cfg.Provider.Model)
+	}
+	if cfg.Provider.MaxTokens != 16384 {
+		t.Errorf("Provider.MaxTokens = %d", cfg.Provider.MaxTokens)
+	}
+	if cfg.Provider.APIKeys["anthropic"] != "sk-test-123" {
+		t.Errorf("APIKeys[anthropic] = %q", cfg.Provider.APIKeys["anthropic"])
+	}
+	if cfg.Provider.Endpoints["ollama"] != "http://myhost:11434/v1" {
+		t.Errorf("Endpoints[ollama] = %q", cfg.Provider.Endpoints["ollama"])
+	}
+	if cfg.Tools.BashTimeout.Duration() != 60*time.Second {
+		t.Errorf("Tools.BashTimeout = %v", cfg.Tools.BashTimeout)
+	}
+	if cfg.Tools.MaxFileSize != 2097152 {
+		t.Errorf("Tools.MaxFileSize = %d", cfg.Tools.MaxFileSize)
+	}
+}
+
+func TestLoadTOML_FileNotFound(t *testing.T) {
+	cfg := Defaults()
+	err := loadTOML(&cfg, "/nonexistent/config.toml")
+	if !os.IsNotExist(err) {
+		t.Errorf("expected os.IsNotExist, got %v", err)
+	}
+}
+
+func TestApplyEnv(t *testing.T) {
+	cfg := Defaults()
+
+	t.Setenv("MISTRAL_API_KEY", "sk-mistral-test")
+	t.Setenv("ANTHROPICS_API_KEY", "sk-anthro-test")
+	t.Setenv("GOOGLE_API_KEY", "goog-test")
+	t.Setenv("GNOMA_PROVIDER", "openai")
+	t.Setenv("GNOMA_MODEL", "gpt-4o-mini")
+
+	applyEnv(&cfg)
+
+	if cfg.Provider.APIKeys["mistral"] != "sk-mistral-test" {
+		t.Errorf("APIKeys[mistral] = %q", cfg.Provider.APIKeys["mistral"])
+	}
+	if cfg.Provider.APIKeys["anthropic"] != "sk-anthro-test" {
+		t.Errorf("APIKeys[anthropic] = %q (should pick ANTHROPICS_API_KEY)", cfg.Provider.APIKeys["anthropic"])
+	}
+	if cfg.Provider.APIKeys["google"] != "goog-test" {
+		t.Errorf("APIKeys[google] = %q (should pick GOOGLE_API_KEY)", cfg.Provider.APIKeys["google"])
+	}
+	if cfg.Provider.Default != "openai" {
+		t.Errorf("Provider.Default = %q, want openai (from GNOMA_PROVIDER)", cfg.Provider.Default)
+	}
+	if cfg.Provider.Model != "gpt-4o-mini" {
+		t.Errorf("Provider.Model = %q, want gpt-4o-mini (from GNOMA_MODEL)", cfg.Provider.Model)
+	}
+}
+
+func TestApplyEnv_EnvVarReference(t *testing.T) {
+	cfg := Defaults()
+	cfg.Provider.APIKeys["custom"] = "${MY_CUSTOM_KEY}"
+
+	t.Setenv("MY_CUSTOM_KEY", "resolved-value")
+
+	applyEnv(&cfg)
+
+	if cfg.Provider.APIKeys["custom"] != "resolved-value" {
+		t.Errorf("APIKeys[custom] = %q, want resolved-value", cfg.Provider.APIKeys["custom"])
+	}
+}
+
+func TestLayeredLoad(t *testing.T) {
+	// Set up global config
+	globalDir := t.TempDir()
+	gnomaDir := filepath.Join(globalDir, "gnoma")
+	os.MkdirAll(gnomaDir, 0o755)
+	os.WriteFile(filepath.Join(gnomaDir, "config.toml"), []byte(`
+[provider]
+default = "anthropic"
+max_tokens = 4096
+`), 0o644)
+
+	// Set up project config that overrides
+	projectDir := t.TempDir()
+	pGnomaDir := filepath.Join(projectDir, ".gnoma")
+	os.MkdirAll(pGnomaDir, 0o755)
+	os.WriteFile(filepath.Join(pGnomaDir, "config.toml"), []byte(`
+[provider]
+model = "claude-haiku"
+`), 0o644)
+
+	// Override XDG_CONFIG_HOME and working directory
+	t.Setenv("XDG_CONFIG_HOME", globalDir)
+	origDir, _ := os.Getwd()
+	os.Chdir(projectDir)
+	defer os.Chdir(origDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Global: default = anthropic
+	if cfg.Provider.Default != "anthropic" {
+		t.Errorf("Default = %q, want anthropic (from global)", cfg.Provider.Default)
+	}
+	// Project: model = claude-haiku
+	if cfg.Provider.Model != "claude-haiku" {
+		t.Errorf("Model = %q, want claude-haiku (from project)", cfg.Provider.Model)
+	}
+	// Global: max_tokens = 4096
+	if cfg.Provider.MaxTokens != 4096 {
+		t.Errorf("MaxTokens = %d, want 4096 (from global)", cfg.Provider.MaxTokens)
+	}
+}
