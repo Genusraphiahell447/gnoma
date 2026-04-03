@@ -498,7 +498,7 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 			m.streamBuf.Reset()
 		}
 	case stream.EventToolCallDone:
-		if evt.ToolCallName == "agent" {
+		if evt.ToolCallName == "agent" || evt.ToolCallName == "spawn_elfs" {
 			// Suppress tool message — elf tree view handles display
 			m.elfToolActive = true
 		} else {

@@ -150,15 +150,19 @@ depends_on: [vision]
 
 **Deliverables:**
 
-- [ ] Elf interface + SyncElf + BackgroundElf implementations
-- [ ] ElfManager: spawn, monitor, cancel, collect results
-- [ ] Router-integrated spawning (`router.Select()` picks arm per elf)
-- [ ] Parent ↔ elf communication via typed channels
-- [ ] Concurrent tool execution (read-only parallel via errgroup, writes serial)
+- [x] Elf interface + BackgroundElf implementation
+- [x] ElfManager: spawn, monitor, cancel, collect results
+- [x] Router-integrated spawning (`router.Select()` picks arm per elf)
+- [x] Parent ↔ elf communication via typed channels (elf.Progress)
+- [x] Concurrent tool execution (read-only parallel via WaitGroup, writes serial)
+- [x] `agent` tool: single elf spawn with tree progress view
+- [x] `spawn_elfs` tool: batch N elfs in one call, all run in parallel
+- [x] CC-style tree view: ├─/└─ branches, tool uses, tokens, activity, Done(duration)
+- [x] Elf output truncated to 2000 chars for parent context protection
 - [ ] Elf results feed back to router as quality signals
 - [ ] Coordinator mode: orchestrator dispatches to worker elfs
 
-**Exit criteria:** Parent spawns 3 background elfs on different providers (chosen by router), collects and synthesizes results.
+**Exit criteria:** Parent spawns 3 elfs via `spawn_elfs`, all run in parallel (chosen by router), tree shows live progress, results synthesized.
 
 ## M8: Extensibility
 
@@ -175,8 +179,10 @@ depends_on: [vision]
 - [ ] MCP tool naming: `mcp__{server}__{tool}`
 - [ ] MCP tool replaceability: `replace_default` config swaps built-in tools
 - [ ] Plugin system: plugin.json manifest, install/enable/disable lifecycle
+- [ ] `/batch` skill: decompose work into N units, spawn all via `spawn_elfs`, track progress (CC-inspired)
+- [ ] Coordinator mode prompt: fan-out guidance for parallel elf dispatch, concurrency rules (read vs write)
 
-**Exit criteria:** MCP tools appear in gnoma. `replace_default` swaps built-ins. Skills invocable. Hooks fire on tool use.
+**Exit criteria:** MCP tools appear in gnoma. `replace_default` swaps built-ins. Skills invocable. Hooks fire on tool use. `/batch` decomposes and parallelizes work.
 
 ## M9: Router Advanced
 
@@ -207,8 +213,12 @@ depends_on: [vision]
 - [ ] Incognito enforcement: sessions NOT persisted
 - [ ] Serve mode: Unix socket listener, spawn session goroutine per client
 - [ ] Coordinator mode: orchestrator dispatches to restricted worker elfs
+- [ ] Task framework: registered tasks with lifecycle (pending/running/completed/failed), abort controllers (CC-inspired AppState.tasks)
+- [ ] Task notification system: completed background elfs inject `<task-notification>` messages into parent conversation (CC-inspired)
+- [ ] StreamingToolExecutor: concurrent-safe tool classification, sibling abort on failure (CC-inspired)
+- [ ] Git worktree isolation: `isolation: "worktree"` gives each elf a separate working copy (CC-inspired)
 
-**Exit criteria:** Resume yesterday's conversation. External client connects via serve mode.
+**Exit criteria:** Resume yesterday's conversation. External client connects via serve mode. Task notifications flow from background elfs to parent.
 
 ## M11: Task Learning
 

@@ -194,6 +194,9 @@ func main() {
 	agentTool := agent.New(elfMgr)
 	agentTool.SetProgressCh(elfProgressCh)
 	reg.Register(agentTool)
+	batchTool := agent.NewBatch(elfMgr)
+	batchTool.SetProgressCh(elfProgressCh)
+	reg.Register(batchTool)
 
 	// Create firewall
 	fw := security.NewFirewall(security.FirewallConfig{
