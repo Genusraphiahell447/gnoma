@@ -77,6 +77,9 @@ var (
 	sStatusBranch = lipgloss.NewStyle().
 			Foreground(cGreen)
 
+	sStatusIncognito = lipgloss.NewStyle().
+				Foreground(cYellow)
+
 	sLine = lipgloss.NewStyle().
 		Foreground(cSurface)
 )

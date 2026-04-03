@@ -10,6 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
+	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
@@ -24,8 +26,15 @@ type chatMessage struct {
 	content string
 }
 
+// Config holds optional dependencies for TUI features.
+type Config struct {
+	Firewall *security.Firewall // for incognito toggle
+	Engine   *engine.Engine     // for model switching
+}
+
 type Model struct {
 	session session.Session
+	config  Config
 	width   int
 	height  int
 
@@ -37,10 +46,11 @@ type Model struct {
 	input        textinput.Model
 	cwd          string
 	gitBranch    string
-	scrollOffset int // 0 = bottom, positive = scrolled up
+	scrollOffset int
+	incognito    bool
 }
 
-func New(sess session.Session) Model {
+func New(sess session.Session, cfg Config) Model {
 	ti := textinput.New()
 	ti.Placeholder = ""
 	ti.Prompt = "❯ "
@@ -52,6 +62,7 @@ func New(sess session.Session) Model {
 
 	return Model{
 		session:   sess,
+		config:    cfg,
 		input:     ti,
 		cwd:       cwd,
 		gitBranch: gitBranch,
@@ -162,22 +173,71 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
-	switch {
-	case cmd == "/quit" || cmd == "/exit" || cmd == "/q":
+	parts := strings.Fields(cmd)
+	command := parts[0]
+	args := ""
+	if len(parts) > 1 {
+		args = strings.Join(parts[1:], " ")
+	}
+
+	switch command {
+	case "/quit", "/exit", "/q":
 		return m, tea.Quit
-	case cmd == "/clear":
+
+	case "/clear":
 		m.messages = nil
+		m.scrollOffset = 0
 		return m, nil
-	case cmd == "/incognito":
-		m.messages = append(m.messages, chatMessage{role: "system", content: "incognito mode toggled"})
+
+	case "/incognito":
+		if m.config.Firewall != nil {
+			m.incognito = m.config.Firewall.Incognito().Toggle()
+			if m.incognito {
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: "🔒 incognito mode ON — no persistence, no learning, no content logging"})
+			} else {
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: "🔓 incognito mode OFF"})
+			}
+		} else {
+			m.messages = append(m.messages, chatMessage{role: "error",
+				content: "firewall not configured"})
+		}
 		return m, nil
-	case cmd == "/help":
+
+	case "/model":
+		if args == "" {
+			status := m.session.Status()
+			m.messages = append(m.messages, chatMessage{role: "system",
+				content: fmt.Sprintf("current model: %s/%s\nUsage: /model <model-name>", status.Provider, status.Model)})
+			return m, nil
+		}
+		if m.config.Engine != nil {
+			m.config.Engine.SetModel(args)
+			m.messages = append(m.messages, chatMessage{role: "system",
+				content: fmt.Sprintf("model switched to: %s", args)})
+		}
+		return m, nil
+
+	case "/provider":
+		if args == "" {
+			status := m.session.Status()
+			m.messages = append(m.messages, chatMessage{role: "system",
+				content: fmt.Sprintf("current provider: %s\nUsage: /provider <name> (mistral, anthropic, openai, google, ollama)", status.Provider)})
+			return m, nil
+		}
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands: /clear, /incognito, /quit, /help"})
+			content: fmt.Sprintf("provider switching requires restart: gnoma --provider %s", args)})
 		return m, nil
+
+	case "/help":
+		m.messages = append(m.messages, chatMessage{role: "system",
+			content: "Commands:\n  /clear            clear chat\n  /incognito        toggle incognito mode\n  /model <name>     switch model\n  /provider <name>  show/switch provider\n  /help             show this help\n  /quit             exit gnoma"})
+		return m, nil
+
 	default:
 		m.messages = append(m.messages, chatMessage{role: "error",
-			content: fmt.Sprintf("unknown command: %s (try /help)", cmd)})
+			content: fmt.Sprintf("unknown command: %s (try /help)", command)})
 		return m, nil
 	}
 }
@@ -392,10 +452,12 @@ func (m Model) renderInput() string {
 func (m Model) renderStatus() string {
 	status := m.session.Status()
 
-	// Left: provider + model
-	left := sStatusHighlight.Render(
-		fmt.Sprintf(" %s/%s", status.Provider, status.Model),
-	)
+	// Left: provider + model + incognito
+	provModel := fmt.Sprintf(" %s/%s", status.Provider, status.Model)
+	if m.incognito {
+		provModel += " " + sStatusIncognito.Render("🔒")
+	}
+	left := sStatusHighlight.Render(provModel)
 
 	// Center: cwd + git branch
 	dir := filepath.Base(m.cwd)

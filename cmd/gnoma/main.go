@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
@@ -37,6 +38,8 @@ func main() {
 		system       = flag.String("system", defaultSystem, "system prompt")
 		apiKey       = flag.String("api-key", "", "API key (or set MISTRAL_API_KEY env)")
 		maxTurns     = flag.Int("max-turns", 50, "max tool-calling rounds per turn")
+		permMode     = flag.String("permission", "bypass", "permission mode (default, accept_edits, bypass, deny, plan, auto)")
+		incognito    = flag.Bool("incognito", false, "incognito mode — no persistence, no learning")
 		verbose      = flag.Bool("verbose", false, "enable debug logging")
 		version      = flag.Bool("version", false, "print version and exit")
 	)
@@ -122,6 +125,15 @@ func main() {
 		Logger:           logger,
 	})
 
+	// Incognito mode
+	if *incognito {
+		fw.Incognito().Activate()
+		logger.Debug("incognito mode enabled")
+	}
+
+	// Permission checker
+	_ = permission.NewChecker(permission.Mode(*permMode), nil, nil)
+
 	// Build system prompt with compact inventory summary
 	systemPrompt := *system
 	if summary := inventory.Summary(); summary != "" {
@@ -187,7 +199,10 @@ func main() {
 		sess := session.NewLocal(eng, *providerName, armModel)
 		defer sess.Close()
 
-		m := tui.New(sess)
+		m := tui.New(sess, tui.Config{
+			Firewall: fw,
+			Engine:   eng,
+		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
