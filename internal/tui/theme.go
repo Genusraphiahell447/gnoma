@@ -64,6 +64,10 @@ var (
 			Foreground(cBlue).
 			Bold(true)
 
+	styleAssistantLabel = lipgloss.NewStyle().
+				Foreground(cPurple).
+				Bold(true)
+
 	sToolOutput = lipgloss.NewStyle().
 			Foreground(cGreen)
 

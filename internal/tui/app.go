@@ -64,12 +64,19 @@ type Model struct {
 func New(sess session.Session, cfg Config) Model {
 	ti := textarea.New()
 	ti.Placeholder = "Type a message... (Enter to send, Shift+Enter for newline)"
-	ti.Prompt = "❯ "
 	ti.ShowLineNumbers = false
 	ti.SetHeight(1)
 	ti.MaxHeight = 10
 	ti.SetWidth(80)
 	ti.CharLimit = 0
+
+	// Prompt only on first line, empty continuation
+	ti.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
+			return "❯ "
+		}
+		return "  "
+	})
 
 	// Remap: Shift+Enter/Ctrl+J for newline (not plain Enter)
 	km := ti.KeyMap
@@ -463,15 +470,15 @@ func (m Model) View() tea.View {
 		return tea.NewView("")
 	}
 
-	// Auto-size textarea based on content
-	lines := strings.Count(m.input.Value(), "\n") + 1
-	if lines < 1 {
-		lines = 1
+	// Auto-size textarea to fit all content + 1 for cursor room
+	contentLines := strings.Count(m.input.Value(), "\n") + 2 // +1 for last line, +1 for cursor
+	if contentLines < 2 {
+		contentLines = 2
 	}
-	if lines > 10 {
-		lines = 10
+	if contentLines > 12 {
+		contentLines = 12
 	}
-	m.input.SetHeight(lines)
+	m.input.SetHeight(contentLines)
 
 	status := m.renderStatus()
 	input := m.renderInput()
@@ -531,12 +538,17 @@ func (m Model) renderChat(height int) string {
 
 	// Streaming
 	if m.streaming && m.streamBuf.Len() > 0 {
-		wrapped := wrapText(m.streamBuf.String(), m.width-8)
-		for _, line := range strings.Split(wrapped, "\n") {
-			lines = append(lines, "    "+line)
+		wrapped := wrapText(m.streamBuf.String(), m.width-4)
+		wLines := strings.Split(wrapped, "\n")
+		for i, line := range wLines {
+			if i == 0 {
+				lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
+			} else {
+				lines = append(lines, "  "+line)
+			}
 		}
 	} else if m.streaming {
-		lines = append(lines, "    "+sCursor.Render("█"))
+		lines = append(lines, styleAssistantLabel.Render("◆ ")+sCursor.Render("█"))
 	}
 
 	// Join all logical lines then split by newlines
@@ -596,36 +608,56 @@ func (m Model) renderChat(height int) string {
 
 func (m Model) renderMessage(msg chatMessage) []string {
 	var lines []string
-	w := m.width - 8
+	w := m.width - 4
+	indent := "  " // 2-space indent for continuation lines
 
 	switch msg.role {
 	case "user":
-		lines = append(lines, sUserLabel.Render("❯ ")+sUserLabel.Render(msg.content))
+		// ❯ first line, indented continuation
+		msgLines := strings.Split(msg.content, "\n")
+		for i, line := range msgLines {
+			if i == 0 {
+				lines = append(lines, sUserLabel.Render("❯ ")+sUserLabel.Render(line))
+			} else {
+				lines = append(lines, sUserLabel.Render(indent+line))
+			}
+		}
 		lines = append(lines, "")
 
 	case "assistant":
-		wrapped := wrapText(msg.content, w)
-		for _, line := range strings.Split(wrapped, "\n") {
-			lines = append(lines, "    "+line)
+		// ◆ first line, indented continuation
+		wrapped := wrapText(msg.content, w-2)
+		wLines := strings.Split(wrapped, "\n")
+		for i, line := range wLines {
+			if i == 0 {
+				lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
+			} else {
+				lines = append(lines, indent+line)
+			}
 		}
 		lines = append(lines, "")
 
 	case "tool":
-		lines = append(lines, "    "+sToolOutput.Render(msg.content))
+		lines = append(lines, indent+sToolOutput.Render(msg.content))
 
 	case "toolresult":
-		// Render tool output as indented code block
 		for _, line := range strings.Split(msg.content, "\n") {
-			lines = append(lines, "      "+sToolResult.Render(line))
+			lines = append(lines, indent+indent+sToolResult.Render(line))
 		}
 		lines = append(lines, "")
 
 	case "system":
-		lines = append(lines, "    "+sSystem.Render("• "+msg.content))
+		for i, line := range strings.Split(msg.content, "\n") {
+			if i == 0 {
+				lines = append(lines, sSystem.Render("• "+line))
+			} else {
+				lines = append(lines, sSystem.Render(indent+line))
+			}
+		}
 		lines = append(lines, "")
 
 	case "error":
-		lines = append(lines, "    "+sError.Render("✗ "+msg.content))
+		lines = append(lines, sError.Render("✗ "+msg.content))
 		lines = append(lines, "")
 	}
 
@@ -678,7 +710,7 @@ func (m Model) renderSeparators() (string, string) {
 }
 
 func (m Model) renderInput() string {
-	return "  " + m.input.View()
+	return m.input.View()
 }
 
 func (m Model) renderStatus() string {
