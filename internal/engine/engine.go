@@ -55,6 +55,10 @@ type Engine struct {
 	// Cached model capabilities, resolved lazily
 	modelCaps    *provider.Capabilities
 	modelCapsFor string // model ID the cached caps are for
+
+	// Deferred tool loading: tools with ShouldDefer() are excluded until
+	// the model requests them. Activated on first use.
+	activatedTools map[string]bool
 }
 
 // New creates an engine.
@@ -67,8 +71,9 @@ func New(cfg Config) (*Engine, error) {
 		logger = slog.Default()
 	}
 	return &Engine{
-		cfg:    cfg,
-		logger: logger,
+		cfg:            cfg,
+		logger:         logger,
+		activatedTools: make(map[string]bool),
 	}, nil
 }
 

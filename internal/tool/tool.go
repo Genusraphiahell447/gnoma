@@ -20,3 +20,10 @@ type Tool interface {
 	// IsDestructive returns true if the tool can cause irreversible changes.
 	IsDestructive() bool
 }
+
+// DeferrableTool is an optional interface for tools that can be excluded
+// from initial requests and loaded on demand. Reduces token overhead
+// for rarely-used tools with large schemas.
+type DeferrableTool interface {
+	ShouldDefer() bool
+}

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
+	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
@@ -270,13 +271,28 @@ func main() {
 		systemPrompt = systemPrompt + "\n\n" + summary
 	}
 
+	// Load project docs as immutable context prefix
+	var prefixMsgs []message.Message
+	for _, name := range []string{"CLAUDE.md", ".gnoma/GNOMA.md"} {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			continue
+		}
+		prefixMsgs = append(prefixMsgs,
+			message.NewUserText(fmt.Sprintf("[Project docs: %s]\n\n%s", name, string(data))),
+			message.NewAssistantText("I've read the project documentation and will follow these guidelines."),
+		)
+		logger.Debug("loaded project docs as context prefix", "file", name, "size", len(data))
+	}
+
 	// Create context window with summarize strategy (falls back to truncation)
 	var compactStrategy gnomactx.Strategy
 	compactStrategy = gnomactx.NewSummarizeStrategy(prov)
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{
-		MaxTokens: cfg.Provider.MaxTokens * 20, // rough: max_tokens is per-turn, context window ~20x
-		Strategy:  compactStrategy,
-		Logger:    logger,
+		MaxTokens:      cfg.Provider.MaxTokens * 20, // rough: max_tokens is per-turn, context window ~20x
+		Strategy:       compactStrategy,
+		PrefixMessages: prefixMsgs,
+		Logger:         logger,
 	})
 
 	// Create engine

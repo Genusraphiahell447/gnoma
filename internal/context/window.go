@@ -18,8 +18,13 @@ type Strategy interface {
 type Window struct {
 	tracker  *Tracker
 	strategy Strategy
-	messages []message.Message
+	prefix   []message.Message // immutable prefix (project docs), never compacted
+	messages []message.Message // mutable conversation history
 	logger   *slog.Logger
+
+	// Compact hooks
+	onPreCompact  func([]message.Message)
+	onPostCompact func([]message.Message)
 
 	// Circuit breaker: stop retrying after consecutive failures
 	consecutiveFailures int
@@ -27,9 +32,12 @@ type Window struct {
 }
 
 type WindowConfig struct {
-	MaxTokens int64
-	Strategy  Strategy
-	Logger    *slog.Logger
+	MaxTokens      int64
+	Strategy       Strategy
+	PrefixMessages []message.Message // immutable prefix, survives compaction
+	OnPreCompact   func([]message.Message)
+	OnPostCompact  func([]message.Message)
+	Logger         *slog.Logger
 }
 
 func NewWindow(cfg WindowConfig) *Window {
@@ -38,11 +46,14 @@ func NewWindow(cfg WindowConfig) *Window {
 		logger = slog.Default()
 	}
 	return &Window{
-		tracker:     NewTracker(cfg.MaxTokens),
-		strategy:    cfg.Strategy,
-		messages:    nil,
-		logger:      logger,
-		maxFailures: 3,
+		tracker:       NewTracker(cfg.MaxTokens),
+		strategy:      cfg.Strategy,
+		prefix:        cfg.PrefixMessages,
+		messages:      nil,
+		logger:        logger,
+		onPreCompact:  cfg.OnPreCompact,
+		onPostCompact: cfg.OnPostCompact,
+		maxFailures:   3,
 	}
 }
 
@@ -52,12 +63,23 @@ func (w *Window) Append(msg message.Message, usage message.Usage) {
 	w.tracker.Add(usage)
 }
 
-// Messages returns the current message history.
+// Messages returns the mutable conversation history (without prefix).
 func (w *Window) Messages() []message.Message {
 	return w.messages
 }
 
-// SetMessages replaces the message history (used after compaction).
+// AllMessages returns prefix + mutable history. Use this for building provider requests.
+func (w *Window) AllMessages() []message.Message {
+	if len(w.prefix) == 0 {
+		return w.messages
+	}
+	all := make([]message.Message, 0, len(w.prefix)+len(w.messages))
+	all = append(all, w.prefix...)
+	all = append(all, w.messages...)
+	return all
+}
+
+// SetMessages replaces the mutable message history (used after compaction).
 func (w *Window) SetMessages(msgs []message.Message) {
 	w.messages = msgs
 }
@@ -73,13 +95,25 @@ func (w *Window) CompactIfNeeded() (bool, error) {
 	if !w.tracker.ShouldCompact() {
 		return false, nil
 	}
+	return w.doCompact(false)
+}
 
+// ForceCompact runs compaction regardless of the token threshold.
+// Used for reactive compaction (e.g., after a 413 response).
+func (w *Window) ForceCompact() (bool, error) {
+	if len(w.messages) <= 2 {
+		return false, nil
+	}
+	return w.doCompact(true)
+}
+
+func (w *Window) doCompact(force bool) (bool, error) {
 	if w.strategy == nil {
 		return false, fmt.Errorf("no compaction strategy configured")
 	}
 
-	// Circuit breaker
-	if w.consecutiveFailures >= w.maxFailures {
+	// Circuit breaker (skip for forced)
+	if !force && w.consecutiveFailures >= w.maxFailures {
 		w.logger.Warn("compaction circuit breaker open",
 			"failures", w.consecutiveFailures,
 			"max", w.maxFailures,
@@ -87,18 +121,33 @@ func (w *Window) CompactIfNeeded() (bool, error) {
 		return false, nil
 	}
 
-	budget := w.tracker.Remaining() + w.tracker.Used()/2 // target: half of current usage
-	if budget < 0 {
+	var budget int64
+	if force {
 		budget = w.tracker.MaxTokens() / 2
+	} else {
+		budget = w.tracker.Remaining() + w.tracker.Used()/2
+		if budget < 0 {
+			budget = w.tracker.MaxTokens() / 2
+		}
 	}
 
-	w.logger.Info("compacting context",
+	label := "compacting"
+	if force {
+		label = "forced compacting"
+	}
+	w.logger.Info(label+" context",
 		"messages", len(w.messages),
+		"prefix", len(w.prefix),
 		"used", w.tracker.Used(),
 		"budget", budget,
-		"strategy", fmt.Sprintf("%T", w.strategy),
 	)
 
+	// Pre-compact hook
+	if w.onPreCompact != nil {
+		w.onPreCompact(w.messages)
+	}
+
+	// Compact only mutable messages — prefix is preserved separately
 	compacted, err := w.strategy.Compact(w.messages, budget)
 	if err != nil {
 		w.consecutiveFailures++
@@ -113,7 +162,6 @@ func (w *Window) CompactIfNeeded() (bool, error) {
 	originalLen := len(w.messages)
 	w.messages = compacted
 
-	// Rough estimate: reduce tracked tokens proportionally
 	ratio := float64(len(compacted)) / float64(originalLen+1)
 	w.tracker.Set(int64(float64(w.tracker.Used()) * ratio))
 
@@ -123,46 +171,15 @@ func (w *Window) CompactIfNeeded() (bool, error) {
 		"tokens_after", w.tracker.Used(),
 	)
 
+	// Post-compact hook
+	if w.onPostCompact != nil {
+		w.onPostCompact(compacted)
+	}
+
 	return true, nil
 }
 
-// ForceCompact runs compaction regardless of the token threshold.
-// Used for reactive compaction (e.g., after a 413 response).
-func (w *Window) ForceCompact() (bool, error) {
-	if w.strategy == nil {
-		return false, fmt.Errorf("no compaction strategy configured")
-	}
-	if len(w.messages) <= 2 {
-		return false, nil // nothing to compact
-	}
-
-	budget := w.tracker.MaxTokens() / 2
-
-	w.logger.Info("forced compaction",
-		"messages", len(w.messages),
-		"used", w.tracker.Used(),
-		"budget", budget,
-	)
-
-	compacted, err := w.strategy.Compact(w.messages, budget)
-	if err != nil {
-		return false, err
-	}
-
-	originalLen := len(w.messages)
-	w.messages = compacted
-	ratio := float64(len(compacted)) / float64(originalLen+1)
-	w.tracker.Set(int64(float64(w.tracker.Used()) * ratio))
-
-	w.logger.Info("forced compaction complete",
-		"messages_before", originalLen,
-		"messages_after", len(compacted),
-		"tokens_after", w.tracker.Used(),
-	)
-	return true, nil
-}
-
-// Reset clears all messages and usage.
+// Reset clears all messages and usage (prefix is preserved).
 func (w *Window) Reset() {
 	w.messages = nil
 	w.tracker.Reset()

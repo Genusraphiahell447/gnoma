@@ -64,6 +64,7 @@ func (t *BatchTool) Description() string         { return "Spawn multiple elfs (
 func (t *BatchTool) Parameters() json.RawMessage { return batchSchema }
 func (t *BatchTool) IsReadOnly() bool            { return true }
 func (t *BatchTool) IsDestructive() bool         { return false }
+func (t *BatchTool) ShouldDefer() bool           { return true }
 
 type batchArgs struct {
 	Tasks    []batchTask `json:"tasks"`

@@ -190,8 +190,11 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 }
 
 func (e *Engine) buildRequest(ctx context.Context) provider.Request {
-	// Scan messages through firewall if configured
+	// Use AllMessages (prefix + history) if context window manages prefix docs
 	messages := e.history
+	if e.cfg.Context != nil {
+		messages = e.cfg.Context.AllMessages()
+	}
 	systemPrompt := e.cfg.System
 	if e.cfg.Firewall != nil {
 		messages = e.cfg.Firewall.ScanOutgoingMessages(messages)
@@ -209,6 +212,10 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 	if caps == nil || caps.ToolUse {
 		// nil caps = unknown model, include tools optimistically
 		for _, t := range e.cfg.Tools.All() {
+			// Skip deferred tools until the model requests them
+			if dt, ok := t.(tool.DeferrableTool); ok && dt.ShouldDefer() && !e.activatedTools[t.Name()] {
+				continue
+			}
 			req.Tools = append(req.Tools, provider.ToolDefinition{
 				Name:        t.Name(),
 				Description: t.Description(),
@@ -237,6 +244,12 @@ func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb 
 
 	for _, call := range calls {
 		t, ok := e.cfg.Tools.Get(call.Name)
+		if ok {
+			// Activate deferred tools on first use
+			if dt, isDeferrable := t.(tool.DeferrableTool); isDeferrable && dt.ShouldDefer() {
+				e.activatedTools[call.Name] = true
+			}
+		}
 		if !ok {
 			e.logger.Warn("unknown tool", "name", call.Name)
 			unknownResults = append(unknownResults, message.ToolResult{

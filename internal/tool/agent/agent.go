@@ -53,6 +53,7 @@ func (t *Tool) Description() string         { return "Spawn a sub-agent (elf) to
 func (t *Tool) Parameters() json.RawMessage { return paramSchema }
 func (t *Tool) IsReadOnly() bool            { return true }
 func (t *Tool) IsDestructive() bool         { return false }
+func (t *Tool) ShouldDefer() bool           { return true }
 
 type agentArgs struct {
 	Prompt   string `json:"prompt"`
