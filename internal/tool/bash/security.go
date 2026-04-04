@@ -10,13 +10,20 @@ import (
 type SecurityCheck int
 
 const (
-	CheckIncomplete      SecurityCheck = iota + 1 // fragments, trailing operators
-	CheckMetacharacters                            // ; | & $ ` < >
-	CheckCmdSubstitution                           // $(), ``, ${}
-	CheckRedirection                               // < > >> etc.
-	CheckDangerousVars                             // IFS, PATH manipulation
-	CheckNewlineInjection                          // embedded newlines
-	CheckControlChars                              // ASCII 00-1F (except \n \t)
+	CheckIncomplete        SecurityCheck = iota + 1 // fragments, trailing operators
+	CheckMetacharacters                              // ; | & $ ` < >
+	CheckCmdSubstitution                             // $(), ``, ${}
+	CheckRedirection                                 // < > >> etc.
+	CheckDangerousVars                               // IFS, PATH manipulation
+	CheckNewlineInjection                            // embedded newlines
+	CheckControlChars                                // ASCII 00-1F (except \n \t)
+	CheckJQInjection                                 // jq with shell metacharacters
+	CheckObfuscatedFlags                             // Unicode lookalike hyphens
+	CheckProcEnviron                                 // /proc/*/environ access
+	CheckBraceExpansion                              // dangerous {a,b} expansion
+	CheckUnicodeWhitespace                           // non-ASCII whitespace
+	CheckZshDangerous                                // zsh-specific dangerous constructs
+	CheckCommentDesync                               // # inside strings hiding commands
 )
 
 // SecurityViolation describes a failed security check.
@@ -59,6 +66,27 @@ func ValidateCommand(cmd string) *SecurityViolation {
 		return v
 	}
 	if v := checkSensitiveRedirection(cmd); v != nil {
+		return v
+	}
+	if v := checkJQInjection(cmd); v != nil {
+		return v
+	}
+	if v := checkObfuscatedFlags(cmd); v != nil {
+		return v
+	}
+	if v := checkProcEnviron(cmd); v != nil {
+		return v
+	}
+	if v := checkBraceExpansion(cmd); v != nil {
+		return v
+	}
+	if v := checkUnicodeWhitespace(cmd); v != nil {
+		return v
+	}
+	if v := checkZshDangerous(cmd); v != nil {
+		return v
+	}
+	if v := checkCommentQuoteDesync(cmd); v != nil {
 		return v
 	}
 	return nil
@@ -234,6 +262,193 @@ func checkSensitiveRedirection(cmd string) *SecurityViolation {
 				Message: fmt.Sprintf("redirection to sensitive path: %s", target),
 			}
 		}
+	}
+	return nil
+}
+
+// checkJQInjection detects jq commands with embedded shell metacharacters in the filter.
+func checkJQInjection(cmd string) *SecurityViolation {
+	// Only check commands that invoke jq
+	if !strings.Contains(cmd, "jq ") && !strings.HasPrefix(cmd, "jq") {
+		return nil
+	}
+	// jq filters with $( or ` indicate shell injection through jq
+	dangerousInJQ := []string{"$(", "`", "system(", "input|"}
+	for _, d := range dangerousInJQ {
+		if strings.Contains(cmd, d) {
+			return &SecurityViolation{
+				Check:   CheckJQInjection,
+				Message: fmt.Sprintf("jq command with dangerous pattern: %s", d),
+			}
+		}
+	}
+	return nil
+}
+
+// checkObfuscatedFlags detects Unicode lookalike characters used as hyphens.
+// Attackers use en-dash (–), em-dash (—), minus sign (−) instead of ASCII hyphen.
+func checkObfuscatedFlags(cmd string) *SecurityViolation {
+	lookalikes := []rune{
+		'\u2013', // en-dash –
+		'\u2014', // em-dash —
+		'\u2212', // minus sign −
+		'\uFE63', // small hyphen-minus ﹣
+		'\uFF0D', // fullwidth hyphen-minus -
+	}
+	for i, r := range cmd {
+		for _, look := range lookalikes {
+			if r == look {
+				return &SecurityViolation{
+					Check:   CheckObfuscatedFlags,
+					Message: fmt.Sprintf("Unicode lookalike hyphen U+%04X at position %d", r, i),
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// checkProcEnviron blocks access to /proc/*/environ and /proc/self/mem.
+func checkProcEnviron(cmd string) *SecurityViolation {
+	dangerous := []string{
+		"/proc/self/environ",
+		"/proc/self/mem",
+		"/proc/self/cmdline",
+	}
+	lower := strings.ToLower(cmd)
+	for _, d := range dangerous {
+		if strings.Contains(lower, d) {
+			return &SecurityViolation{
+				Check:   CheckProcEnviron,
+				Message: fmt.Sprintf("access to %s (environment exfiltration)", d),
+			}
+		}
+	}
+	// Also catch /proc/*/environ with PID
+	if strings.Contains(lower, "/proc/") && strings.Contains(lower, "/environ") {
+		return &SecurityViolation{
+			Check:   CheckProcEnviron,
+			Message: "/proc/PID/environ access (environment exfiltration)",
+		}
+	}
+	return nil
+}
+
+// checkBraceExpansion detects dangerous brace expansion patterns.
+// {a,b} is used to expand multiple arguments — can bypass argument filters.
+func checkBraceExpansion(cmd string) *SecurityViolation {
+	inSingle := false
+	inDouble := false
+	braceDepth := 0
+
+	for _, r := range cmd {
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if inSingle || inDouble {
+			continue
+		}
+		if r == '{' {
+			braceDepth++
+		}
+		if r == '}' && braceDepth > 0 {
+			braceDepth--
+		}
+		// Comma inside braces = brace expansion
+		if r == ',' && braceDepth > 0 {
+			return &SecurityViolation{
+				Check:   CheckBraceExpansion,
+				Message: "brace expansion {a,b} (can bypass argument filters)",
+			}
+		}
+	}
+	return nil
+}
+
+// checkUnicodeWhitespace detects non-ASCII whitespace characters that can hide commands.
+func checkUnicodeWhitespace(cmd string) *SecurityViolation {
+	for i, r := range cmd {
+		if r > 127 && unicode.IsSpace(r) {
+			return &SecurityViolation{
+				Check:   CheckUnicodeWhitespace,
+				Message: fmt.Sprintf("non-ASCII whitespace U+%04X at position %d", r, i),
+			}
+		}
+	}
+	return nil
+}
+
+// checkZshDangerous detects zsh-specific dangerous constructs.
+func checkZshDangerous(cmd string) *SecurityViolation {
+	dangerousPatterns := []struct {
+		pattern string
+		msg     string
+	}{
+		{"=(", "zsh process substitution =() (arbitrary execution)"},
+		{">(", "zsh output process substitution >()"},
+		{"<(", "zsh input process substitution <()"},
+		{"zmodload", "zsh module loading (can load arbitrary code)"},
+		{"sysopen", "zsh sysopen (direct file descriptor access)"},
+		{"ztcp", "zsh TCP socket access"},
+		{"zsocket", "zsh socket access"},
+	}
+	for _, p := range dangerousPatterns {
+		if strings.Contains(cmd, p.pattern) {
+			return &SecurityViolation{
+				Check:   CheckZshDangerous,
+				Message: p.msg,
+			}
+		}
+	}
+	return nil
+}
+
+// checkCommentQuoteDesync detects # characters that could be interpreted differently
+// depending on shell parsing context (e.g., mid-word # in zsh vs bash).
+func checkCommentQuoteDesync(cmd string) *SecurityViolation {
+	inSingle := false
+	inDouble := false
+	escaped := false
+	prevWasSpace := true
+
+	for _, r := range cmd {
+		if escaped {
+			escaped = false
+			prevWasSpace = false
+			continue
+		}
+		if r == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			prevWasSpace = false
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			prevWasSpace = false
+			continue
+		}
+		if inSingle || inDouble {
+			prevWasSpace = false
+			continue
+		}
+		// # at start of word is a comment — legit after whitespace
+		// # mid-word is suspicious in zsh (history expansion, etc.)
+		if r == '#' && !prevWasSpace {
+			return &SecurityViolation{
+				Check:   CheckCommentDesync,
+				Message: "mid-word # character (comment/history expansion ambiguity)",
+			}
+		}
+		prevWasSpace = unicode.IsSpace(r)
 	}
 	return nil
 }

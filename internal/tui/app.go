@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
@@ -377,45 +380,79 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			var b strings.Builder
 			fmt.Fprintf(&b, "current: %s/%s\n", status.Provider, status.Model)
 			if m.config.Router != nil {
-				b.WriteString("\nAvailable arms:\n")
-				for _, arm := range m.config.Router.Arms() {
+				arms := m.config.Router.Arms()
+				sort.Slice(arms, func(i, j int) bool {
+					return string(arms[i].ID) < string(arms[j].ID)
+				})
+				b.WriteString("\nAvailable models:\n")
+				for i, arm := range arms {
 					marker := "  "
 					if string(arm.ID) == status.Provider+"/"+status.Model {
 						marker = "→ "
 					}
-					caps := ""
+					var caps []string
 					if arm.Capabilities.ToolUse {
-						caps += "tools "
+						caps = append(caps, "tools")
 					}
 					if arm.Capabilities.Thinking {
-						caps += "thinking "
+						caps = append(caps, "thinking")
 					}
 					if arm.Capabilities.Vision {
-						caps += "vision "
+						caps = append(caps, "vision")
 					}
 					local := ""
 					if arm.IsLocal {
 						local = " (local)"
 					}
-					fmt.Fprintf(&b, "%s%s  [%s]%s\n", marker, arm.ID, strings.TrimSpace(caps), local)
+					capStr := ""
+					if len(caps) > 0 {
+						capStr = " [" + strings.Join(caps, ", ") + "]"
+					}
+					fmt.Fprintf(&b, "%s%d. %s%s%s\n", marker, i+1, arm.ID, capStr, local)
 				}
 			}
-			b.WriteString("\nUsage: /model <model-name>")
+			b.WriteString("\nUsage: /model <name-or-number>")
 			m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 			return m, nil
 		}
 		if m.config.Engine != nil {
-			m.config.Engine.SetModel(args)
-			// Update session status display
+			modelName := args
+			// Support numeric selection: /model 3
+			if n, err := strconv.Atoi(args); err == nil && n >= 1 && m.config.Router != nil {
+				arms := m.config.Router.Arms()
+				sort.Slice(arms, func(i, j int) bool {
+					return string(arms[i].ID) < string(arms[j].ID)
+				})
+				if n <= len(arms) {
+					modelName = arms[n-1].ModelName
+				}
+			}
+			m.config.Engine.SetModel(modelName)
 			if ls, ok := m.session.(*session.Local); ok {
-				ls.SetModel(args)
+				ls.SetModel(modelName)
 			}
 			m.messages = append(m.messages, chatMessage{role: "system",
-				content: fmt.Sprintf("model switched to: %s", args)})
+				content: fmt.Sprintf("model switched to: %s", modelName)})
 		}
 		return m, nil
 
 	case "/config":
+		// /config set <key> <value>
+		if strings.HasPrefix(args, "set ") {
+			parts := strings.SplitN(strings.TrimPrefix(args, "set "), " ", 2)
+			if len(parts) != 2 {
+				m.messages = append(m.messages, chatMessage{role: "error",
+					content: "Usage: /config set <key> <value>\nKeys: provider.default, provider.model, permission.mode"})
+				return m, nil
+			}
+			if err := gnomacfg.SetProjectConfig(parts[0], parts[1]); err != nil {
+				m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+			} else {
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: fmt.Sprintf("config set: %s = %s (saved to .gnoma/config.toml)", parts[0], parts[1])})
+			}
+			return m, nil
+		}
 		status := m.session.Status()
 		var b strings.Builder
 		b.WriteString("Current configuration:\n")
@@ -430,6 +467,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			fmt.Fprintf(&b, "  git branch: %s\n", m.gitBranch)
 		}
 		b.WriteString("\nConfig files: ~/.config/gnoma/config.toml, .gnoma/config.toml")
+		b.WriteString("\nEdit: /config set <key> <value>")
 		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 		return m, nil
 

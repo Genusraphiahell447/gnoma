@@ -118,3 +118,43 @@ func (t *Tracker) State() TokenState {
 func (t *Tracker) ShouldCompact() bool {
 	return t.State() == TokensCritical
 }
+
+// PreEstimate adds an estimated token count before the provider reports actual usage.
+// Used for proactive compaction triggering before sending a request.
+func (t *Tracker) PreEstimate(tokens int64) {
+	t.current += tokens
+}
+
+// EstimateTokens returns a rough token estimate for a text string.
+// Heuristic: ~4 characters per token for English text.
+func EstimateTokens(text string) int64 {
+	return int64(len(text)+3) / 4
+}
+
+// EstimateMessages returns a rough token estimate for a slice of messages.
+func EstimateMessages(msgs []message.Message) int64 {
+	var total int64
+	for _, msg := range msgs {
+		for _, c := range msg.Content {
+			switch c.Type {
+			case message.ContentText:
+				total += EstimateTokens(c.Text)
+			case message.ContentToolCall:
+				total += 50 // schema overhead per tool call
+				if c.ToolCall != nil {
+					total += EstimateTokens(string(c.ToolCall.Arguments))
+				}
+			case message.ContentToolResult:
+				if c.ToolResult != nil {
+					total += EstimateTokens(c.ToolResult.Content)
+				}
+			case message.ContentThinking:
+				if c.Thinking != nil {
+					total += EstimateTokens(c.Thinking.Text)
+				}
+			}
+		}
+		total += 4 // per-message overhead (role, separators)
+	}
+	return total
+}

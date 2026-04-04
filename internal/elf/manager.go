@@ -12,10 +12,17 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
 
+// elfMeta tracks routing metadata for quality feedback.
+type elfMeta struct {
+	armID    router.ArmID
+	taskType router.TaskType
+}
+
 // Manager spawns, tracks, and manages elfs.
 type Manager struct {
 	mu     sync.RWMutex
 	elfs   map[string]Elf
+	meta   map[string]elfMeta // routing metadata per elf ID
 	router *router.Router
 	tools  *tool.Registry
 	logger *slog.Logger
@@ -34,6 +41,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 	}
 	return &Manager{
 		elfs:   make(map[string]Elf),
+		meta:   make(map[string]elfMeta),
 		router: cfg.Router,
 		tools:  cfg.Tools,
 		logger: logger,
@@ -80,10 +88,30 @@ func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, s
 
 	m.mu.Lock()
 	m.elfs[elf.ID()] = elf
+	m.meta[elf.ID()] = elfMeta{armID: arm.ID, taskType: taskType}
 	m.mu.Unlock()
 
 	m.logger.Info("elf spawned", "id", elf.ID(), "arm", arm.ID)
 	return elf, nil
+}
+
+// ReportResult reports an elf's outcome to the router for quality feedback.
+func (m *Manager) ReportResult(result Result) {
+	m.mu.RLock()
+	meta, ok := m.meta[result.ID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return
+	}
+
+	m.router.ReportOutcome(router.Outcome{
+		ArmID:    meta.armID,
+		TaskType: meta.taskType,
+		Success:  result.Status == StatusCompleted,
+		Tokens:   int(result.Usage.TotalTokens()),
+		Duration: result.Duration,
+	})
 }
 
 // SpawnWithProvider creates an elf using a specific provider (bypasses router).

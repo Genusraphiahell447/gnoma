@@ -173,6 +173,9 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 				}
 			}
 
+			// Report outcome to router
+			t.manager.ReportResult(results[idx])
+
 			// Send done progress
 			r := results[idx]
 			t.sendProgress(elf.Progress{

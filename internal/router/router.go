@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
@@ -121,6 +122,27 @@ func (r *Router) RemoveArm(id ArmID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.arms, id)
+}
+
+// Outcome records the result of a task execution for quality feedback.
+type Outcome struct {
+	ArmID    ArmID
+	TaskType TaskType
+	Success  bool
+	Tokens   int
+	Duration time.Duration
+}
+
+// ReportOutcome records a task execution result for quality tracking.
+// M4: logs only. M9 will use this for bandit learning.
+func (r *Router) ReportOutcome(o Outcome) {
+	r.logger.Debug("outcome reported",
+		"arm", o.ArmID,
+		"task", o.TaskType,
+		"success", o.Success,
+		"tokens", o.Tokens,
+		"duration", o.Duration,
+	)
 }
 
 // Arms returns all registered arms.

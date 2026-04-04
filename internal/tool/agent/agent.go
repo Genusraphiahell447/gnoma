@@ -169,6 +169,9 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 		return tool.Result{Output: "Elf timed out after 5 minutes"}, nil
 	}
 
+	// Report outcome to router for quality feedback
+	t.manager.ReportResult(result)
+
 	// Send done signal — stays in tree until turn completes
 	doneProgress := elf.Progress{
 		ElfID:       result.ID,
