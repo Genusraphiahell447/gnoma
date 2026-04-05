@@ -2,6 +2,7 @@ package persist
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,13 +46,16 @@ func (s *Store) Save(toolName, callID, content string) (string, bool) {
 		return "", false
 	}
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		slog.Warn("persist: failed to create session directory", "dir", s.dir, "error", err)
 		return "", false
 	}
-	// Sanitize tool name for filesystem (replace dots and slashes)
+	// Sanitize tool name and call ID for filesystem (replace dots, slashes, path traversal)
 	safeName := strings.NewReplacer(".", "_", "/", "_").Replace(toolName)
-	filename := safeName + "-" + callID + ".txt"
+	safeCallID := strings.NewReplacer("/", "_", "..", "_").Replace(callID)
+	filename := safeName + "-" + safeCallID + ".txt"
 	path := filepath.Join(s.dir, filename)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		slog.Warn("persist: failed to write tool result", "path", path, "error", err)
 		return "", false
 	}
 	return path, true
@@ -67,8 +71,11 @@ func InlineReplacement(path, content string) string {
 		path, previewSize, preview)
 }
 
-// List returns all persisted results, optionally filtered by tool name prefix.
+// List returns all persisted results, optionally filtered by sanitized tool name prefix.
+// Tool names are stored with dots and slashes replaced by underscores — e.g.,
+// "fs.grep" is stored as "fs_grep". Pass the sanitized form as the filter.
 // An empty filter returns all results.
+// Returns nil (not error) if the session directory does not yet exist.
 func (s *Store) List(toolNameFilter string) ([]ResultFile, error) {
 	entries, err := os.ReadDir(s.dir)
 	if os.IsNotExist(err) {
