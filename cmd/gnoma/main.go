@@ -300,6 +300,8 @@ func main() {
 	batchTool := agent.NewBatch(elfMgr, store)
 	batchTool.SetProgressCh(elfProgressCh)
 	reg.Register(batchTool)
+	reg.Register(agent.NewListResultsTool(store))
+	reg.Register(agent.NewReadResultTool(store))
 
 	// Build system prompt with cwd + compact inventory summary
 	systemPrompt := *system
