@@ -172,7 +172,7 @@ func (w *Window) doCompact(force bool) (bool, error) {
 
 	// Re-estimate tokens from actual message content rather than using a
 	// message-count ratio (which is unrelated to token count).
-	w.tracker.Set(EstimateMessages(compacted))
+	w.tracker.Set(w.tracker.CountMessages(compacted))
 
 	w.logger.Info("compaction complete",
 		"messages_before", originalLen,

@@ -2,6 +2,7 @@ package context
 
 import (
 	"somegit.dev/Owlibou/gnoma/internal/message"
+	"somegit.dev/Owlibou/gnoma/internal/tokenizer"
 )
 
 // TokenState indicates how close to the context limit we are.
@@ -40,6 +41,8 @@ type Tracker struct {
 	// Configurable buffers
 	autocompactBuffer int64
 	warningBuffer     int64
+
+	tok *tokenizer.Tokenizer
 }
 
 func NewTracker(maxTokens int64) *Tracker {
@@ -123,6 +126,48 @@ func (t *Tracker) ShouldCompact() bool {
 // Used for proactive compaction triggering before sending a request.
 func (t *Tracker) PreEstimate(tokens int64) {
 	t.current += tokens
+}
+
+// SetTokenizer sets the tokenizer used for accurate token counting.
+func (t *Tracker) SetTokenizer(tok *tokenizer.Tokenizer) {
+	t.tok = tok
+}
+
+// CountTokens returns the token count for text using the configured tokenizer,
+// falling back to the len/4 heuristic if no tokenizer is set.
+func (t *Tracker) CountTokens(text string) int64 {
+	if t.tok != nil {
+		return int64(t.tok.Count(text))
+	}
+	return EstimateTokens(text)
+}
+
+// CountMessages returns the token count for a message slice.
+func (t *Tracker) CountMessages(msgs []message.Message) int64 {
+	var total int64
+	for _, msg := range msgs {
+		for _, c := range msg.Content {
+			switch c.Type {
+			case message.ContentText:
+				total += t.CountTokens(c.Text)
+			case message.ContentToolCall:
+				total += 50
+				if c.ToolCall != nil {
+					total += t.CountTokens(string(c.ToolCall.Arguments))
+				}
+			case message.ContentToolResult:
+				if c.ToolResult != nil {
+					total += t.CountTokens(c.ToolResult.Content)
+				}
+			case message.ContentThinking:
+				if c.Thinking != nil {
+					total += t.CountTokens(c.Thinking.Text)
+				}
+			}
+		}
+		total += 4 // per-message overhead (role, separators)
+	}
+	return total
 }
 
 // EstimateTokens returns a rough token estimate for a text string.
