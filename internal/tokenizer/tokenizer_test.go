@@ -45,3 +45,15 @@ func TestTokenizer_CodeCountsReasonably(t *testing.T) {
 		t.Errorf("code token count out of expected range: %d", n)
 	}
 }
+
+func TestTokenizer_CachedLoadReturnsSameResult(t *testing.T) {
+	tok := tokenizer.New("cl100k_base")
+	first := tok.Count("hello world")
+	second := tok.Count("hello world")
+	if first != second {
+		t.Errorf("cached result differs: first=%d second=%d", first, second)
+	}
+	if first <= 0 {
+		t.Errorf("expected positive token count, got %d", first)
+	}
+}
