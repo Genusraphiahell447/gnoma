@@ -123,15 +123,13 @@ func ClassifyTask(prompt string) Task {
 		RequiresTools: true, // assume tools needed by default
 	}
 
-	// Check for task type keywords (order matters — more specific first)
+	// Check for task type keywords (order matters — more specific/common first).
+	// Orchestration is placed late: its keywords ("dispatch", "pipeline", "orchestrat")
+	// appear as nouns in non-orchestration prompts (e.g. "refactor the pipeline dispatch",
+	// "review the orchestration layer"). Operational task types must gate first.
 	switch {
 	case containsAny(lower, "security", "vulnerability", "cve", "owasp", "xss", "injection", "audit security"):
 		task.Type = TaskSecurityReview
-		task.Priority = PriorityHigh
-	case containsAny(lower, "plan", "architect", "design", "strategy", "roadmap"):
-		task.Type = TaskPlanning
-	case containsAny(lower, "orchestrat", "coordinate", "dispatch", "pipeline"):
-		task.Type = TaskOrchestration
 		task.Priority = PriorityHigh
 	case containsAny(lower, "debug", "fix", "troubleshoot", "not working", "error", "crash", "failing", "bug"):
 		task.Type = TaskDebug
@@ -144,6 +142,12 @@ func ClassifyTask(prompt string) Task {
 	case containsAny(lower, "explain", "what is", "how does", "describe", "tell me about"):
 		task.Type = TaskExplain
 		task.RequiresTools = false
+	case containsAny(lower, "plan", "architect", "design", "strategy", "roadmap"):
+		task.Type = TaskPlanning
+	case containsAny(lower, "orchestrat", "coordinate", "dispatch", "pipeline",
+		"fan out", "subtask", "delegate to", "spawn elf"):
+		task.Type = TaskOrchestration
+		task.Priority = PriorityHigh
 	case containsAny(lower, "create", "implement", "build", "add", "write", "generate", "make"):
 		task.Type = TaskGeneration
 	case containsAny(lower, "scaffold", "boilerplate", "template", "stub", "skeleton"):

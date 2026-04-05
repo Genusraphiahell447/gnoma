@@ -35,6 +35,47 @@ func TestClassifyTask(t *testing.T) {
 	}
 }
 
+func TestClassifyTask_OrchestrationNotFalsePositive(t *testing.T) {
+	// Words like "coordinator", "pipeline", "dispatch" appear in non-orchestration contexts.
+	// More specific classifications (debug, review, refactor, explain) must win.
+	tests := []struct {
+		prompt string
+		want   TaskType
+	}{
+		{"fix the coordinator bug", TaskDebug},           // "coordinator" contains "coordinate"
+		{"review the orchestration layer", TaskReview},   // "orchestrat" present but review wins
+		{"refactor the pipeline dispatch", TaskRefactor}, // "dispatch" present but refactor wins
+		{"explain how coordination works", TaskExplain},  // "coordinat" present but explain wins
+		{"debug the dispatch table", TaskDebug},          // "dispatch" present but debug wins
+	}
+	for _, tt := range tests {
+		task := ClassifyTask(tt.prompt)
+		if task.Type != tt.want {
+			t.Errorf("ClassifyTask(%q).Type = %s, want %s", tt.prompt, task.Type, tt.want)
+		}
+	}
+}
+
+func TestClassifyTask_OrchestrationKeywords(t *testing.T) {
+	// Explicit orchestration-intent phrases should still classify correctly.
+	tests := []struct {
+		prompt string
+		want   TaskType
+	}{
+		{"orchestrate the migration across services", TaskOrchestration},
+		{"fan out the work to 5 elfs", TaskOrchestration},
+		{"split this into subtasks and run them in parallel", TaskOrchestration},
+		{"delegate to worker elfs for parallel processing", TaskOrchestration},
+		{"spawn elfs to handle this", TaskOrchestration},
+	}
+	for _, tt := range tests {
+		task := ClassifyTask(tt.prompt)
+		if task.Type != tt.want {
+			t.Errorf("ClassifyTask(%q).Type = %s, want %s", tt.prompt, task.Type, tt.want)
+		}
+	}
+}
+
 func TestClassifyTask_RequiresTools(t *testing.T) {
 	// Explain tasks don't require tools
 	task := ClassifyTask("explain how generics work")
