@@ -213,12 +213,7 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	if result.Output != "" {
 		// Truncate elf output to avoid flooding parent context.
 		// The parent LLM gets enough to summarize; full text stays in the elf.
-		output := result.Output
-		const maxOutputChars = 2000
-		if len(output) > maxOutputChars {
-			output = output[:maxOutputChars] + fmt.Sprintf("\n\n[truncated — full output was %d chars]", len(result.Output))
-		}
-		b.WriteString(output)
+		b.WriteString(truncateOutput(result.Output, maxOutputChars))
 	}
 
 	return tool.Result{

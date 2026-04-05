@@ -222,12 +222,7 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 			fmt.Fprintf(&b, "Error: %v\n", r.Error)
 		}
 		if r.Output != "" {
-			output := r.Output
-			const maxOutputChars = 2000
-			if len(output) > maxOutputChars {
-				output = output[:maxOutputChars] + fmt.Sprintf("\n\n[truncated — full output was %d chars]", len(r.Output))
-			}
-			b.WriteString(output)
+			b.WriteString(truncateOutput(r.Output, maxOutputChars))
 		}
 		b.WriteString("\n\n")
 	}
