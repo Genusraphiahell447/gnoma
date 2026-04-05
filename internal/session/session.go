@@ -66,4 +66,6 @@ type Session interface {
 	Close() error
 	// Status returns current session state.
 	Status() Status
+	// SessionID returns the persistent identifier for this session.
+	SessionID() string
 }

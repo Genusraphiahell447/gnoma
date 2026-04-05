@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func TestLocal_SendAndReceive(t *testing.T) {
 	}
 
 	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
-	sess := NewLocal(eng, "test", "mock-model")
+	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "mock-model"})
 
 	// Initial state
 	status := sess.Status()
@@ -120,7 +121,7 @@ func TestLocal_SendWhileBusy(t *testing.T) {
 	}
 
 	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
-	sess := NewLocal(eng, "test", "model")
+	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
 	sess.Send("first")
 
@@ -147,7 +148,7 @@ func TestLocal_Cancel(t *testing.T) {
 	}
 
 	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
-	sess := NewLocal(eng, "test", "model")
+	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
 	sess.Send("slow task")
 
@@ -170,7 +171,7 @@ func TestLocal_Cancel(t *testing.T) {
 func TestLocal_Close(t *testing.T) {
 	mp := &mockProvider{name: "test"}
 	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
-	sess := NewLocal(eng, "test", "model")
+	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
 	if err := sess.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -198,7 +199,7 @@ func TestLocal_StatusTracking(t *testing.T) {
 	}
 
 	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
-	sess := NewLocal(eng, "test", "mock-model")
+	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "mock-model"})
 
 	// Turn 1
 	sess.Send("one")
@@ -245,6 +246,85 @@ func (s *slowStream) Close() error          { return nil }
 
 // Ensure Local implements Session interface
 var _ Session = (*Local)(nil)
+
+func TestLocal_AutoSave(t *testing.T) {
+	mp := &mockProvider{
+		name: "test",
+		streams: []stream.Stream{
+			newEventStream(message.StopEndTurn,
+				stream.Event{Type: stream.EventTextDelta, Text: "saved!"},
+			),
+		},
+	}
+
+	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	store := NewSessionStore(t.TempDir(), 10, slog.Default())
+	sess := NewLocal(LocalConfig{
+		Engine:    eng,
+		Provider:  "test",
+		Model:     "mock-model",
+		SessionID: "test-session-001",
+		Store:     store,
+	})
+
+	if err := sess.Send("hello"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	for range sess.Events() {
+	}
+
+	snap, err := store.Load("test-session-001")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if snap.ID != "test-session-001" {
+		t.Errorf("snap.ID = %q, want %q", snap.ID, "test-session-001")
+	}
+	if snap.Metadata.Provider != "test" {
+		t.Errorf("snap.Metadata.Provider = %q, want %q", snap.Metadata.Provider, "test")
+	}
+	if snap.Metadata.TurnCount != 1 {
+		t.Errorf("snap.Metadata.TurnCount = %d, want 1", snap.Metadata.TurnCount)
+	}
+	if len(snap.Messages) == 0 {
+		t.Error("snap.Messages should not be empty after a turn")
+	}
+}
+
+func TestLocal_AutoSave_SkipsWhenNoStore(t *testing.T) {
+	mp := &mockProvider{
+		name: "test",
+		streams: []stream.Stream{
+			newEventStream(message.StopEndTurn,
+				stream.Event{Type: stream.EventTextDelta, Text: "ok"},
+			),
+		},
+	}
+
+	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	// No store — must not panic
+	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "mock-model"})
+
+	if err := sess.Send("hello"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	for range sess.Events() {
+	}
+
+	status := sess.Status()
+	if status.State != StateIdle {
+		t.Errorf("state = %s, want idle", status.State)
+	}
+}
+
+func TestLocal_SessionID(t *testing.T) {
+	mp := &mockProvider{name: "test"}
+	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "m", SessionID: "my-id"})
+	if sess.SessionID() != "my-id" {
+		t.Errorf("SessionID() = %q, want %q", sess.SessionID(), "my-id")
+	}
+}
 
 // Suppress unused import
 var _ = json.Marshal

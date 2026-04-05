@@ -432,7 +432,11 @@ func main() {
 		if armModel == "" {
 			armModel = prov.DefaultModel()
 		}
-		sess := session.NewLocal(eng, *providerName, armModel)
+		sess := session.NewLocal(session.LocalConfig{
+			Engine:   eng,
+			Provider: *providerName,
+			Model:    armModel,
+		})
 		defer sess.Close()
 
 		m := tui.New(sess, tui.Config{
