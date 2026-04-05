@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
-	"encoding/json"
 	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
