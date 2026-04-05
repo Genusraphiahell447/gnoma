@@ -9,6 +9,11 @@ type Config struct {
 	Tools      ToolsSection      `toml:"tools"`
 	RateLimits RateLimitSection  `toml:"rate_limits"`
 	Security   SecuritySection   `toml:"security"`
+	Session    SessionSection    `toml:"session"`
+}
+
+type SessionSection struct {
+	MaxKeep int `toml:"max_keep"`
 }
 
 // SecuritySection configures the secret scanner and firewall.

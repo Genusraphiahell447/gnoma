@@ -18,5 +18,6 @@ func Defaults() Config {
 			BashTimeout: Duration(30 * time.Second),
 			MaxFileSize: 1 << 20, // 1MB
 		},
+		Session: SessionSection{MaxKeep: 20},
 	}
 }
