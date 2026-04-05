@@ -104,6 +104,44 @@ llamacpp = "http://localhost:9090/v1"
 
 ---
 
+## Session Persistence
+
+Conversations are auto-saved to `.gnoma/sessions/` after each completed turn. On a crash you lose at most the current in-flight turn; all previously completed turns are safe.
+
+### Resume a session
+
+```sh
+gnoma --resume              # interactive session picker (↑↓ navigate, Enter load, Esc cancel)
+gnoma --resume <id>         # restore directly by ID
+gnoma -r                    # shorthand
+```
+
+Inside the TUI:
+
+```
+/resume                     # open picker
+/resume <id>                # restore by ID
+```
+
+### Incognito mode
+
+```sh
+gnoma --incognito           # no session saved, no quality scores updated
+```
+
+Toggle at runtime with `Ctrl+X`.
+
+### Config
+
+```toml
+[session]
+max_keep = 20   # how many sessions to retain per project (default: 20)
+```
+
+Sessions are stored per-project under `.gnoma/sessions/<id>/`. Quality scores (EMA routing data) are stored globally at `~/.config/gnoma/quality.json`.
+
+---
+
 ## Config
 
 Config is read in priority order:
