@@ -15,6 +15,9 @@ func TestCoordinatorSystemPrompt_InjectedForOrchestration(t *testing.T) {
 	if !strings.Contains(prompt, "list_results") {
 		t.Error("coordinator prompt must mention list_results")
 	}
+	if !strings.Contains(prompt, "read_result") {
+		t.Error("coordinator prompt must mention read_result")
+	}
 }
 
 func TestShouldInjectCoordinatorPrompt(t *testing.T) {
