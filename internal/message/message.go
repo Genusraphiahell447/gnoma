@@ -13,8 +13,8 @@ const (
 
 // Message represents a single turn in the conversation.
 type Message struct {
-	Role    Role
-	Content []Content
+	Role    Role      `json:"role"`
+	Content []Content `json:"content"`
 }
 
 func NewUserText(text string) Message {
