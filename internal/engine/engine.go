@@ -154,6 +154,26 @@ func (e *Engine) SetModel(model string) {
 	e.cfg.Model = model
 }
 
+// SetHistory replaces the conversation history (for session restore).
+// Also syncs the context window and re-estimates the tracker's token count.
+func (e *Engine) SetHistory(msgs []message.Message) {
+	e.history = msgs
+	if e.cfg.Context != nil {
+		e.cfg.Context.SetMessages(msgs)
+		e.cfg.Context.Tracker().Set(e.cfg.Context.Tracker().CountMessages(msgs))
+	}
+}
+
+// SetUsage sets cumulative token usage (for session restore).
+func (e *Engine) SetUsage(u message.Usage) {
+	e.usage = u
+}
+
+// SetActivatedTools restores the set of activated deferred tools (for session restore).
+func (e *Engine) SetActivatedTools(tools map[string]bool) {
+	e.activatedTools = tools
+}
+
 // Reset clears conversation history and usage.
 func (e *Engine) Reset() {
 	e.history = nil
