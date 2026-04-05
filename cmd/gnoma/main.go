@@ -10,6 +10,7 @@ import (
 	mrand "math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ import (
 )
 
 func main() {
+	var resumeFlag string
 	var (
 		providerName = flag.String("provider", "mistral", "LLM provider")
 		model        = flag.String("model", "", "model name (empty = provider default)")
@@ -53,6 +55,8 @@ func main() {
 		verbose      = flag.Bool("verbose", false, "enable debug logging")
 		version      = flag.Bool("version", false, "print version and exit")
 	)
+	flag.StringVar(&resumeFlag, "resume", "", "resume session by ID (omit ID to list sessions)")
+	flag.StringVar(&resumeFlag, "r", "", "resume session (shorthand)")
 	flag.Parse()
 
 	if *version {
@@ -172,9 +176,38 @@ func main() {
 	// Elf manager (created now, agent tool registered after router exists)
 	// We'll register the agent tool after the router is created below
 
+	// Create session store
+	sessStore := session.NewSessionStore(gnomacfg.ProjectRoot(), cfg.Session.MaxKeep, logger)
+
 	// Create router and register the provider as a single arm
 	// (M4 foundation: one provider from CLI. Multi-provider routing comes with config.)
 	rtr := router.New(router.Config{Logger: logger})
+
+	// Restore QualityTracker data from disk (best-effort)
+	{
+		userCfgDir, _ := os.UserConfigDir()
+		qualityPath := filepath.Join(userCfgDir, "gnoma", "quality.json")
+		if data, err := os.ReadFile(qualityPath); err == nil {
+			var snap router.QualitySnapshot
+			if err := json.Unmarshal(data, &snap); err == nil {
+				rtr.QualityTracker().Restore(snap)
+				logger.Debug("quality data restored", "path", qualityPath)
+			}
+		}
+	}
+
+	// Save QualityTracker data on exit (best-effort)
+	defer func() {
+		snap := rtr.QualityTracker().Snapshot()
+		data, err := json.Marshal(snap)
+		if err != nil {
+			return
+		}
+		userCfgDir, _ := os.UserConfigDir()
+		dir := filepath.Join(userCfgDir, "gnoma")
+		os.MkdirAll(dir, 0o755)
+		os.WriteFile(filepath.Join(dir, "quality.json"), data, 0o644)
+	}()
 	armModel := *model
 	if armModel == "" {
 		armModel = prov.DefaultModel()
@@ -375,6 +408,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resume logic: --resume/-r flag
+	resumeRequested := isFlagSet("resume") || isFlagSet("r")
+	if resumeRequested {
+		var snap session.Snapshot
+		var loadErr error
+		if resumeFlag != "" {
+			snap, loadErr = sessStore.Load(resumeFlag)
+		}
+		if resumeFlag == "" || loadErr != nil {
+			sessions, listErr := sessStore.List()
+			if listErr != nil || len(sessions) == 0 {
+				fmt.Fprintln(os.Stderr, "no saved sessions found")
+			} else {
+				fmt.Fprintln(os.Stderr, "Saved sessions:")
+				fmt.Fprintln(os.Stderr, "")
+				for _, m := range sessions {
+					fmt.Fprintf(os.Stderr, "  %s  %s/%s  %d turns  %s\n",
+						m.ID, m.Provider, m.Model, m.TurnCount,
+						m.UpdatedAt.Format("2006-01-02 15:04"),
+					)
+				}
+				if loadErr != nil {
+					fmt.Fprintf(os.Stderr, "\nsession %q not found\n", resumeFlag)
+				}
+			}
+			os.Exit(0)
+		}
+		// Valid session found — restore engine state
+		eng.SetHistory(snap.Messages)
+		eng.SetUsage(snap.Metadata.Usage)
+		sessionID = snap.ID
+		logger.Info("session resumed", "id", snap.ID, "turns", snap.Metadata.TurnCount)
+	}
+
 	// Detect mode: TUI (interactive TTY) or pipe mode
 	input, err := readInput(flag.Args())
 	if err != nil {
@@ -433,21 +500,26 @@ func main() {
 			armModel = prov.DefaultModel()
 		}
 		sess := session.NewLocal(session.LocalConfig{
-			Engine:   eng,
-			Provider: *providerName,
-			Model:    armModel,
+			Engine:    eng,
+			Provider:  *providerName,
+			Model:     armModel,
+			SessionID: sessionID,
+			Store:     sessStore,
+			Incognito: fw.Incognito(),
+			Logger:    logger,
 		})
 		defer sess.Close()
 
 		m := tui.New(sess, tui.Config{
-			Firewall:    fw,
-			Engine:      eng,
-			Permissions: permChecker,
-			Router:      rtr,
-			ElfManager:  elfMgr,
-			PermCh:      permCh,
-			PermReqCh:   permReqCh,
-			ElfProgress: elfProgressCh,
+			Firewall:     fw,
+			Engine:       eng,
+			Permissions:  permChecker,
+			Router:       rtr,
+			ElfManager:   elfMgr,
+			PermCh:       permCh,
+			PermReqCh:    permReqCh,
+			ElfProgress:  elfProgressCh,
+			SessionStore: sessStore,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
