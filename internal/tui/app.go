@@ -50,14 +50,15 @@ type chatMessage struct {
 
 // Config holds optional dependencies for TUI features.
 type Config struct {
-	Firewall    *security.Firewall    // for incognito toggle
-	Engine      *engine.Engine        // for model switching
-	Permissions *permission.Checker   // for mode switching
-	Router      *router.Router        // for model listing
-	ElfManager  *elf.Manager          // for CancelAll on escape/quit
-	PermCh      chan bool             // TUI → engine: y/n response
-	PermReqCh   <-chan PermReqMsg    // engine → TUI: tool requesting approval
-	ElfProgress <-chan elf.Progress   // elf → TUI: structured progress updates
+	Firewall     *security.Firewall    // for incognito toggle
+	Engine       *engine.Engine        // for model switching
+	Permissions  *permission.Checker   // for mode switching
+	Router       *router.Router        // for model listing
+	ElfManager   *elf.Manager          // for CancelAll on escape/quit
+	PermCh       chan bool             // TUI → engine: y/n response
+	PermReqCh    <-chan PermReqMsg    // engine → TUI: tool requesting approval
+	ElfProgress  <-chan elf.Progress   // elf → TUI: structured progress updates
+	SessionStore *session.SessionStore // nil = no persistence
 }
 
 type Model struct {
@@ -728,9 +729,60 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		return m, m.listenForEvents()
 
+	case "/resume":
+		if m.config.SessionStore == nil {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "session persistence is not configured"})
+			return m, nil
+		}
+		sessions, err := m.config.SessionStore.List()
+		if err != nil {
+			m.messages = append(m.messages, chatMessage{role: "error", content: "failed to list sessions: " + err.Error()})
+			return m, nil
+		}
+		if args != "" {
+			snap, loadErr := m.config.SessionStore.Load(args)
+			if loadErr == nil {
+				if m.config.Engine != nil {
+					m.config.Engine.SetHistory(snap.Messages)
+					m.config.Engine.SetUsage(snap.Metadata.Usage)
+				}
+				// Rebuild display history from restored messages (text only)
+				m.messages = nil
+				for _, msg := range snap.Messages {
+					if t := msg.TextContent(); t != "" {
+						m.messages = append(m.messages, chatMessage{
+							role:    string(msg.Role),
+							content: t,
+						})
+					}
+				}
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: fmt.Sprintf("Session %s resumed (%d turns, %s/%s)",
+						snap.ID, snap.Metadata.TurnCount, snap.Metadata.Provider, snap.Metadata.Model)})
+				return m, nil
+			}
+			// Session not found — fall through to show list with error note
+			m.messages = append(m.messages, chatMessage{role: "system",
+				content: fmt.Sprintf("session %q not found — available sessions:", args)})
+		}
+		if len(sessions) == 0 {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "no saved sessions"})
+			return m, nil
+		}
+		var b strings.Builder
+		b.WriteString("Saved sessions:\n\n")
+		for _, s := range sessions {
+			fmt.Fprintf(&b, "  %s  %s/%s  %d turns  %s\n",
+				s.ID, s.Provider, s.Model, s.TurnCount,
+				s.UpdatedAt.Format("2006-01-02 15:04"))
+		}
+		b.WriteString("\nUse /resume <id> to restore a session.")
+		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
+		return m, nil
+
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma"})
+			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /resume [id]        list or restore saved sessions\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma"})
 		return m, nil
 
 	default:

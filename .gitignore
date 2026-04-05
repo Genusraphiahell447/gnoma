@@ -30,6 +30,9 @@ Thumbs.db
 # Project config with secrets
 .gnoma/config.toml
 
+# Session data
+.gnoma/sessions/
+
 # Debug
 __debug_bin*
 .env
