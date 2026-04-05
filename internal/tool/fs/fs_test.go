@@ -310,6 +310,62 @@ func TestGlobTool_NoMatches(t *testing.T) {
 	}
 }
 
+func TestGlobTool_Doublestar(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "internal", "foo"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "cmd", "bar"), 0o755)
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte(""), 0o644)
+	os.WriteFile(filepath.Join(dir, "internal", "foo", "foo.go"), []byte(""), 0o644)
+	os.WriteFile(filepath.Join(dir, "cmd", "bar", "bar.go"), []byte(""), 0o644)
+	os.WriteFile(filepath.Join(dir, "cmd", "bar", "bar_test.go"), []byte(""), 0o644)
+
+	g := NewGlobTool()
+
+	tests := []struct {
+		pattern string
+		want    int
+	}{
+		{"**/*.go", 4},
+		{"**/*_test.go", 1},
+		{"internal/**/*.go", 1},
+		{"cmd/**/*.go", 2},
+		{"*.go", 1}, // only root-level, no ** — existing behaviour unchanged
+	}
+	for _, tc := range tests {
+		result, err := g.Execute(context.Background(), mustJSON(t, globArgs{Pattern: tc.pattern, Path: dir}))
+		if err != nil {
+			t.Fatalf("pattern %q: Execute: %v", tc.pattern, err)
+		}
+		if result.Metadata["count"] != tc.want {
+			t.Errorf("pattern %q: count = %v, want %d\noutput:\n%s", tc.pattern, result.Metadata["count"], tc.want, result.Output)
+		}
+	}
+}
+
+func TestMatchGlob_DoublestarEdgeCases(t *testing.T) {
+	tests := []struct {
+		pattern string
+		name    string
+		want    bool
+	}{
+		{"**/*.go", "main.go", true},
+		{"**/*.go", "internal/foo/foo.go", true},
+		{"**/*.go", "a/b/c/d.go", true},
+		{"**/*.go", "main.ts", false},
+		{"internal/**/*.go", "internal/foo/bar.go", true},
+		{"internal/**/*.go", "cmd/foo/bar.go", false},
+		{"**", "anything/goes", true},
+		{"*.go", "main.go", true},
+		{"*.go", "sub/main.go", false}, // no ** — single level only
+	}
+	for _, tc := range tests {
+		got := matchGlob(tc.pattern, tc.name)
+		if got != tc.want {
+			t.Errorf("matchGlob(%q, %q) = %v, want %v", tc.pattern, tc.name, got, tc.want)
+		}
+	}
+}
+
 // --- Grep ---
 
 func TestGrepTool_Interface(t *testing.T) {

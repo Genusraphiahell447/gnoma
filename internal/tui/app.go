@@ -6,10 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	xansi "github.com/charmbracelet/x/ansi"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textarea"
@@ -21,6 +24,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
+	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
@@ -37,6 +41,7 @@ type PermReqMsg struct {
 	Args     json.RawMessage
 }
 type elfProgressMsg struct{ progress elf.Progress }
+type clearQuitHintMsg struct{}
 
 type chatMessage struct {
 	role    string
@@ -48,7 +53,8 @@ type Config struct {
 	Firewall    *security.Firewall    // for incognito toggle
 	Engine      *engine.Engine        // for model switching
 	Permissions *permission.Checker   // for mode switching
-	Router      *router.Router       // for model listing
+	Router      *router.Router        // for model listing
+	ElfManager  *elf.Manager          // for CancelAll on escape/quit
 	PermCh      chan bool             // TUI → engine: y/n response
 	PermReqCh   <-chan PermReqMsg    // engine → TUI: tool requesting approval
 	ElfProgress <-chan elf.Progress   // elf → TUI: structured progress updates
@@ -60,10 +66,11 @@ type Model struct {
 	width   int
 	height  int
 
-	messages    []chatMessage
-	streaming   bool
-	streamBuf   *strings.Builder
-	currentRole string
+	messages     []chatMessage
+	streaming    bool
+	streamBuf    *strings.Builder // regular text content (assistant role)
+	thinkingBuf  *strings.Builder // reasoning/thinking content (frozen once text starts)
+	currentRole  string
 
 	input          textarea.Model
 	mdRenderer     *glamour.TermRenderer
@@ -75,16 +82,26 @@ type Model struct {
 	gitBranch      string
 	scrollOffset   int
 	incognito      bool
+	copyMode       bool            // ctrl+] toggles mouse passthrough for terminal text selection
+	lastCtrlC      time.Time       // tracks first ctrl+c for double-press detection
+	quitHint       bool            // show "ctrl+c to quit" indicator in status bar
 	permPending    bool            // waiting for user to approve/deny a tool
 	permToolName   string          // which tool is asking
 	permArgs       json.RawMessage // tool args for display
+	initPending       bool   // true while /init turn is in-flight; triggers AGENTS.md reload on turnDone
+	initHadToolCalls  bool   // set when any tool call fires during an init turn
+	initRetried       bool   // set after first retry (no-tool-call case) so we don't retry indefinitely
+	initWriteNudged   bool   // set after write nudge (spawn_elfs-ran-but-no-fs_write case)
+	streamFilterClose  string // non-empty while suppressing a model pseudo-block; value is expected close tag
+	runningTools   []string        // transient: tool names currently executing (rendered ephemerally, not in chat history)
 }
 
 func New(sess session.Session, cfg Config) Model {
 	ti := textarea.New()
 	ti.Placeholder = "Type a message... (Enter to send, Shift+Enter for newline)"
 	ti.ShowLineNumbers = false
-	ti.SetHeight(1)
+	ti.DynamicHeight = true
+	ti.MinHeight = 2
 	ti.MaxHeight = 10
 	ti.SetWidth(80)
 	ti.CharLimit = 0
@@ -107,21 +124,22 @@ func New(sess session.Session, cfg Config) Model {
 	cwd, _ := os.Getwd()
 	gitBranch := detectGitBranch()
 
-	// Markdown renderer for chat output
+	// Markdown renderer for chat output (74 = 80 - 6 for "◆ "/"  " prefix)
 	mdRenderer, _ := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(80),
+		glamour.WithWordWrap(74),
 	)
 
 	return Model{
-		session:    sess,
-		config:     cfg,
-		input:      ti,
-		mdRenderer: mdRenderer,
-		elfStates:  make(map[string]*elf.Progress),
-		cwd:        cwd,
-		gitBranch:  gitBranch,
-		streamBuf:  &strings.Builder{},
+		session:     sess,
+		config:      cfg,
+		input:       ti,
+		mdRenderer:  mdRenderer,
+		elfStates:   make(map[string]*elf.Progress),
+		cwd:         cwd,
+		gitBranch:   gitBranch,
+		streamBuf:   &strings.Builder{},
+		thinkingBuf: &strings.Builder{},
 	}
 }
 
@@ -137,15 +155,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(m.width - 4)
-		// Recreate markdown renderer with new width
+		// Recreate markdown renderer with new width (account for "◆ "/"  " prefix)
 		m.mdRenderer, _ = glamour.NewTermRenderer(
 			glamour.WithStandardStyle("dark"),
-			glamour.WithWordWrap(m.width-4),
+			glamour.WithWordWrap(m.width-6),
 		)
 		return m, nil
 
 	case tea.KeyMsg:
-		// Handle permission prompt Y/N
+		// --- Global keys: work in ALL states ---
+
+		// Escape = global stop, never quits
+		if msg.String() == "escape" {
+			if m.permPending {
+				m.permPending = false
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: fmt.Sprintf("✗ %s denied (cancelled)", m.permToolName)})
+				m.config.PermCh <- false
+			}
+			if m.streaming {
+				m.session.Cancel()
+				if m.config.ElfManager != nil {
+					m.config.ElfManager.CancelAll()
+				}
+				m.streaming = false
+				m.messages = append(m.messages, chatMessage{role: "system",
+					content: "⏹ stopped"})
+			}
+			m.scrollOffset = 0
+			return m, nil
+		}
+
+		// Ctrl+C = clear input (single) or quit (double within 1s)
+		if msg.String() == "ctrl+c" {
+			now := time.Now()
+			if m.quitHint && now.Sub(m.lastCtrlC) < time.Second {
+				// Second press within window → clean shutdown
+				if m.permPending {
+					m.permPending = false
+					m.config.PermCh <- false
+				}
+				if m.streaming {
+					m.session.Cancel()
+				}
+				if m.config.ElfManager != nil {
+					m.config.ElfManager.CancelAll()
+				}
+				return m, tea.Quit
+			}
+			// First press → clear input, show hint, start expiry timer
+			m.input.SetValue("")
+			m.lastCtrlC = now
+			m.quitHint = true
+			return m, tea.Tick(time.Second, func(time.Time) tea.Msg {
+				return clearQuitHintMsg{}
+			})
+		}
+
+		// --- Permission prompt Y/N (only when prompting) ---
 		if m.permPending {
 			switch strings.ToLower(msg.String()) {
 			case "y":
@@ -154,7 +221,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					content: fmt.Sprintf("✓ %s approved", m.permToolName)})
 				m.config.PermCh <- true
 				return m, m.listenForEvents() // continue listening
-			case "n", "escape":
+			case "n":
 				m.permPending = false
 				m.messages = append(m.messages, chatMessage{role: "system",
 					content: fmt.Sprintf("✗ %s denied", m.permToolName)})
@@ -165,17 +232,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "ctrl+c":
-			if m.streaming {
-				m.session.Cancel()
-				return m, nil
-			}
-			return m, tea.Quit
-		case "escape":
-			if m.streaming {
-				m.session.Cancel()
-				return m, nil
-			}
 		case "ctrl+x":
 			// Toggle incognito
 			if m.config.Firewall != nil {
@@ -223,6 +279,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+o":
 			m.expandOutput = !m.expandOutput
 			return m, nil
+		case "ctrl+]":
+			m.copyMode = !m.copyMode
+			return m, nil
 		case "pgup", "shift+up":
 			m.scrollOffset += 5
 			return m, nil
@@ -255,6 +314,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case clearQuitHintMsg:
+		m.quitHint = false
+		return m, nil
+
 	case elfProgressMsg:
 		p := msg.progress
 		// Keep completed elfs in tree — only cleared on turnDoneMsg
@@ -268,8 +331,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.permPending = true
 		m.permToolName = msg.ToolName
 		m.permArgs = msg.Args
-		m.messages = append(m.messages, chatMessage{role: "system",
-			content: formatPermissionPrompt(msg.ToolName, msg.Args)})
 		m.scrollOffset = 0
 		return m, nil
 
@@ -281,16 +342,120 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scrollOffset = 0
 		m.elfStates = make(map[string]*elf.Progress) // clear elf states
 		m.elfOrder = nil
+		m.runningTools = nil
+
+		// If /init completed with any content but no tool calls, the model described or
+		// planned but didn't call spawn_elfs. Retry once with a fresh context and a
+		// short direct prompt that's easier for local models to act on.
+		if m.initPending && !m.initRetried && !m.initHadToolCalls && msg.err == nil &&
+			(m.thinkingBuf.Len() > 0 || m.streamBuf.Len() > 0) {
+			m.initRetried = true
+			m.streaming = true
+			if m.thinkingBuf.Len() > 0 {
+				m.messages = append(m.messages, chatMessage{role: "thinking", content: m.thinkingBuf.String()})
+				m.thinkingBuf.Reset()
+			}
+			if m.streamBuf.Len() > 0 {
+				m.messages = append(m.messages, chatMessage{role: m.currentRole, content: m.streamBuf.String()})
+				m.streamBuf.Reset()
+			}
+			// Reset engine context so the retry starts fresh — the long initPrompt +
+			// thinking response overwhelms local models before they can emit a tool call.
+			if m.config.Engine != nil {
+				m.config.Engine.Reset()
+			}
+			nudge := "Call spawn_elfs now. Spawn 3 elfs in parallel: (1) explore project structure, read go.mod/Makefile/existing AI config files; (2) find non-standard Go conventions and idioms; (3) check README/docs for env vars and setup requirements. Then write AGENTS.md using fs.write."
+			if err := m.session.Send(nudge); err != nil {
+				m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+				m.streaming = false
+				m.initPending = false
+			}
+			return m, m.listenForEvents()
+		}
+
+		// If /init ran spawn_elfs (tool calls happened) but the model then narrated
+		// instead of calling fs_write, nudge it to write the file. Keep the elf research
+		// in context — that's the whole point. No engine reset here.
+		if m.initPending && !m.initWriteNudged && m.initHadToolCalls && msg.err == nil {
+			agentsMD := filepath.Join(m.cwd, "AGENTS.md")
+			if _, statErr := os.Stat(agentsMD); os.IsNotExist(statErr) {
+				m.initWriteNudged = true
+				m.streaming = true
+				if m.thinkingBuf.Len() > 0 {
+					m.messages = append(m.messages, chatMessage{role: "thinking", content: m.thinkingBuf.String()})
+					m.thinkingBuf.Reset()
+				}
+				if m.streamBuf.Len() > 0 {
+					m.messages = append(m.messages, chatMessage{role: m.currentRole, content: m.streamBuf.String()})
+					m.streamBuf.Reset()
+				}
+				// Ask the model to output the document as plain text. Local models
+				// reliably generate text; they unreliably call tools. The fallback
+				// below will write whatever the model outputs to disk.
+				writeNudge := "Output the complete AGENTS.md document now as markdown text. Include: project overview, module path, build commands (make build/test/lint/cover), all dependencies, and coding conventions from the elf research. Do not call any tools — output the markdown document directly, starting with a # heading."
+				if err := m.session.Send(writeNudge); err != nil {
+					m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+					m.streaming = false
+					m.initPending = false
+				}
+				return m, m.listenForEvents()
+			}
+		}
+
+		// Fallback: the write nudge asked the model to output AGENTS.md as plain
+		// text; write whatever it generated directly to disk. streamBuf holds the
+		// model's text response from this (the nudge) turn — it hasn't been flushed
+		// yet. Use it if substantial; otherwise fall back to the longest assistant
+		// message in history (for models that did generate the report earlier).
+		if m.initPending && m.initWriteNudged && m.initHadToolCalls && msg.err == nil {
+			agentsMD := filepath.Join(m.cwd, "AGENTS.md")
+			if _, statErr := os.Stat(agentsMD); os.IsNotExist(statErr) {
+				content := extractMarkdownDoc(sanitizeAssistantText(m.streamBuf.String()))
+				if len(content) < 300 {
+					// streamBuf is thin — model may have put content in an earlier turn
+					for _, histMsg := range m.messages {
+						clean := extractMarkdownDoc(sanitizeAssistantText(histMsg.content))
+						if histMsg.role == "assistant" && len(clean) > len(content) {
+							content = clean
+						}
+					}
+				}
+				if looksLikeAgentsMD(content) {
+					if err := os.WriteFile(agentsMD, []byte(content), 0644); err == nil {
+						m.messages = append(m.messages, chatMessage{
+							role:    "system",
+							content: fmt.Sprintf("• AGENTS.md written to %s (extracted from model output)", agentsMD),
+						})
+					}
+				}
+			}
+		}
+
+		// Flush any remaining thinking then text content
+		hadOutput := false
+		if m.thinkingBuf.Len() > 0 {
+			m.messages = append(m.messages, chatMessage{role: "thinking", content: m.thinkingBuf.String()})
+			m.thinkingBuf.Reset()
+			hadOutput = true
+		}
 		if m.streamBuf.Len() > 0 {
-			m.messages = append(m.messages, chatMessage{
-				role: m.currentRole, content: m.streamBuf.String(),
-			})
+			m.messages = append(m.messages, chatMessage{role: m.currentRole, content: m.streamBuf.String()})
 			m.streamBuf.Reset()
+			hadOutput = true
+		}
+		if !hadOutput && msg.err == nil && !m.initHadToolCalls {
+			// Turn completed with no output at all — model likely doesn't support tools.
+			m.messages = append(m.messages, chatMessage{
+				role:    "error",
+				content: "No output. The model may not support function calling or produced only thinking content. Try a more capable model.",
+			})
 		}
 		if msg.err != nil {
-			m.messages = append(m.messages, chatMessage{
-				role: "error", content: msg.err.Error(),
-			})
+			m.messages = append(m.messages, chatMessage{role: "error", content: msg.err.Error()})
+		}
+		if m.initPending {
+			m.initPending = false
+			m = m.loadAgentsMD()
 		}
 		return m, nil
 	}
@@ -310,6 +475,8 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 	m.streaming = true
 	m.currentRole = "assistant"
 	m.streamBuf.Reset()
+	m.thinkingBuf.Reset()
+	m.streamFilterClose = ""
 
 	if err := m.session.Send(input); err != nil {
 		m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
@@ -331,7 +498,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit", "/q":
 		return m, tea.Quit
 
-	case "/clear":
+	case "/clear", "/new":
 		m.messages = nil
 		m.scrollOffset = 0
 		if m.config.Engine != nil {
@@ -342,14 +509,13 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/compact":
 		if m.config.Engine != nil {
 			if w := m.config.Engine.ContextWindow(); w != nil {
-				compacted, err := w.CompactIfNeeded()
+				compacted, err := w.ForceCompact()
 				if err != nil {
 					m.messages = append(m.messages, chatMessage{role: "error", content: "compaction failed: " + err.Error()})
 				} else if compacted {
 					m.messages = append(m.messages, chatMessage{role: "system", content: "context compacted — older messages summarized"})
 				} else {
-					// Force compaction even if not at threshold
-					m.messages = append(m.messages, chatMessage{role: "system", content: "context usage within budget, no compaction needed"})
+					m.messages = append(m.messages, chatMessage{role: "system", content: "no compaction strategy configured"})
 				}
 			}
 		}
@@ -425,7 +591,17 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 				})
 				if n <= len(arms) {
 					modelName = arms[n-1].ModelName
+				} else {
+					m.messages = append(m.messages, chatMessage{role: "error",
+						content: fmt.Sprintf("no model at index %d — use /model to list available models", n)})
+					return m, nil
 				}
+			}
+			// Validate name-based selection against known arms
+			if m.config.Router != nil && !isKnownModel(m.config.Router.Arms(), modelName) {
+				m.messages = append(m.messages, chatMessage{role: "error",
+					content: fmt.Sprintf("unknown model: %q — use /model to list available models", modelName)})
+				return m, nil
 			}
 			m.config.Engine.SetModel(modelName)
 			if ls, ok := m.session.(*session.Local); ok {
@@ -516,9 +692,45 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			content: fmt.Sprintf("provider switching requires restart: gnoma --provider %s", args)})
 		return m, nil
 
+	case "/init":
+		root := gnomacfg.ProjectRoot()
+		agentsPath := filepath.Join(root, "AGENTS.md")
+		var existingPath string
+		if _, err := os.Stat(agentsPath); err == nil {
+			existingPath = agentsPath
+		}
+
+		prompt := initPrompt(root, existingPath)
+
+		m.messages = append(m.messages, chatMessage{role: "user", content: "/init"})
+		m.streaming = true
+		m.currentRole = "assistant"
+		m.streamBuf.Reset()
+		m.thinkingBuf.Reset()
+		m.streamFilterClose = ""
+		m.initPending = true
+		m.initHadToolCalls = false
+		m.initRetried = false
+		m.initWriteNudged = false
+
+		// Local models (Ollama, llama.cpp) often narrate tool calls as text instead of
+		// invoking them. Force tool_choice: required so the API response includes actual
+		// function call JSON rather than a prose description.
+		opts := engine.TurnOptions{}
+		if status := m.session.Status(); isLocalProvider(status.Provider) {
+			opts.ToolChoice = provider.ToolChoiceRequired
+		}
+		if err := m.session.SendWithOptions(prompt, opts); err != nil {
+			m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+			m.streaming = false
+			m.initPending = false
+			return m, nil
+		}
+		return m, m.listenForEvents()
+
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /clear              clear chat\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma"})
+			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma"})
 		return m, nil
 
 	default:
@@ -532,29 +744,50 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 	switch evt.Type {
 	case stream.EventTextDelta:
 		if evt.Text != "" {
-			m.streamBuf.WriteString(evt.Text)
+			text := filterModelCodeBlocks(&m.streamFilterClose, evt.Text)
+			if text != "" {
+				m.streamBuf.WriteString(text)
+			}
 		}
 	case stream.EventThinkingDelta:
-		m.streamBuf.WriteString(evt.Text)
+		// Accumulate reasoning in a separate buffer so it stays frozen/dim
+		// while regular text content streams normally below it.
+		if m.streamBuf.Len() == 0 {
+			m.thinkingBuf.WriteString(evt.Text)
+		} else {
+			// Text has already started; treat additional thinking as text.
+			m.streamBuf.WriteString(evt.Text)
+		}
 	case stream.EventToolCallStart:
+		// Flush both buffers before tool call label
+		if m.thinkingBuf.Len() > 0 {
+			m.messages = append(m.messages, chatMessage{role: "thinking", content: m.thinkingBuf.String()})
+			m.thinkingBuf.Reset()
+		}
 		if m.streamBuf.Len() > 0 {
 			m.messages = append(m.messages, chatMessage{role: m.currentRole, content: m.streamBuf.String()})
 			m.streamBuf.Reset()
+		}
+		if m.initPending {
+			m.initHadToolCalls = true
 		}
 	case stream.EventToolCallDone:
 		if evt.ToolCallName == "agent" || evt.ToolCallName == "spawn_elfs" {
 			// Suppress tool message — elf tree view handles display
 			m.elfToolActive = true
 		} else {
-			m.messages = append(m.messages, chatMessage{
-				role: "tool", content: fmt.Sprintf("⚙ [%s] running...", evt.ToolCallName),
-			})
+			// Track running tools transiently — not in permanent chat history
+			m.runningTools = append(m.runningTools, evt.ToolCallName)
 		}
 	case stream.EventToolResult:
 		if m.elfToolActive {
 			// Suppress raw elf output — tree shows progress, LLM summarizes
 			m.elfToolActive = false
 		} else {
+			// Pop first running tool (FIFO — results arrive in call order)
+			if len(m.runningTools) > 0 {
+				m.runningTools = m.runningTools[1:]
+			}
 			m.messages = append(m.messages, chatMessage{
 				role: "toolresult", content: evt.ToolOutput,
 			})
@@ -609,16 +842,6 @@ func (m Model) View() tea.View {
 		return tea.NewView("")
 	}
 
-	// Auto-size textarea to fit all content + 1 for cursor room
-	contentLines := strings.Count(m.input.Value(), "\n") + 2 // +1 for last line, +1 for cursor
-	if contentLines < 2 {
-		contentLines = 2
-	}
-	if contentLines > 12 {
-		contentLines = 12
-	}
-	m.input.SetHeight(contentLines)
-
 	status := m.renderStatus()
 	input := m.renderInput()
 	topLine, bottomLine := m.renderSeparators()
@@ -637,7 +860,11 @@ func (m Model) View() tea.View {
 		bottomLine,
 		status,
 	))
-	v.MouseMode = tea.MouseModeCellMotion
+	if m.copyMode {
+		v.MouseMode = tea.MouseModeNone
+	} else {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	v.AltScreen = true
 	return v
 }
@@ -680,43 +907,72 @@ func (m Model) renderChat(height int) string {
 		lines = append(lines, m.renderElfTree()...)
 	}
 
-	// Streaming
-	if m.streaming && m.streamBuf.Len() > 0 {
-		// Stream raw text — markdown rendered only after completion
-		raw := m.streamBuf.String()
-		rLines := strings.Split(raw, "\n")
-		for i, line := range rLines {
-			if i == 0 {
-				lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
-			} else {
-				lines = append(lines, "  "+line)
+	// Transient: running tools (disappear when tool completes)
+	for _, name := range m.runningTools {
+		lines = append(lines, "  "+sToolOutput.Render(fmt.Sprintf("⚙ [%s] running...", name)))
+	}
+
+	// Transient: permission prompt (disappear when approved/denied)
+	if m.permPending {
+		lines = append(lines, "")
+		lines = append(lines, sSystem.Render("• "+formatPermissionPrompt(m.permToolName, m.permArgs)))
+		lines = append(lines, "")
+	}
+
+	// Streaming: show frozen thinking above live text content
+	if m.streaming {
+		maxWidth := m.width - 2
+		if m.thinkingBuf.Len() > 0 {
+			// Thinking is frozen once text starts; show dim with hollow diamond.
+			// Cap at 3 lines while streaming (ctrl+o expands).
+			const liveThinkMax = 3
+			thinkLines := strings.Split(wrapText(m.thinkingBuf.String(), maxWidth), "\n")
+			showN := len(thinkLines)
+			if !m.expandOutput && showN > liveThinkMax {
+				showN = liveThinkMax
+			}
+			for i, line := range thinkLines[:showN] {
+				if i == 0 {
+					lines = append(lines, sThinkingLabel.Render("◇ ")+sThinkingBody.Render(line))
+				} else {
+					lines = append(lines, sThinkingBody.Render("  "+line))
+				}
+			}
+			if !m.expandOutput && len(thinkLines) > liveThinkMax {
+				lines = append(lines, sHint.Render(fmt.Sprintf("  +%d lines (ctrl+o to expand)", len(thinkLines)-liveThinkMax)))
 			}
 		}
-	} else if m.streaming {
-		lines = append(lines, styleAssistantLabel.Render("◆ ")+sCursor.Render("█"))
+		if m.streamBuf.Len() > 0 {
+			// Regular text content — strip model artifacts before display
+			liveText := sanitizeAssistantText(m.streamBuf.String())
+			for i, line := range strings.Split(wrapText(liveText, maxWidth), "\n") {
+				if i == 0 {
+					lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
+				} else {
+					lines = append(lines, "  "+line)
+				}
+			}
+		} else if m.thinkingBuf.Len() == 0 {
+			lines = append(lines, styleAssistantLabel.Render("◆ ")+sCursor.Render("█"))
+		}
 	}
 
 	// Join all logical lines then split by newlines
 	raw := strings.Join(lines, "\n")
 	rawLines := strings.Split(raw, "\n")
 
-	// Hard-wrap each line to terminal width to get accurate physical line count
+	// Hard-wrap any remaining overlong lines to get accurate physical line count
+	// for the scroll logic. Content should already be word-wrapped by renderMessage,
+	// but ANSI escape overhead can push a styled line past m.width.
 	var physLines []string
 	for _, line := range rawLines {
-		// Strip ANSI to measure visible width, but keep original for rendering
-		visible := lipgloss.Width(line)
-		if visible <= m.width {
+		if lipgloss.Width(line) <= m.width {
 			physLines = append(physLines, line)
 		} else {
-			// Line wraps — split into chunks of terminal width
-			// Use simple rune-based splitting (ANSI-aware wrapping is complex,
-			// so we just let it wrap naturally and count approximate lines)
-			wrappedCount := (visible + m.width - 1) / m.width
-			physLines = append(physLines, line) // the line itself
-			// Account for the extra wrapped lines
-			for i := 1; i < wrappedCount; i++ {
-				physLines = append(physLines, "") // placeholder for wrapped overflow
-			}
+			// Actually split the line using ANSI-aware hard wrap so the scroll
+			// offset math and the rendered content agree.
+			split := strings.Split(xansi.Hardwrap(line, m.width, false), "\n")
+			physLines = append(physLines, split...)
 		}
 	}
 
@@ -757,8 +1013,9 @@ func (m Model) renderMessage(msg chatMessage) []string {
 
 	switch msg.role {
 	case "user":
-		// ❯ first line, indented continuation
-		msgLines := strings.Split(msg.content, "\n")
+		// ❯ first line, indented continuation — word-wrapped to terminal width
+		maxWidth := m.width - 2 // 2 for the "❯ " / "  " prefix
+		msgLines := strings.Split(wrapText(msg.content, maxWidth), "\n")
 		for i, line := range msgLines {
 			if i == 0 {
 				lines = append(lines, sUserLabel.Render("❯ ")+sUserLabel.Render(line))
@@ -768,11 +1025,35 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		}
 		lines = append(lines, "")
 
+	case "thinking":
+		// Thinking/reasoning content — dim italic with hollow diamond label.
+		// Collapsed to 3 lines by default; ctrl+o expands.
+		const thinkingMaxLines = 3
+		maxWidth := m.width - 2
+		msgLines := strings.Split(wrapText(msg.content, maxWidth), "\n")
+		showLines := len(msgLines)
+		if !m.expandOutput && showLines > thinkingMaxLines {
+			showLines = thinkingMaxLines
+		}
+		for i, line := range msgLines[:showLines] {
+			if i == 0 {
+				lines = append(lines, sThinkingLabel.Render("◇ ")+sThinkingBody.Render(line))
+			} else {
+				lines = append(lines, sThinkingBody.Render(indent+line))
+			}
+		}
+		if !m.expandOutput && len(msgLines) > thinkingMaxLines {
+			remaining := len(msgLines) - thinkingMaxLines
+			lines = append(lines, sHint.Render(indent+fmt.Sprintf("+%d lines (ctrl+o to expand)", remaining)))
+		}
+		lines = append(lines, "")
+
 	case "assistant":
-		// Render markdown with glamour
-		rendered := msg.content
+		// Render markdown with glamour; strip model-specific artifacts first.
+		clean := sanitizeAssistantText(msg.content)
+		rendered := clean
 		if m.mdRenderer != nil {
-			if md, err := m.mdRenderer.Render(msg.content); err == nil {
+			if md, err := m.mdRenderer.Render(clean); err == nil {
 				rendered = strings.TrimSpace(md)
 			}
 		}
@@ -787,7 +1068,10 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		lines = append(lines, "")
 
 	case "tool":
-		lines = append(lines, indent+sToolOutput.Render(msg.content))
+		maxW := m.width - len([]rune(indent))
+		for _, line := range strings.Split(wrapText(msg.content, maxW), "\n") {
+			lines = append(lines, indent+sToolOutput.Render(line))
+		}
 
 	case "toolresult":
 		resultLines := strings.Split(msg.content, "\n")
@@ -795,6 +1079,7 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		if m.expandOutput {
 			maxShow = len(resultLines) // show all
 		}
+		maxW := m.width - 4 // indent(2) + indent(2)
 		for i, line := range resultLines {
 			if i >= maxShow {
 				remaining := len(resultLines) - maxShow
@@ -802,20 +1087,23 @@ func (m Model) renderMessage(msg chatMessage) []string {
 					fmt.Sprintf("+%d lines (ctrl+o to expand)", remaining)))
 				break
 			}
-			// Diff coloring for edit results
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "++") && len(trimmed) > 1 {
-				lines = append(lines, indent+indent+sDiffAdd.Render(line))
-			} else if strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "--") && len(trimmed) > 1 {
-				lines = append(lines, indent+indent+sDiffRemove.Render(line))
-			} else {
-				lines = append(lines, indent+indent+sToolResult.Render(line))
+			// Wrap this logical line into sub-lines, then diff-color each sub-line
+			for _, subLine := range strings.Split(wrapText(line, maxW), "\n") {
+				trimmed := strings.TrimSpace(subLine)
+				if strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "++") && len(trimmed) > 1 {
+					lines = append(lines, indent+indent+sDiffAdd.Render(subLine))
+				} else if strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "--") && len(trimmed) > 1 {
+					lines = append(lines, indent+indent+sDiffRemove.Render(subLine))
+				} else {
+					lines = append(lines, indent+indent+sToolResult.Render(subLine))
+				}
 			}
 		}
 		lines = append(lines, "")
 
 	case "system":
-		for i, line := range strings.Split(msg.content, "\n") {
+		maxW := m.width - 4 // "• "(2) + indent(2)
+		for i, line := range strings.Split(wrapText(msg.content, maxW), "\n") {
 			if i == 0 {
 				lines = append(lines, sSystem.Render("• "+line))
 			} else {
@@ -825,7 +1113,10 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		lines = append(lines, "")
 
 	case "error":
-		lines = append(lines, sError.Render("✗ "+msg.content))
+		maxW := m.width - 2 // "✗ " = 2
+		for _, line := range strings.Split(wrapText(msg.content, maxW), "\n") {
+			lines = append(lines, sError.Render("✗ "+line))
+		}
 		lines = append(lines, "")
 	}
 
@@ -889,9 +1180,21 @@ func (m Model) renderElfTree() []string {
 			stats = append(stats, formatTokens(p.Tokens))
 		}
 
-		line := sToolOutput.Render(branch+" ") + sText.Render(p.Description)
+		statsStr := ""
 		if len(stats) > 0 {
-			line += sToolResult.Render(" · "+strings.Join(stats, " · "))
+			statsStr = " · " + strings.Join(stats, " · ")
+		}
+		desc := p.Description
+		if len(statsStr) > 0 {
+			// Truncate description so the combined line fits on one terminal row
+			maxDescW := m.width - 4 - len([]rune(branch)) - len([]rune(statsStr))
+			if maxDescW > 10 && len([]rune(desc)) > maxDescW {
+				desc = string([]rune(desc)[:maxDescW-1]) + "…"
+			}
+		}
+		line := sToolOutput.Render(branch+" ") + sText.Render(desc)
+		if len(statsStr) > 0 {
+			line += sToolResult.Render(statsStr)
 		}
 		lines = append(lines, line)
 
@@ -911,7 +1214,17 @@ func (m Model) renderElfTree() []string {
 			}
 			activity = sToolResult.Render(activity)
 		}
-		lines = append(lines, sToolResult.Render(childPrefix+"└─ ")+activity)
+		// Wrap activity so long error/path strings don't overflow the terminal.
+		actPrefix := childPrefix + "└─ "
+		actMaxW := m.width - len([]rune(actPrefix))
+		actLines := strings.Split(wrapText(activity, actMaxW), "\n")
+		for j, al := range actLines {
+			if j == 0 {
+				lines = append(lines, sToolResult.Render(actPrefix)+al)
+			} else {
+				lines = append(lines, sToolResult.Render(childPrefix+"   ")+al)
+			}
+		}
 	}
 
 	lines = append(lines, "") // spacing after tree
@@ -1012,6 +1325,12 @@ func (m Model) renderStatus() string {
 	}
 	right := tokenStyle.Render(tokenStr) + sStatusDim.Render(fmt.Sprintf(" │ turns: %d ", status.TurnCount))
 
+	if m.quitHint {
+		right = lipgloss.NewStyle().Foreground(cRed).Bold(true).Render("ctrl+c to quit ") + sStatusDim.Render("│ ") + right
+	}
+	if m.copyMode {
+		right = lipgloss.NewStyle().Foreground(cYellow).Bold(true).Render("✂ COPY ") + sStatusDim.Render("│ ") + right
+	}
 	if m.streaming {
 		right = sStatusStreaming.Render("● streaming ") + sStatusDim.Render("│ ") + right
 	}
@@ -1034,34 +1353,225 @@ func (m Model) renderStatus() string {
 	return sStatusBar.Width(m.width).Render(bar)
 }
 
+// wrapText word-wraps text at word boundaries, preserving existing newlines.
+// Uses ANSI-aware wrapping so lipgloss-styled text is measured correctly.
 func wrapText(text string, width int) string {
 	if width <= 0 {
 		return text
 	}
-	var result strings.Builder
-	for i, line := range strings.Split(text, "\n") {
-		if i > 0 {
-			result.WriteByte('\n')
-		}
-		if len(line) <= width {
-			result.WriteString(line)
-			continue
-		}
-		words := strings.Fields(line)
-		lineLen := 0
-		for _, word := range words {
-			if lineLen+len(word)+1 > width && lineLen > 0 {
-				result.WriteByte('\n')
-				lineLen = 0
-			} else if lineLen > 0 {
-				result.WriteByte(' ')
-				lineLen++
-			}
-			result.WriteString(word)
-			lineLen += len(word)
+	return xansi.Wordwrap(text, width, "")
+}
+
+// isLocalProvider returns true for providers that run locally (Ollama, llama.cpp).
+// These often require tool_choice: required to emit function call JSON.
+func isLocalProvider(providerName string) bool {
+	return providerName == "ollama" || providerName == "llamacpp"
+}
+
+// reModelCodeBlock matches <<tool_code>>…<</tool_code>> blocks that some models
+// (e.g. Gemma4) emit as plain text instead of structured function calls.
+var reModelCodeBlock = regexp.MustCompile(`(?s)(<<[/]?tool_code>>.*?<<[/]tool_code>>|<<function_call>>.*?<tool_call\|>)`)
+
+// extractMarkdownDoc strips any narrative preamble before the first # heading
+// and returns the markdown portion. Returns "" if no heading is found.
+func extractMarkdownDoc(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			// Found the first heading — return everything from here
+			idx := strings.Index(s, line)
+			return strings.TrimSpace(s[idx:])
 		}
 	}
-	return result.String()
+	return ""
+}
+
+// looksLikeAgentsMD returns true if s appears to be a real markdown document
+// (not a refusal or planning response): substantial length and at least one
+// section heading.
+func looksLikeAgentsMD(s string) bool {
+	return len(s) >= 300 && strings.Contains(s, "##")
+}
+
+// sanitizeAssistantText removes model-specific artifacts (e.g. <<tool_code>> blocks)
+// before rendering or writing to disk.
+func sanitizeAssistantText(s string) string {
+	s = reModelCodeBlock.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
+}
+
+// filterModelCodeBlocks filters <<tool_code>> ... <</tool_code>> spans from a streaming
+// text delta, updating the active filter state across chunk boundaries.
+// Returns the text that should be written to the stream buffer (may be empty).
+// modelBlockPairs lists known open→close tag pairs for model pseudo-tool-call formats.
+// Checked in order; first match wins.
+var modelBlockPairs = [][2]string{
+	{"<<tool_code>>", "<</tool_code>>"},
+	{"<<tool_code>>", "<<</tool_code>>"},   // some model variants
+	{"<<function_call>>", "<tool_call|>"},  // Gemma function-call format
+}
+
+// filterModelCodeBlocks suppresses model-internal pseudo-tool-call blocks from a
+// streaming text delta. closeTag must point to the Model's streamFilterClose field;
+// it is non-empty while the filter is active and holds the expected closing tag.
+// Returns only the text that should be written to streamBuf.
+func filterModelCodeBlocks(closeTag *string, text string) string {
+	var out strings.Builder
+
+	for text != "" {
+		if *closeTag != "" {
+			// Inside a filtered block — scan for the expected close tag.
+			if idx := strings.Index(text, *closeTag); idx >= 0 {
+				text = text[idx+len(*closeTag):]
+				*closeTag = ""
+			} else {
+				return out.String() // close tag not yet arrived, discard rest
+			}
+		} else {
+			// Not filtering — scan for any known open tag.
+			earliest := -1
+			var openLen, closeLen int
+			var chosenClose string
+			for _, pair := range modelBlockPairs {
+				idx := strings.Index(text, pair[0])
+				if idx >= 0 && (earliest < 0 || idx < earliest) {
+					earliest = idx
+					openLen = len(pair[0])
+					chosenClose = pair[1]
+					closeLen = len(chosenClose)
+					_ = closeLen
+				}
+			}
+			if earliest < 0 {
+				out.WriteString(text)
+				return out.String()
+			}
+			out.WriteString(text[:earliest])
+			*closeTag = chosenClose
+			text = text[earliest+openLen:]
+		}
+	}
+
+	return out.String()
+}
+
+// initPrompt builds the prompt sent to the LLM for /init.
+// existingPath is the absolute path to an existing AGENTS.md, or "" if none exists.
+// The 3 base elfs always run. When existingPath is set, a 4th elf reads the current file.
+// The LLM is free to spawn additional elfs if it identifies gaps.
+func initPrompt(root, existingPath string) string {
+	baseElfs := fmt.Sprintf(`IMPORTANT: Use only fs.ls, fs.glob, fs.grep, and fs.read for all analysis. Do NOT use bash — it will be denied and will cause you to fail. Your first action must be spawn_elfs.
+
+Use spawn_elfs to analyze the project in parallel. Spawn at least these elfs simultaneously:
+
+- Elf 1 (task_type: "explain"): Explore project structure at %s.
+  - Run fs.ls on root and every immediate subdirectory.
+  - Read go.mod (or package.json/Cargo.toml/pyproject.toml): extract module path, Go/runtime version, and key external dependencies with exact import paths. List TUI/UI framework deps (e.g. charm.land/*, tview) separately from backend/LLM deps.
+  - Read Makefile or build scripts: note targets beyond the standard (build/test/lint/fmt/vet/clean/tidy/install). Note non-standard flags, multi-step sequences, or env vars they require.
+  - Read existing AI config files if present: CLAUDE.md, .cursor/rules, .cursorrules, .github/copilot-instructions.md, .gnoma/GNOMA.md. These will be loaded at runtime — do NOT copy their content into AGENTS.md. Only note what topics they cover so the synthesis step knows what to skip.
+  - Build a domain glossary: read the primary type-definition files in these packages (use fs.ls to find them): internal/message, internal/engine, internal/router, internal/elf, internal/provider, internal/context, internal/security, internal/session. For each exported type, struct, or interface whose name would be ambiguous or non-obvious to an outside AI, add a one-line entry: Name → what it is in this project. Specifically look for: Arm, Turn, Elf, Accumulator, Firewall, LimitPool, TaskType, Incognito, Stream, Event, Session, Router. Do not list generic config struct fields.
+  - Report: module path, runtime version, non-standard Makefile targets only (skip standard ones: build/test/lint/cover/fmt/vet/clean/tidy/install/run), full dependency list (TUI + backend separated), domain glossary.
+
+- Elf 2 (task_type: "explain"): Discover non-standard code conventions at %s.
+  - Use fs.glob **/*.go (or language equivalent) to find source files. Read at least 8 files spanning different packages — prefer non-trivial ones (engine, provider, tool implementations, tests).
+  - Use fs.grep to locate each pattern below. NEVER use internal/tui as a source for code examples — it is application glue, not where idioms live. For each match found: read the file, then paste the relevant lines with the file path as the first comment (e.g. '// internal/foo/bar.go'). If fs.grep returns no matches outside internal/tui, omit that pattern entirely. Do NOT invent or paraphrase.
+    * new(expr): fs.grep '= new(' across **/*.go, exclude internal/tui
+    * errors.AsType: fs.grep 'errors.AsType' across **/*.go
+    * WaitGroup.Go: fs.grep '\.Go(func' across **/*.go
+    * testing/synctest: fs.grep 'synctest' across **/*.go
+    * Discriminated union: fs.grep 'Content\|EventType\|ContentType' across internal/message, internal/stream — look for a struct with a Type field switched on by callers
+    * Pull-based iterator: fs.grep 'func.*Next\(\)' across **/*.go — look for Next/Current/Err/Close pattern
+    * json.RawMessage passthrough: fs.grep 'json.RawMessage' across internal/tool — find a Parameters() or Execute() signature
+    * errgroup: fs.grep 'errgroup' across **/*.go
+    * Channel semaphore: fs.grep 'chan struct{}' across **/*.go, look for concurrency-limiting usage
+  - Error handling: fs.grep 'var Err' across **/*.go — paste a real sentinel definition. fs.grep 'fmt.Errorf' across **/*.go and look for error-wrapping calls — paste a real one. File path required on each.
+  - Test conventions: fs.grep '//go:build' across **/*_test.go for build tags. fs.grep 't\.Helper()' across **/*_test.go for helper convention. fs.grep 't\.TempDir()' across **/*_test.go. Paste one real example each with file path.
+  - Report ONLY what differs from standard language knowledge. Skip obvious conventions.
+
+- Elf 3 (task_type: "explain"): Extract setup requirements and gotchas at %s.
+  - Read README.md, CONTRIBUTING.md, docs/ contents if they exist.
+  - Find required environment variables: use fs.grep to search for os.Getenv and os.LookupEnv across all .go files. List every unique variable name found and what it configures based on surrounding context. Also check .env.example if it exists.
+  - Note non-obvious setup steps (token scopes, local service dependencies, build prerequisites not in the Makefile).
+  - Note repo etiquette ONLY if not already covered by CLAUDE.md — skip commit format and co-signing if CLAUDE.md documents them.
+  - Note architectural gotchas explicitly called out in comments or docs — skip generic advice.
+  - Skip anything obvious for a project of this type.`, root, root, root)
+
+	synthRules := fmt.Sprintf(`After all elfs complete, you may spawn additional focused elfs with agent tool if specific gaps need investigation.
+
+Then synthesize and write AGENTS.md to %s/AGENTS.md using fs.write.
+
+CRITICAL RULE — DO NOT DUPLICATE LOADED FILES:
+CLAUDE.md (and other AI config files) are loaded directly into the AI's context at runtime.
+Writing their content into AGENTS.md is pure noise — it will be read twice and adds nothing.
+AGENTS.md must only contain information those files do not already cover.
+If CLAUDE.md thoroughly covers a topic (e.g. Go style, commit format, provider list), skip it.
+
+QUALITY TEST: Before writing each line — would removing this cause an AI assistant to make a mistake on this codebase? If no, cut it.
+
+INCLUDE (only if not already in CLAUDE.md or equivalent):
+- Module path and key dependencies with exact import paths (especially non-obvious or private ones)
+- Build/test commands the AI cannot guess from manifest files alone (non-standard targets, flags, sequences)
+- Language-version-specific idioms in use: e.g. Go 1.26 new(expr), errors.AsType, WaitGroup.Go; show code examples
+- Non-standard type patterns: discriminated unions, pull-based iterators, json.RawMessage passthrough — with examples
+- Domain terminology: project-specific names that differ from industry-standard meanings
+- Testing quirks: build tags, helper conventions, concurrency test tools, mock policy
+- Required env var names and what they configure (not "see .env.example" — list them)
+- Non-obvious architectural constraints or gotchas not derivable from reading the code
+
+EXCLUDE:
+- Anything already documented in CLAUDE.md or other AI config files that will be loaded at runtime
+- File-by-file directory listing (discoverable via fs.ls)
+- Standard language conventions the AI already knows
+- Generic advice ("write clean code", "handle errors", "use descriptive names")
+- Standard Makefile/build targets (build, test, lint, cover, fmt, vet, clean, tidy, install, run) — do not list them at all, not even as a summary line; only write non-standard targets
+- The "Standard Targets: ..." line itself — it adds nothing and must not appear
+- Planned features not yet in code
+- Vague statements ("see config files for details", "follow project conventions") — include the actual detail or nothing
+
+Do not fabricate. Only write what was observed in files you actually read.
+Format: terse directive-style bullets. Short code examples where the pattern is non-obvious. No prose paragraphs.`, root)
+
+	if existingPath != "" {
+		return fmt.Sprintf(`You are updating the AGENTS.md project documentation file for the project at %s.
+
+%s
+- Elf 4 (task_type: "review"): Read the existing AGENTS.md at %s.
+  - For each section: accurate (keep), stale (update), missing (add), bloat (cut — fails quality test).
+  - Specifically flag: anything duplicated from CLAUDE.md or other loaded AI config files (remove it), fabricated content (remove it), and missing language-version-specific idioms.
+  - Report a structured diff: keep / update / add / remove.
+
+%s
+
+When updating: tighten as well as correct. Remove duplication and bloat even if it was in the old version.`,
+			root, baseElfs, existingPath, synthRules)
+	}
+
+	return fmt.Sprintf(`You are creating an AGENTS.md project documentation file for the project at %s.
+
+%s
+
+%s`, root, baseElfs, synthRules)
+}
+
+// loadAgentsMD reads AGENTS.md from disk and appends it to the context window prefix.
+func (m Model) loadAgentsMD() Model {
+	root := gnomacfg.ProjectRoot()
+	path := filepath.Join(root, "AGENTS.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return m
+	}
+	if m.config.Engine != nil {
+		if w := m.config.Engine.ContextWindow(); w != nil {
+			w.AddPrefix(
+				message.NewUserText(fmt.Sprintf("[Project docs: AGENTS.md]\n\n%s", string(data))),
+				message.NewAssistantText("I've read the project documentation and will follow these guidelines."),
+			)
+		}
+	}
+	m.messages = append(m.messages, chatMessage{role: "system",
+		content: fmt.Sprintf("AGENTS.md written to %s — loaded into context for this session.", path)})
+	return m
 }
 
 // injectSystemContext adds a message to the engine's conversation history
@@ -1073,6 +1583,17 @@ func (m Model) injectSystemContext(text string) {
 		// so the conversation stays in user→assistant alternation
 		m.config.Engine.InjectMessage(message.NewAssistantText("Understood."))
 	}
+}
+
+// updateInputHeight recalculates and sets the textarea viewport height based on
+// isKnownModel returns true if modelName matches a ModelName in the provided arms slice.
+func isKnownModel(arms []*router.Arm, modelName string) bool {
+	for _, arm := range arms {
+		if arm.ModelName == modelName {
+			return true
+		}
+	}
+	return false
 }
 
 // shortPermHint returns a compact string for the separator bar (e.g., "bash: find . -name '*.go'").

@@ -45,6 +45,11 @@ type Turn struct {
 	Rounds   int               // number of API round-trips
 }
 
+// TurnOptions carries per-turn overrides that apply for a single Submit call.
+type TurnOptions struct {
+	ToolChoice provider.ToolChoiceMode // "" = use provider default
+}
+
 // Engine orchestrates the conversation.
 type Engine struct {
 	cfg     Config
@@ -59,6 +64,9 @@ type Engine struct {
 	// Deferred tool loading: tools with ShouldDefer() are excluded until
 	// the model requests them. Activated on first use.
 	activatedTools map[string]bool
+
+	// Per-turn options, set for the duration of SubmitWithOptions.
+	turnOpts TurnOptions
 }
 
 // New creates an engine.
@@ -124,6 +132,9 @@ func (e *Engine) ContextWindow() *gnomactx.Window {
 // the model should see as context in subsequent turns.
 func (e *Engine) InjectMessage(msg message.Message) {
 	e.history = append(e.history, msg)
+	if e.cfg.Context != nil {
+		e.cfg.Context.AppendMessage(msg)
+	}
 }
 
 // Usage returns cumulative token usage.
@@ -145,4 +156,8 @@ func (e *Engine) SetModel(model string) {
 func (e *Engine) Reset() {
 	e.history = nil
 	e.usage = message.Usage{}
+	if e.cfg.Context != nil {
+		e.cfg.Context.Reset()
+	}
+	e.activatedTools = make(map[string]bool)
 }

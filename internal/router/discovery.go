@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
@@ -15,10 +16,37 @@ const discoveryTimeout = 5 * time.Second
 
 // DiscoveredModel represents a model found via discovery.
 type DiscoveredModel struct {
-	ID       string
-	Name     string
-	Provider string // "ollama" or "llamacpp"
-	Size     int64  // bytes, if available
+	ID            string
+	Name          string
+	Provider      string // "ollama" or "llamacpp"
+	Size          int64  // bytes, if available
+	SupportsTools bool   // whether the model supports function/tool calling
+	ContextSize   int    // context window in tokens (0 = unknown, use default)
+}
+
+// toolSupportedModelPrefixes lists known model families that support tool/function calling.
+// This is a conservative allowlist — unknown models default to no tool support.
+var toolSupportedModelPrefixes = []string{
+	"mistral", "mixtral", "codestral",
+	"llama3", "llama-3",
+	"qwen2", "qwen-2", "qwen2.5",
+	"command-r",
+	"functionary",
+	"hermes",
+	"firefunction",
+	"nexusraven",
+	"groq-tool",
+}
+
+// inferToolSupport returns true if the model name suggests tool/function calling support.
+func inferToolSupport(modelName string) bool {
+	lower := strings.ToLower(modelName)
+	for _, prefix := range toolSupportedModelPrefixes {
+		if strings.Contains(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // DiscoverOllama polls the local Ollama instance for available models.
@@ -62,10 +90,12 @@ func DiscoverOllama(ctx context.Context, baseURL string) ([]DiscoveredModel, err
 	var models []DiscoveredModel
 	for _, m := range result.Models {
 		models = append(models, DiscoveredModel{
-			ID:       m.Name,
-			Name:     m.Name,
-			Provider: "ollama",
-			Size:     m.Size,
+			ID:            m.Name,
+			Name:          m.Name,
+			Provider:      "ollama",
+			Size:          m.Size,
+			SupportsTools: inferToolSupport(m.Name),
+			ContextSize:   32768, // conservative default; Ollama /api/show can refine this
 		})
 	}
 	return models, nil
@@ -107,9 +137,11 @@ func DiscoverLlamaCpp(ctx context.Context, baseURL string) ([]DiscoveredModel, e
 	var models []DiscoveredModel
 	for _, m := range result.Data {
 		models = append(models, DiscoveredModel{
-			ID:       m.ID,
-			Name:     m.ID,
-			Provider: "llamacpp",
+			ID:            m.ID,
+			Name:          m.ID,
+			Provider:      "llamacpp",
+			SupportsTools: inferToolSupport(m.ID),
+			ContextSize:   8192, // llama.cpp default; --ctx-size configurable
 		})
 	}
 	return models, nil
@@ -208,8 +240,14 @@ func RegisterDiscoveredModels(r *Router, models []DiscoveredModel, providerFacto
 			ModelName: m.ID,
 			IsLocal:   true,
 			Capabilities: provider.Capabilities{
-				ToolUse:       true, // assume tool support, will fail gracefully if not
-				ContextWindow: 32768,
+				// Conservative default: don't assume tool support.
+				// Many small local models (phi, tinyllama, etc.) don't support
+				// function calling and will produce confused output if selected
+				// for tool-requiring tasks. Larger known models (mistral, llama3,
+				// qwen2.5-coder) support tools. Callers can update the arm's
+				// Capabilities after probing the model template.
+				ToolUse:       m.SupportsTools,
+				ContextWindow: m.ContextSize,
 			},
 		})
 	}

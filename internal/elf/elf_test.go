@@ -222,6 +222,94 @@ func TestManager_WaitAll(t *testing.T) {
 	}
 }
 
+func TestBackgroundElf_WaitIdempotent(t *testing.T) {
+	mp := &mockProvider{
+		name:    "test",
+		streams: []stream.Stream{newEventStream("hello")},
+	}
+	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	elf := SpawnBackground(eng, "do something")
+
+	r1 := elf.Wait()
+	r2 := elf.Wait() // must not deadlock
+
+	if r1.Status != r2.Status {
+		t.Errorf("Wait() returned different statuses: %s vs %s", r1.Status, r2.Status)
+	}
+	if r1.Output != r2.Output {
+		t.Errorf("Wait() returned different outputs: %q vs %q", r1.Output, r2.Output)
+	}
+}
+
+func TestBackgroundElf_PanicRecovery(t *testing.T) {
+	// A provider that panics on Stream() — simulates an engine crash
+	panicProvider := &panicOnStreamProvider{}
+	eng, _ := engine.New(engine.Config{Provider: panicProvider, Tools: tool.NewRegistry()})
+	elf := SpawnBackground(eng, "do something")
+
+	result := elf.Wait() // must not hang
+
+	if result.Status != StatusFailed {
+		t.Errorf("status = %s, want failed", result.Status)
+	}
+	if result.Error == nil {
+		t.Error("error should be non-nil after panic recovery")
+	}
+}
+
+type panicOnStreamProvider struct{}
+
+func (p *panicOnStreamProvider) Name() string        { return "panic" }
+func (p *panicOnStreamProvider) DefaultModel() string { return "panic" }
+func (p *panicOnStreamProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
+	return nil, nil
+}
+func (p *panicOnStreamProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
+	panic("intentional test panic")
+}
+
+func TestManager_CleanupRemovesMeta(t *testing.T) {
+	mp := &mockProvider{
+		name:    "test",
+		streams: []stream.Stream{newEventStream("result")},
+	}
+
+	rtr := router.New(router.Config{})
+	rtr.RegisterArm(&router.Arm{
+		ID: "test/mock", Provider: mp, ModelName: "mock",
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+
+	mgr := NewManager(ManagerConfig{Router: rtr, Tools: tool.NewRegistry()})
+	e, _ := mgr.Spawn(context.Background(), router.TaskGeneration, "task", "", 30)
+	e.Wait()
+
+	// Before cleanup: elf and meta both present
+	mgr.mu.RLock()
+	_, elfExists := mgr.elfs[e.ID()]
+	_, metaExists := mgr.meta[e.ID()]
+	mgr.mu.RUnlock()
+
+	if !elfExists || !metaExists {
+		t.Fatal("elf and meta should exist before cleanup")
+	}
+
+	mgr.Cleanup()
+
+	// After cleanup: both removed
+	mgr.mu.RLock()
+	_, elfExists = mgr.elfs[e.ID()]
+	_, metaExists = mgr.meta[e.ID()]
+	mgr.mu.RUnlock()
+
+	if elfExists {
+		t.Error("elf should be removed after cleanup")
+	}
+	if metaExists {
+		t.Error("meta should be removed after cleanup (was leaking)")
+	}
+}
+
 // slowEventStream blocks until context cancelled
 type slowEventStream struct {
 	done bool

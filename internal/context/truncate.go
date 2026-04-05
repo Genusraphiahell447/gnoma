@@ -46,7 +46,10 @@ func (s *TruncateStrategy) Compact(messages []message.Message, budget int64) ([]
 		marker := message.NewUserText("[Earlier conversation was summarized to save context]")
 		ack := message.NewAssistantText("Understood, I'll continue from here.")
 
-		recent := history[len(history)-keepRecent:]
+		// Adjust split to never orphan tool results (the assistant message with
+		// matching tool calls must stay in the recent window with its results).
+		splitAt := safeSplitPoint(history, len(history)-keepRecent)
+		recent := history[splitAt:]
 		result := append(systemMsgs, marker, ack)
 		result = append(result, recent...)
 		return result, nil

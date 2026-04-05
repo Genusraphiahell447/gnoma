@@ -99,17 +99,19 @@ type QualityThreshold struct {
 	Target     float64 // ideal
 }
 
+// DefaultThresholds are calibrated for M4 heuristic scores (range ~0–0.85).
+// M9 will replace these with bandit-derived values once quality data accumulates.
 var DefaultThresholds = map[TaskType]QualityThreshold{
-	TaskBoilerplate:    {0.50, 0.70, 0.80},
-	TaskGeneration:     {0.60, 0.75, 0.88},
-	TaskRefactor:       {0.65, 0.78, 0.90},
-	TaskReview:         {0.70, 0.82, 0.92},
-	TaskUnitTest:       {0.60, 0.75, 0.85},
-	TaskPlanning:       {0.75, 0.88, 0.95},
-	TaskOrchestration:  {0.80, 0.90, 0.96},
-	TaskSecurityReview: {0.88, 0.94, 0.99},
-	TaskDebug:          {0.65, 0.80, 0.90},
-	TaskExplain:        {0.55, 0.72, 0.85},
+	TaskBoilerplate:    {0.40, 0.55, 0.70}, // any capable arm works
+	TaskGeneration:     {0.45, 0.60, 0.75},
+	TaskRefactor:       {0.50, 0.65, 0.78},
+	TaskReview:         {0.55, 0.68, 0.80},
+	TaskUnitTest:       {0.45, 0.60, 0.75},
+	TaskPlanning:       {0.60, 0.72, 0.82},
+	TaskOrchestration:  {0.65, 0.75, 0.83},
+	TaskSecurityReview: {0.70, 0.78, 0.84}, // requires thinking or large context window
+	TaskDebug:          {0.50, 0.65, 0.78},
+	TaskExplain:        {0.40, 0.55, 0.72},
 }
 
 // ClassifyTask infers a TaskType from the user's prompt using keyword heuristics.

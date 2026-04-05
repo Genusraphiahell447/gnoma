@@ -56,13 +56,16 @@ func (s *SummarizeStrategy) Compact(messages []message.Message, budget int64) ([
 		return messages, nil
 	}
 
-	// Split: old messages to summarize, recent to keep
+	// Split: old messages to summarize, recent to keep.
+	// Adjust split to never orphan tool results — the assistant message with
+	// matching tool calls must stay in the recent window with its results.
 	keepRecent := 6
 	if keepRecent > len(history) {
 		keepRecent = len(history)
 	}
-	oldMessages := history[:len(history)-keepRecent]
-	recentMessages := history[len(history)-keepRecent:]
+	splitAt := safeSplitPoint(history, len(history)-keepRecent)
+	oldMessages := history[:splitAt]
+	recentMessages := history[splitAt:]
 
 	// Build conversation text for summarization
 	var convText strings.Builder

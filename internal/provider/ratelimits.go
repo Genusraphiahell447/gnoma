@@ -1,5 +1,7 @@
 package provider
 
+import "math"
+
 // RateLimits describes the rate limits for a provider+model pair.
 // Zero values mean "no limit" or "unknown".
 type RateLimits struct {
@@ -11,6 +13,31 @@ type RateLimits struct {
 	OTPM        int     // output tokens per minute (Anthropic)
 	TokensMonth int64   // tokens per month
 	SpendCap    float64 // monthly spend cap in provider currency
+}
+
+// MaxConcurrent returns the maximum number of concurrent in-flight requests
+// that this rate limit allows. Returns 0 when there is no meaningful concurrency
+// constraint (provider has high or unknown limits).
+func (rl RateLimits) MaxConcurrent() int {
+	if rl.RPS > 0 {
+		n := int(math.Ceil(rl.RPS))
+		if n < 1 {
+			n = 1
+		}
+		return n
+	}
+	if rl.RPM > 0 {
+		// Allow 1 concurrent slot per 30 RPM (conservative heuristic).
+		n := rl.RPM / 30
+		if n < 1 {
+			n = 1
+		}
+		if n > 16 {
+			n = 16
+		}
+		return n
+	}
+	return 0
 }
 
 // ProviderDefaults holds default rate limits keyed by model glob.

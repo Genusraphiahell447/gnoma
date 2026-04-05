@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"testing"
 
+	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
@@ -443,6 +444,109 @@ func TestEngine_Reset(t *testing.T) {
 	}
 	if e.Usage().InputTokens != 0 {
 		t.Errorf("usage should be zero after reset, got %d", e.Usage().InputTokens)
+	}
+}
+
+func TestEngine_Reset_ClearsContextWindow(t *testing.T) {
+	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{MaxTokens: 200_000})
+	mp := &mockProvider{
+		name: "test",
+		streams: []stream.Stream{
+			newEventStream(message.StopEndTurn, "",
+				stream.Event{Type: stream.EventTextDelta, Text: "hi"},
+			),
+		},
+	}
+	e, _ := New(Config{
+		Provider: mp,
+		Tools:    tool.NewRegistry(),
+		Context:  ctxWindow,
+	})
+	e.Submit(context.Background(), "hello", nil)
+
+	if len(ctxWindow.Messages()) == 0 {
+		t.Fatal("context window should have messages before reset")
+	}
+
+	e.Reset()
+
+	if len(ctxWindow.Messages()) != 0 {
+		t.Errorf("context window should be empty after reset, got %d messages", len(ctxWindow.Messages()))
+	}
+}
+
+func TestSubmit_ContextWindowTracksUserAndToolMessages(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Register(&mockTool{
+		name: "bash",
+		execFn: func(_ context.Context, _ json.RawMessage) (tool.Result, error) {
+			return tool.Result{Output: "output"}, nil
+		},
+	})
+
+	mp := &mockProvider{
+		name: "test",
+		streams: []stream.Stream{
+			newEventStream(message.StopToolUse, "model",
+				stream.Event{Type: stream.EventToolCallStart, ToolCallID: "tc1", ToolCallName: "bash"},
+				stream.Event{Type: stream.EventToolCallDone, ToolCallID: "tc1", Args: json.RawMessage(`{"command":"ls"}`)},
+				stream.Event{Type: stream.EventUsage, Usage: &message.Usage{InputTokens: 100, OutputTokens: 20}},
+			),
+			newEventStream(message.StopEndTurn, "model",
+				stream.Event{Type: stream.EventTextDelta, Text: "Done."},
+			),
+		},
+	}
+
+	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{MaxTokens: 200_000})
+	e, _ := New(Config{
+		Provider: mp,
+		Tools:    reg,
+		Context:  ctxWindow,
+	})
+
+	_, err := e.Submit(context.Background(), "list files", nil)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	allMsgs := ctxWindow.AllMessages()
+	// Expect: user msg, assistant (tool call), tool results, assistant (final)
+	if len(allMsgs) < 4 {
+		t.Errorf("context window has %d messages, want at least 4 (user+assistant+tool_results+assistant)", len(allMsgs))
+		for i, m := range allMsgs {
+			t.Logf("  [%d] role=%s content=%s", i, m.Role, m.TextContent())
+		}
+	}
+	// First message should be user
+	if len(allMsgs) > 0 && allMsgs[0].Role != message.RoleUser {
+		t.Errorf("allMsgs[0].Role = %q, want user", allMsgs[0].Role)
+	}
+}
+
+func TestSubmit_TrackerReflectsInputTokens(t *testing.T) {
+	// Verify the tracker is set from InputTokens (not accumulated).
+	// After 3 rounds, tracker should equal last round's InputTokens+OutputTokens,
+	// not the sum of all rounds.
+	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{MaxTokens: 200_000})
+
+	mp := &mockProvider{
+		name: "test",
+		streams: []stream.Stream{
+			newEventStream(message.StopEndTurn, "",
+				stream.Event{Type: stream.EventUsage, Usage: &message.Usage{InputTokens: 100, OutputTokens: 50}},
+				stream.Event{Type: stream.EventTextDelta, Text: "a"},
+			),
+		},
+	}
+	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry(), Context: ctxWindow})
+
+	e.Submit(context.Background(), "hi", nil)
+
+	// Tracker should be InputTokens + OutputTokens = 150, not more
+	used := ctxWindow.Tracker().Used()
+	if used != 150 {
+		t.Errorf("tracker = %d, want 150 (InputTokens+OutputTokens, not cumulative)", used)
 	}
 }
 

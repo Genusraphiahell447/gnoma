@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -20,8 +19,19 @@ import (
 // Submit sends a user message and runs the agentic loop to completion.
 // The callback receives real-time streaming events.
 func (e *Engine) Submit(ctx context.Context, input string, cb Callback) (*Turn, error) {
+	return e.SubmitWithOptions(ctx, input, TurnOptions{}, cb)
+}
+
+// SubmitWithOptions is like Submit but applies per-turn overrides (e.g. ToolChoice).
+func (e *Engine) SubmitWithOptions(ctx context.Context, input string, opts TurnOptions, cb Callback) (*Turn, error) {
+	e.turnOpts = opts
+	defer func() { e.turnOpts = TurnOptions{} }()
+
 	userMsg := message.NewUserText(input)
 	e.history = append(e.history, userMsg)
+	if e.cfg.Context != nil {
+		e.cfg.Context.AppendMessage(userMsg)
+	}
 
 	return e.runLoop(ctx, cb)
 }
@@ -29,6 +39,11 @@ func (e *Engine) Submit(ctx context.Context, input string, cb Callback) (*Turn, 
 // SubmitMessages is like Submit but accepts pre-built messages.
 func (e *Engine) SubmitMessages(ctx context.Context, msgs []message.Message, cb Callback) (*Turn, error) {
 	e.history = append(e.history, msgs...)
+	if e.cfg.Context != nil {
+		for _, m := range msgs {
+			e.cfg.Context.AppendMessage(m)
+		}
+	}
 
 	return e.runLoop(ctx, cb)
 }
@@ -48,6 +63,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		// Route and stream
 		var s stream.Stream
 		var err error
+		var decision router.RoutingDecision
 
 		if e.cfg.Router != nil {
 			// Classify task from the latest user message
@@ -59,7 +75,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				}
 			}
 			task := router.ClassifyTask(prompt)
-			task.EstimatedTokens = 4000 // rough default
+			task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
 
 			e.logger.Debug("routing request",
 				"task_type", task.Type,
@@ -67,13 +83,12 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				"round", turn.Rounds,
 			)
 
-			var arm *router.Arm
-			s, arm, err = e.cfg.Router.Stream(ctx, task, req)
-			if arm != nil {
+			s, decision, err = e.cfg.Router.Stream(ctx, task, req)
+			if decision.Arm != nil {
 				e.logger.Debug("streaming request",
-					"provider", arm.Provider.Name(),
-					"model", arm.ModelName,
-					"arm", arm.ID,
+					"provider", decision.Arm.Provider.Name(),
+					"model", decision.Arm.ModelName,
+					"arm", decision.Arm.ID,
 					"messages", len(req.Messages),
 					"tools", len(req.Tools),
 					"round", turn.Rounds,
@@ -101,9 +116,11 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 						}
 					}
 					task := router.ClassifyTask(prompt)
-					task.EstimatedTokens = 4000
-					s, _, retryErr := e.cfg.Router.Stream(ctx, task, req)
-					return s, retryErr
+					task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+					var retryDecision router.RoutingDecision
+					s, retryDecision, err = e.cfg.Router.Stream(ctx, task, req)
+					decision = retryDecision // adopt new reservation on retry
+					return s, err
 				}
 				return e.cfg.Provider.Stream(ctx, req)
 			})
@@ -111,19 +128,29 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				// Try reactive compaction on 413 (request too large)
 				s, err = e.handleRequestTooLarge(ctx, err, req)
 				if err != nil {
+					decision.Rollback()
 					return nil, fmt.Errorf("provider stream: %w", err)
 				}
 			}
 		}
 
-		// Consume stream, forwarding events to callback
+		// Consume stream, forwarding events to callback.
+		// Track TTFT and stream duration for arm performance metrics.
 		acc := stream.NewAccumulator()
 		var stopReason message.StopReason
 		var model string
 
+		streamStart := time.Now()
+		var firstTokenAt time.Time
+
 		for s.Next() {
 			evt := s.Current()
 			acc.Apply(evt)
+
+			// Record time of first text token for TTFT metric
+			if firstTokenAt.IsZero() && evt.Type == stream.EventTextDelta && evt.Text != "" {
+				firstTokenAt = time.Now()
+			}
 
 			// Capture stop reason and model from events
 			if evt.StopReason != "" {
@@ -137,14 +164,28 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				cb(evt)
 			}
 		}
+		streamEnd := time.Now()
 		if err := s.Err(); err != nil {
 			s.Close()
+			decision.Rollback()
 			return nil, fmt.Errorf("stream error: %w", err)
 		}
 		s.Close()
 
 		// Build response
 		resp := acc.Response(stopReason, model)
+
+		// Commit pool reservation and record perf metrics for this round.
+		actualTokens := int(resp.Usage.InputTokens + resp.Usage.OutputTokens)
+		decision.Commit(actualTokens)
+		if decision.Arm != nil && !firstTokenAt.IsZero() {
+			decision.Arm.Perf.Update(
+				firstTokenAt.Sub(streamStart),
+				int(resp.Usage.OutputTokens),
+				streamEnd.Sub(streamStart),
+			)
+		}
+
 		turn.Usage.Add(resp.Usage)
 		turn.Messages = append(turn.Messages, resp.Message)
 		e.history = append(e.history, resp.Message)
@@ -152,7 +193,14 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 		// Track in context window and check for compaction
 		if e.cfg.Context != nil {
-			e.cfg.Context.Append(resp.Message, resp.Usage)
+			e.cfg.Context.AppendMessage(resp.Message)
+			// Set tracker to the provider-reported context size (InputTokens = full context
+			// as sent this round). This avoids double-counting InputTokens across rounds.
+			if resp.Usage.InputTokens > 0 {
+				e.cfg.Context.Tracker().Set(resp.Usage.InputTokens + resp.Usage.OutputTokens)
+			} else {
+				e.cfg.Context.Tracker().Add(message.Usage{OutputTokens: resp.Usage.OutputTokens})
+			}
 			if compacted, err := e.cfg.Context.CompactIfNeeded(); err != nil {
 				e.logger.Error("context compaction failed", "error", err)
 			} else if compacted {
@@ -169,8 +217,18 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 		// Decide next action
 		switch resp.StopReason {
-		case message.StopEndTurn, message.StopMaxTokens, message.StopSequence:
+		case message.StopEndTurn, message.StopSequence:
 			return turn, nil
+
+		case message.StopMaxTokens:
+			// Model hit its output token budget mid-response. Inject a continue prompt
+			// and re-query so the response is completed rather than silently truncated.
+			contMsg := message.NewUserText("Continue from where you left off.")
+			e.history = append(e.history, contMsg)
+			if e.cfg.Context != nil {
+				e.cfg.Context.AppendMessage(contMsg)
+			}
+			// Continue loop — next round will resume generation
 
 		case message.StopToolUse:
 			results, err := e.executeTools(ctx, resp.Message.ToolCalls(), cb)
@@ -180,6 +238,9 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			toolMsg := message.NewToolResults(results...)
 			turn.Messages = append(turn.Messages, toolMsg)
 			e.history = append(e.history, toolMsg)
+			if e.cfg.Context != nil {
+				e.cfg.Context.AppendMessage(toolMsg)
+			}
 			// Continue loop — re-query provider with tool results
 
 		default:
@@ -205,12 +266,15 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 		Model:        e.cfg.Model,
 		SystemPrompt: systemPrompt,
 		Messages:     messages,
+		ToolChoice:   e.turnOpts.ToolChoice,
 	}
 
-	// Only include tools if the model supports them
+	// Only include tools if the model supports them.
+	// When Router is active, skip capability gating — the router selects the arm
+	// and already knows its capabilities. Gating here would use the wrong provider.
 	caps := e.resolveCapabilities(ctx)
-	if caps == nil || caps.ToolUse {
-		// nil caps = unknown model, include tools optimistically
+	if e.cfg.Router != nil || caps == nil || caps.ToolUse {
+		// Router active, nil caps (unknown model), or model supports tools
 		for _, t := range e.cfg.Tools.All() {
 			// Skip deferred tools until the model requests them
 			if dt, ok := t.(tool.DeferrableTool); ok && dt.ShouldDefer() && !e.activatedTools[t.Name()] {
@@ -352,10 +416,11 @@ func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
 
 // handleRequestTooLarge attempts compaction on 413 and retries once.
@@ -387,7 +452,7 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 			}
 		}
 		task := router.ClassifyTask(prompt)
-		task.EstimatedTokens = 4000
+		task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
 		s, _, err := e.cfg.Router.Stream(ctx, task, req)
 		return s, err
 	}
@@ -441,12 +506,3 @@ func (e *Engine) retryOnTransient(ctx context.Context, firstErr error, fn func()
 	return nil, firstErr
 }
 
-// toolDefFromTool converts a tool.Tool to provider.ToolDefinition.
-// Unused currently but kept for reference when building tool definitions dynamically.
-func toolDefFromJSON(name, description string, params json.RawMessage) provider.ToolDefinition {
-	return provider.ToolDefinition{
-		Name:        name,
-		Description: description,
-		Parameters:  params,
-	}
-}

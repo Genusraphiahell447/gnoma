@@ -94,6 +94,14 @@ var (
 
 	sText = lipgloss.NewStyle().
 		Foreground(cText)
+
+	sThinkingLabel = lipgloss.NewStyle().
+			Foreground(cOverlay).
+			Italic(true)
+
+	sThinkingBody = lipgloss.NewStyle().
+			Foreground(cOverlay).
+			Italic(true)
 )
 
 // Status bar

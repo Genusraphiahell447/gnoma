@@ -9,6 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+
 // SetProjectConfig writes a single key=value to the project config file (.gnoma/config.toml).
 // Only whitelisted keys are supported.
 func SetProjectConfig(key, value string) error {
@@ -21,7 +22,7 @@ func SetProjectConfig(key, value string) error {
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, strings.Join(allowedKeys(), ", "))
 	}
 
-	path := filepath.Join(".gnoma", "config.toml")
+	path := projectConfigPath()
 
 	// Load existing config or start fresh
 	var cfg Config

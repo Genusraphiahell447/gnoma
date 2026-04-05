@@ -24,6 +24,7 @@ const (
 	CheckUnicodeWhitespace                           // non-ASCII whitespace
 	CheckZshDangerous                                // zsh-specific dangerous constructs
 	CheckCommentDesync                               // # inside strings hiding commands
+	CheckIndirectExec                                // eval, bash -c, curl|bash, source
 )
 
 // SecurityViolation describes a failed security check.
@@ -87,6 +88,9 @@ func ValidateCommand(cmd string) *SecurityViolation {
 		return v
 	}
 	if v := checkCommentQuoteDesync(cmd); v != nil {
+		return v
+	}
+	if v := checkIndirectExec(cmd); v != nil {
 		return v
 	}
 	return nil
@@ -247,6 +251,7 @@ func checkStandaloneSemicolon(cmd string) *SecurityViolation {
 }
 
 // checkSensitiveRedirection blocks output redirection to sensitive paths.
+// Detects: >, >>, fd redirects (2>), and no-space variants (>/etc/passwd).
 func checkSensitiveRedirection(cmd string) *SecurityViolation {
 	sensitiveTargets := []string{
 		"/etc/passwd", "/etc/shadow", "/etc/sudoers",
@@ -256,7 +261,14 @@ func checkSensitiveRedirection(cmd string) *SecurityViolation {
 	}
 
 	for _, target := range sensitiveTargets {
-		if strings.Contains(cmd, "> "+target) || strings.Contains(cmd, ">>"+target) {
+		// Match any form: >, >>, 2>, 2>>, &> followed by optional whitespace then target
+		idx := strings.Index(cmd, target)
+		if idx <= 0 {
+			continue
+		}
+		// Check what precedes the target (skip whitespace backwards)
+		pre := strings.TrimRight(cmd[:idx], " \t")
+		if len(pre) > 0 && (pre[len(pre)-1] == '>' || strings.HasSuffix(pre, ">>")) {
 			return &SecurityViolation{
 				Check:   CheckRedirection,
 				Message: fmt.Sprintf("redirection to sensitive path: %s", target),
@@ -384,14 +396,14 @@ func checkUnicodeWhitespace(cmd string) *SecurityViolation {
 }
 
 // checkZshDangerous detects zsh-specific dangerous constructs.
+// Note: <() and >() are intentionally excluded — they are also valid bash process
+// substitution patterns used in legitimate commands (e.g., diff <(cmd1) <(cmd2)).
 func checkZshDangerous(cmd string) *SecurityViolation {
 	dangerousPatterns := []struct {
 		pattern string
 		msg     string
 	}{
-		{"=(", "zsh process substitution =() (arbitrary execution)"},
-		{">(", "zsh output process substitution >()"},
-		{"<(", "zsh input process substitution <()"},
+		{"=(", "zsh =() process substitution (arbitrary execution)"},
 		{"zmodload", "zsh module loading (can load arbitrary code)"},
 		{"sysopen", "zsh sysopen (direct file descriptor access)"},
 		{"ztcp", "zsh TCP socket access"},
@@ -474,5 +486,53 @@ func checkDangerousVars(cmd string) *SecurityViolation {
 			return &SecurityViolation{Check: CheckDangerousVars, Message: p.msg}
 		}
 	}
+	return nil
+}
+
+// checkIndirectExec blocks commands that run arbitrary code indirectly,
+// bypassing all other security checks applied to the outer command string.
+// These are the highest-risk patterns in an agentic context.
+func checkIndirectExec(cmd string) *SecurityViolation {
+	lower := strings.ToLower(cmd)
+
+	// Patterns that execute arbitrary content not visible to the checker.
+	// Each entry is a substring to look for (after lowercasing).
+	patterns := []struct {
+		needle string
+		msg    string
+	}{
+		{"eval ", "eval executes arbitrary code (bypasses all checks)"},
+		{"eval\t", "eval executes arbitrary code (bypasses all checks)"},
+		{"bash -c", "bash -c executes arbitrary inline code"},
+		{"sh -c", "sh -c executes arbitrary inline code"},
+		{"zsh -c", "zsh -c executes arbitrary inline code"},
+		{"| bash", "pipe to bash executes downloaded/piped content"},
+		{"| sh", "pipe to sh executes downloaded/piped content"},
+		{"| zsh", "pipe to zsh executes downloaded/piped content"},
+		{"|bash", "pipe to bash executes downloaded/piped content"},
+		{"|sh", "pipe to sh executes downloaded/piped content"},
+		{"source ", "source executes arbitrary script files"},
+		{"source\t", "source executes arbitrary script files"},
+	}
+
+	for _, p := range patterns {
+		if strings.Contains(lower, p.needle) {
+			return &SecurityViolation{
+				Check:   CheckIndirectExec,
+				Message: p.msg,
+			}
+		}
+	}
+
+	// Dot-source: ". ./script.sh" or ". /path/script.sh"
+	// Careful: don't block ". " that is just "cd" followed by space
+	if strings.HasPrefix(lower, ". /") || strings.HasPrefix(lower, ". ./") ||
+		strings.Contains(lower, " . /") || strings.Contains(lower, " . ./") {
+		return &SecurityViolation{
+			Check:   CheckIndirectExec,
+			Message: "dot-source executes arbitrary script files",
+		}
+	}
+
 	return nil
 }

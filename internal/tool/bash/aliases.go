@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,36 @@ func (m *AliasMap) All() map[string]string {
 		cp[k] = v
 	}
 	return cp
+}
+
+// AliasSummary returns a compact, LLM-readable summary of command-replacement aliases —
+// those where the expansion's first word differs from the alias name (e.g. find → fd).
+// Flag-only aliases (ls → ls --color=auto) are excluded. Returns "" if none found.
+func (m *AliasMap) AliasSummary() string {
+	if m == nil {
+		return ""
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var replacements []string
+	for name, expansion := range m.aliases {
+		firstWord := expansion
+		if idx := strings.IndexAny(expansion, " \t"); idx != -1 {
+			firstWord = expansion[:idx]
+		}
+		if firstWord != name && firstWord != "" {
+			replacements = append(replacements, name+" → "+firstWord)
+		}
+	}
+
+	if len(replacements) == 0 {
+		return ""
+	}
+
+	sort.Strings(replacements)
+	return "Shell command replacements (use replacement's syntax, not original): " +
+		strings.Join(replacements, ", ") + "."
 }
 
 // ExpandCommand expands the first word of a command if it's a known alias.

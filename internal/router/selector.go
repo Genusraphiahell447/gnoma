@@ -14,9 +14,26 @@ const (
 
 // RoutingDecision is the result of arm selection.
 type RoutingDecision struct {
-	Strategy Strategy
-	Arm      *Arm   // primary arm
-	Error    error
+	Strategy     Strategy
+	Arm          *Arm // primary arm
+	Error        error
+	reservations []*Reservation // pool reservations held until commit/rollback
+}
+
+// Commit finalizes the routing decision, recording actual token consumption.
+// Must be called when the request completes successfully.
+func (d RoutingDecision) Commit(actualTokens int) {
+	for _, r := range d.reservations {
+		r.Commit(actualTokens)
+	}
+}
+
+// Rollback releases the routing decision's pool reservations without recording usage.
+// Must be called when the request fails before any tokens are consumed.
+func (d RoutingDecision) Rollback() {
+	for _, r := range d.reservations {
+		r.Rollback()
+	}
 }
 
 // selectBest picks the highest-scoring feasible arm using heuristic scoring.
@@ -121,9 +138,15 @@ func effectiveCost(arm *Arm, task Task) float64 {
 	return base * maxMultiplier
 }
 
-// filterFeasible returns arms that can handle the task (tools, pool capacity).
+// filterFeasible returns arms that can handle the task (tools, pool capacity, quality).
+// Arms that pass tool and pool checks but fall below the task's minimum quality threshold
+// are collected separately and used as a last resort if no arm meets the threshold.
 func filterFeasible(arms []*Arm, task Task) []*Arm {
+	threshold := DefaultThresholds[task.Type]
+
 	var feasible []*Arm
+	var belowQuality []*Arm // passed tool+pool but scored below minimum quality
+
 	for _, arm := range arms {
 		// Must support tools if task requires them
 		if task.RequiresTools && !arm.SupportsTools() {
@@ -143,13 +166,26 @@ func filterFeasible(arms []*Arm, task Task) []*Arm {
 			continue
 		}
 
+		// Quality floor: arms below minimum are set aside, not discarded
+		if heuristicQuality(arm, task) < threshold.Minimum {
+			belowQuality = append(belowQuality, arm)
+			continue
+		}
+
 		feasible = append(feasible, arm)
 	}
 
-	// If no arm with tools is feasible but task requires them,
-	// fall back to any available arm (tool-less is better than nothing)
+	// Degrade gracefully: if no arm meets quality threshold, use below-quality ones
+	if len(feasible) == 0 && len(belowQuality) > 0 {
+		return belowQuality
+	}
+
+	// If still empty and task requires tools, relax pool checks (last resort)
 	if len(feasible) == 0 && task.RequiresTools {
 		for _, arm := range arms {
+			if !arm.Capabilities.ToolUse {
+				continue
+			}
 			poolsOK := true
 			for _, pool := range arm.Pools {
 				if !pool.CanAfford(arm.ID, task.EstimatedTokens) {

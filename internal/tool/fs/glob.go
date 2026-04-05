@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -80,13 +81,7 @@ func (t *GlobTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 			return nil
 		}
 
-		matched, err := filepath.Match(a.Pattern, rel)
-		if err != nil {
-			// Try matching just the filename for simple patterns
-			matched, _ = filepath.Match(a.Pattern, d.Name())
-		}
-
-		if matched {
+		if matchGlob(a.Pattern, rel) {
 			matches = append(matches, rel)
 		}
 		return nil
@@ -114,4 +109,51 @@ func (t *GlobTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 		Output:   output,
 		Metadata: map[string]any{"count": len(matches), "pattern": a.Pattern},
 	}, nil
+}
+
+// matchGlob matches a relative path against a glob pattern.
+// Unlike filepath.Match, it supports ** to match zero or more path components.
+func matchGlob(pattern, name string) bool {
+	// Normalize to forward slashes for consistent component splitting.
+	pattern = filepath.ToSlash(pattern)
+	name = filepath.ToSlash(name)
+
+	if !strings.Contains(pattern, "**") {
+		ok, _ := filepath.Match(pattern, filepath.FromSlash(name))
+		return ok
+	}
+	return matchComponents(strings.Split(pattern, "/"), strings.Split(name, "/"))
+}
+
+// matchComponents recursively matches pattern segments against path segments.
+// A "**" segment matches zero or more consecutive path components.
+func matchComponents(pats, parts []string) bool {
+	for len(pats) > 0 {
+		if pats[0] == "**" {
+			// Consume all leading ** segments.
+			for len(pats) > 0 && pats[0] == "**" {
+				pats = pats[1:]
+			}
+			if len(pats) == 0 {
+				return true // trailing ** matches everything
+			}
+			// Try anchoring the remaining pattern at each position.
+			for i := range parts {
+				if matchComponents(pats, parts[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(parts) == 0 {
+			return false
+		}
+		ok, err := path.Match(pats[0], parts[0])
+		if err != nil || !ok {
+			return false
+		}
+		pats = pats[1:]
+		parts = parts[1:]
+	}
+	return len(parts) == 0
 }

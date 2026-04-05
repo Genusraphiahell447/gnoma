@@ -303,3 +303,199 @@ func TestRouter_SelectForcedNotFound(t *testing.T) {
 		t.Error("should error when forced arm not found")
 	}
 }
+
+// --- Gap A: Pool Reservations ---
+
+func TestRoutingDecision_CommitReleasesReservation(t *testing.T) {
+	pool := &LimitPool{
+		TotalLimit: 1000,
+		ArmRates:   map[ArmID]float64{"a/model": 1.0},
+		ScarcityK:  2,
+	}
+	arm := &Arm{
+		ID:           "a/model",
+		Capabilities: provider.Capabilities{ToolUse: true},
+		Pools:        []*LimitPool{pool},
+	}
+
+	r := New(Config{})
+	r.RegisterArm(arm)
+
+	task := Task{Type: TaskGeneration, RequiresTools: true, EstimatedTokens: 500, Priority: PriorityNormal}
+	decision := r.Select(task)
+	if decision.Error != nil {
+		t.Fatalf("Select: %v", decision.Error)
+	}
+
+	// After Select: tokens should be reserved
+	if pool.Reserved == 0 {
+		t.Error("Select should reserve pool capacity")
+	}
+
+	// After Commit: reserved released, used incremented
+	decision.Commit(400)
+	if pool.Reserved != 0 {
+		t.Errorf("Reserved = %f after Commit, want 0", pool.Reserved)
+	}
+	if pool.Used == 0 {
+		t.Error("Used should be non-zero after Commit")
+	}
+}
+
+func TestRoutingDecision_RollbackReleasesReservation(t *testing.T) {
+	pool := &LimitPool{
+		TotalLimit: 1000,
+		ArmRates:   map[ArmID]float64{"a/model": 1.0},
+		ScarcityK:  2,
+	}
+	arm := &Arm{
+		ID:           "a/model",
+		Capabilities: provider.Capabilities{ToolUse: true},
+		Pools:        []*LimitPool{pool},
+	}
+
+	r := New(Config{})
+	r.RegisterArm(arm)
+
+	task := Task{Type: TaskGeneration, RequiresTools: true, EstimatedTokens: 500, Priority: PriorityNormal}
+	decision := r.Select(task)
+	if decision.Error != nil {
+		t.Fatalf("Select: %v", decision.Error)
+	}
+
+	decision.Rollback()
+	if pool.Reserved != 0 {
+		t.Errorf("Reserved = %f after Rollback, want 0", pool.Reserved)
+	}
+	if pool.Used != 0 {
+		t.Errorf("Used = %f after Rollback, want 0", pool.Used)
+	}
+}
+
+func TestSelect_ConcurrentReservationPreventsOvercommit(t *testing.T) {
+	// Pool with very limited capacity: only 1 request can fit
+	pool := &LimitPool{
+		TotalLimit: 10,
+		ArmRates:   map[ArmID]float64{"a/model": 1.0},
+		ScarcityK:  2,
+	}
+	arm := &Arm{
+		ID:           "a/model",
+		Capabilities: provider.Capabilities{ToolUse: true},
+		Pools:        []*LimitPool{pool},
+	}
+
+	r := New(Config{})
+	r.RegisterArm(arm)
+
+	task := Task{Type: TaskGeneration, RequiresTools: true, EstimatedTokens: 8000, Priority: PriorityNormal}
+
+	// First select should succeed and reserve
+	d1 := r.Select(task)
+	// Second concurrent select should fail — capacity reserved by first
+	d2 := r.Select(task)
+
+	if d1.Error != nil && d2.Error != nil {
+		t.Error("at least one selection should succeed")
+	}
+	if d1.Error == nil && d2.Error == nil {
+		t.Error("second selection should fail: pool overcommit prevented")
+	}
+
+	// Cleanup
+	d1.Rollback()
+	d2.Rollback()
+}
+
+// --- Gap B: ArmPerf ---
+
+func TestArmPerf_Update_FirstSample(t *testing.T) {
+	var p ArmPerf
+	p.Update(50*time.Millisecond, 100, 2*time.Second)
+
+	if p.Samples != 1 {
+		t.Errorf("Samples = %d, want 1", p.Samples)
+	}
+	if p.TTFTMs != 50 {
+		t.Errorf("TTFTMs = %f, want 50", p.TTFTMs)
+	}
+	if p.ToksPerSec != 50 { // 100 tokens / 2s
+		t.Errorf("ToksPerSec = %f, want 50", p.ToksPerSec)
+	}
+}
+
+func TestArmPerf_Update_EMA(t *testing.T) {
+	var p ArmPerf
+	p.Update(100*time.Millisecond, 100, time.Second)
+	p.Update(50*time.Millisecond, 100, time.Second) // faster second response
+
+	if p.Samples != 2 {
+		t.Errorf("Samples = %d, want 2", p.Samples)
+	}
+	// EMA: new = 0.3*50 + 0.7*100 = 85
+	if p.TTFTMs < 80 || p.TTFTMs > 90 {
+		t.Errorf("TTFTMs = %f, want ~85 (EMA of 100→50)", p.TTFTMs)
+	}
+}
+
+func TestArmPerf_Update_ZeroDuration(t *testing.T) {
+	var p ArmPerf
+	p.Update(10*time.Millisecond, 100, 0) // zero stream duration
+
+	if p.Samples != 1 {
+		t.Errorf("Samples = %d, want 1", p.Samples)
+	}
+	if p.ToksPerSec != 0 { // undefined throughput → 0
+		t.Errorf("ToksPerSec = %f, want 0 for zero duration", p.ToksPerSec)
+	}
+}
+
+// --- Gap C: QualityThreshold ---
+
+func TestFilterFeasible_RejectsLowQualityArm(t *testing.T) {
+	// Arm with no capabilities — heuristicQuality ≈ 0.5, below security_review minimum (0.88)
+	lowQualityArm := &Arm{
+		ID:           "a/basic",
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 4096},
+	}
+	highQualityArm := &Arm{
+		ID: "b/powerful",
+		Capabilities: provider.Capabilities{
+			ToolUse:       true,
+			Thinking:      true, // thinking boosts score for security review
+			ContextWindow: 200000,
+		},
+	}
+
+	task := Task{
+		Type:          TaskSecurityReview,
+		RequiresTools: true,
+		Priority:      PriorityHigh,
+	}
+
+	feasible := filterFeasible([]*Arm{lowQualityArm, highQualityArm}, task)
+
+	// highQualityArm should be in feasible; lowQualityArm should be filtered
+	if len(feasible) != 1 {
+		t.Fatalf("len(feasible) = %d, want 1", len(feasible))
+	}
+	if feasible[0].ID != "b/powerful" {
+		t.Errorf("feasible[0] = %s, want b/powerful", feasible[0].ID)
+	}
+}
+
+func TestFilterFeasible_FallsBackWhenAllBelowQuality(t *testing.T) {
+	// Only arm available, but quality is low — should still be returned as fallback
+	onlyArm := &Arm{
+		ID:           "a/only",
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 4096},
+	}
+
+	task := Task{Type: TaskSecurityReview, RequiresTools: true}
+	feasible := filterFeasible([]*Arm{onlyArm}, task)
+
+	if len(feasible) == 0 {
+		t.Error("should fall back to low-quality arm when no better option exists")
+	}
+}
+

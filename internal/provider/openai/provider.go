@@ -15,13 +15,20 @@ const defaultModel = "gpt-4o"
 
 // Provider implements provider.Provider for the OpenAI API.
 type Provider struct {
-	client *oai.Client
-	name   string
-	model  string
+	client     *oai.Client
+	name       string
+	model      string
+	streamOpts []option.RequestOption // injected per-request (e.g. think:false for Ollama)
 }
 
 // New creates an OpenAI provider from config.
 func New(cfg provider.ProviderConfig) (provider.Provider, error) {
+	return NewWithStreamOptions(cfg, nil)
+}
+
+// NewWithStreamOptions creates an OpenAI provider with extra per-request stream options.
+// Use this for Ollama/llama.cpp adapters that need non-standard body fields.
+func NewWithStreamOptions(cfg provider.ProviderConfig, streamOpts []option.RequestOption) (provider.Provider, error) {
 	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("openai: api key required")
 	}
@@ -41,9 +48,10 @@ func New(cfg provider.ProviderConfig) (provider.Provider, error) {
 	}
 
 	return &Provider{
-		client: &client,
-		name:   "openai",
-		model:  model,
+		client:     &client,
+		name:       "openai",
+		model:      model,
+		streamOpts: streamOpts,
 	}, nil
 }
 
@@ -57,7 +65,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (stream.Str
 	params := translateRequest(req)
 	params.Model = model
 
-	raw := p.client.Chat.Completions.NewStreaming(ctx, params)
+	raw := p.client.Chat.Completions.NewStreaming(ctx, params, p.streamOpts...)
 
 	return newOpenAIStream(raw), nil
 }

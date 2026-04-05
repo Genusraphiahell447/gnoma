@@ -119,6 +119,67 @@ func TestApplyEnv_EnvVarReference(t *testing.T) {
 	}
 }
 
+func TestProjectRoot_GoMod(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "pkg", "util")
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/foo\n"), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(sub)
+	defer os.Chdir(origDir)
+
+	got := ProjectRoot()
+	if got != root {
+		t.Errorf("ProjectRoot() = %q, want %q", got, root)
+	}
+}
+
+func TestProjectRoot_Git(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "src")
+	os.MkdirAll(sub, 0o755)
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(sub)
+	defer os.Chdir(origDir)
+
+	got := ProjectRoot()
+	if got != root {
+		t.Errorf("ProjectRoot() = %q, want %q", got, root)
+	}
+}
+
+func TestProjectRoot_GnomaDir(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "internal")
+	os.MkdirAll(sub, 0o755)
+	os.MkdirAll(filepath.Join(root, ".gnoma"), 0o755)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(sub)
+	defer os.Chdir(origDir)
+
+	got := ProjectRoot()
+	if got != root {
+		t.Errorf("ProjectRoot() = %q, want %q", got, root)
+	}
+}
+
+func TestProjectRoot_Fallback(t *testing.T) {
+	dir := t.TempDir()
+
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	got := ProjectRoot()
+	if got != dir {
+		t.Errorf("ProjectRoot() = %q, want %q (cwd fallback)", got, dir)
+	}
+}
+
 func TestLayeredLoad(t *testing.T) {
 	// Set up global config
 	globalDir := t.TempDir()

@@ -8,6 +8,15 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
+// ToolChoiceMode controls how the model selects tools.
+type ToolChoiceMode string
+
+const (
+	ToolChoiceAuto     ToolChoiceMode = "auto"
+	ToolChoiceRequired ToolChoiceMode = "required"
+	ToolChoiceNone     ToolChoiceMode = "none"
+)
+
 // Request encapsulates everything needed for a single LLM API call.
 type Request struct {
 	Model          string
@@ -21,6 +30,7 @@ type Request struct {
 	StopSequences  []string
 	Thinking       *ThinkingConfig
 	ResponseFormat *ResponseFormat
+	ToolChoice     ToolChoiceMode // "" = provider default (auto)
 }
 
 // ToolDefinition is the provider-agnostic tool schema.

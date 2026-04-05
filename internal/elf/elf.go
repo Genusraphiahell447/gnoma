@@ -3,6 +3,7 @@ package elf
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -73,13 +74,16 @@ func nextID(prefix string) string {
 
 // BackgroundElf runs on its own goroutine with an independent engine.
 type BackgroundElf struct {
-	id      string
-	eng     *engine.Engine
-	events  chan stream.Event
-	result  chan Result
-	cancel  context.CancelFunc
-	status  atomic.Int32
-	startAt time.Time
+	id           string
+	eng          *engine.Engine
+	events       chan stream.Event
+	result       chan Result
+	cancel       context.CancelFunc
+	status       atomic.Int32
+	startAt      time.Time
+	cachedResult Result
+	resultOnce   sync.Once
+	eventsClose  sync.Once
 }
 
 // SpawnBackground creates and starts a background elf.
@@ -102,6 +106,22 @@ func SpawnBackground(eng *engine.Engine, prompt string) *BackgroundElf {
 }
 
 func (e *BackgroundElf) run(ctx context.Context, prompt string) {
+	closeEvents := func() { e.eventsClose.Do(func() { close(e.events) }) }
+
+	defer func() {
+		if r := recover(); r != nil {
+			closeEvents()
+			res := Result{
+				ID:       e.id,
+				Status:   StatusFailed,
+				Error:    fmt.Errorf("elf panicked: %v", r),
+				Duration: time.Since(e.startAt),
+			}
+			e.status.Store(int32(StatusFailed))
+			e.result <- res
+		}
+	}()
+
 	cb := func(evt stream.Event) {
 		select {
 		case e.events <- evt:
@@ -111,7 +131,7 @@ func (e *BackgroundElf) run(ctx context.Context, prompt string) {
 
 	turn, err := e.eng.Submit(ctx, prompt, cb)
 
-	close(e.events)
+	closeEvents()
 
 	r := Result{
 		ID:       e.id,
@@ -149,5 +169,8 @@ func (e *BackgroundElf) Events() <-chan stream.Event { return e.events }
 func (e *BackgroundElf) Cancel()             { e.cancel() }
 
 func (e *BackgroundElf) Wait() Result {
-	return <-e.result
+	e.resultOnce.Do(func() {
+		e.cachedResult = <-e.result
+	})
+	return e.cachedResult
 }

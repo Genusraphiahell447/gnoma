@@ -27,7 +27,7 @@ var paramSchema = json.RawMessage(`{
 		},
 		"max_turns": {
 			"type": "integer",
-			"description": "Maximum tool-calling rounds for the elf (default 30)"
+			"description": "Maximum tool-calling rounds for the elf (0 or omit = unlimited)"
 		}
 	},
 	"required": ["prompt"]
@@ -51,9 +51,8 @@ func (t *Tool) SetProgressCh(ch chan<- elf.Progress) {
 func (t *Tool) Name() string               { return "agent" }
 func (t *Tool) Description() string         { return "Spawn a sub-agent (elf) to handle a task independently. The elf gets its own conversation and tools. IMPORTANT: To spawn multiple elfs in parallel, call this tool multiple times in the SAME response — do not wait for one to finish before spawning the next." }
 func (t *Tool) Parameters() json.RawMessage { return paramSchema }
-func (t *Tool) IsReadOnly() bool            { return true }
-func (t *Tool) IsDestructive() bool         { return false }
-func (t *Tool) ShouldDefer() bool           { return true }
+func (t *Tool) IsReadOnly() bool  { return true }
+func (t *Tool) IsDestructive() bool { return false }
 
 type agentArgs struct {
 	Prompt   string `json:"prompt"`
@@ -70,11 +69,8 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 		return tool.Result{}, fmt.Errorf("agent: prompt required")
 	}
 
-	taskType := parseTaskType(a.TaskType)
+	taskType := parseTaskType(a.TaskType, a.Prompt)
 	maxTurns := a.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = 30 // default
-	}
 
 	// Truncate description for tree display
 	desc := a.Prompt
@@ -236,7 +232,9 @@ func formatTokens(tokens int) string {
 	return fmt.Sprintf("%d tokens", tokens)
 }
 
-func parseTaskType(s string) router.TaskType {
+// parseTaskType maps explicit task_type hints to router TaskType.
+// When no hint is provided (empty string), auto-classifies from the prompt.
+func parseTaskType(s string, prompt string) router.TaskType {
 	switch strings.ToLower(s) {
 	case "generation":
 		return router.TaskGeneration
@@ -251,6 +249,6 @@ func parseTaskType(s string) router.TaskType {
 	case "planning":
 		return router.TaskPlanning
 	default:
-		return router.TaskGeneration
+		return router.ClassifyTask(prompt).Type
 	}
 }

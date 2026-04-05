@@ -39,7 +39,7 @@ var batchSchema = json.RawMessage(`{
 		},
 		"max_turns": {
 			"type": "integer",
-			"description": "Maximum tool-calling rounds per elf (default 30)"
+			"description": "Maximum tool-calling rounds per elf (0 or omit = unlimited)"
 		}
 	},
 	"required": ["tasks"]
@@ -62,9 +62,8 @@ func (t *BatchTool) SetProgressCh(ch chan<- elf.Progress) {
 func (t *BatchTool) Name() string               { return "spawn_elfs" }
 func (t *BatchTool) Description() string         { return "Spawn multiple elfs (sub-agents) in parallel. Use this when you need to run 2+ independent tasks concurrently. Each elf gets its own conversation and tools. All elfs run simultaneously and results are collected when all complete." }
 func (t *BatchTool) Parameters() json.RawMessage { return batchSchema }
-func (t *BatchTool) IsReadOnly() bool            { return true }
-func (t *BatchTool) IsDestructive() bool         { return false }
-func (t *BatchTool) ShouldDefer() bool           { return true }
+func (t *BatchTool) IsReadOnly() bool  { return true }
+func (t *BatchTool) IsDestructive() bool { return false }
 
 type batchArgs struct {
 	Tasks    []batchTask `json:"tasks"`
@@ -89,9 +88,6 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 	}
 
 	maxTurns := a.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = 30
-	}
 
 	systemPrompt := "You are an elf — a focused sub-agent of gnoma. Complete the given task thoroughly and concisely. Use tools as needed."
 
@@ -116,7 +112,7 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 			}
 		}
 
-		taskType := parseTaskType(task.TaskType)
+		taskType := parseTaskType(task.TaskType, task.Prompt)
 		e, err := t.manager.Spawn(ctx, taskType, task.Prompt, systemPrompt, maxTurns)
 		if err != nil {
 			for _, entry := range elfs {

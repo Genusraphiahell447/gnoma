@@ -53,6 +53,8 @@ type Status struct {
 type Session interface {
 	// Send submits user input and begins an agentic turn.
 	Send(input string) error
+	// SendWithOptions is like Send but applies per-turn engine options.
+	SendWithOptions(input string, opts engine.TurnOptions) error
 	// Events returns the channel that receives streaming events.
 	// A new channel is created per Send(). Closed when the turn completes.
 	Events() <-chan stream.Event

@@ -110,6 +110,30 @@ func TestChecker_AcceptEditsMode(t *testing.T) {
 	}
 }
 
+func TestChecker_ElfNilPrompt_FsWriteAllowed(t *testing.T) {
+	// Elfs use WithDenyPrompt (nil promptFn). Non-destructive fs ops must still
+	// be allowed so elfs can write files in auto/acceptEdits modes.
+	c := NewChecker(ModeAuto, nil, nil) // nil promptFn simulates elf checker
+
+	// Non-destructive fs.write: allowed
+	err := c.Check(context.Background(), ToolInfo{Name: "fs.write"}, json.RawMessage(`{"path":"AGENTS.md"}`))
+	if err != nil {
+		t.Errorf("elf should be able to write files: %v", err)
+	}
+
+	// Destructive fs op: denied
+	err = c.Check(context.Background(), ToolInfo{Name: "fs.delete", IsDestructive: true}, json.RawMessage(`{"path":"foo"}`))
+	if !errors.Is(err, ErrDenied) {
+		t.Error("destructive fs op should be denied without prompt handler")
+	}
+
+	// bash: denied
+	err = c.Check(context.Background(), ToolInfo{Name: "bash"}, json.RawMessage(`{"command":"echo hi"}`))
+	if !errors.Is(err, ErrDenied) {
+		t.Error("bash should be denied without prompt handler")
+	}
+}
+
 func TestChecker_AutoMode(t *testing.T) {
 	c := NewChecker(ModeAuto, nil, func(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
 		return true, nil // approve prompt
@@ -148,23 +172,68 @@ func TestChecker_SafetyCheck(t *testing.T) {
 	// Safety checks are bypass-immune
 	c := NewChecker(ModeBypass, nil, nil)
 
-	tests := []struct {
-		name string
-		args string
+	blocked := []struct {
+		name     string
+		toolName string
+		args     string
 	}{
-		{"env file", `{"path":".env"}`},
-		{"git dir", `{"path":".git/config"}`},
-		{"ssh key", `{"path":"id_rsa"}`},
-		{"aws creds", `{"path":".aws/credentials"}`},
+		{"env file", "fs.read", `{"path":".env"}`},
+		{"git dir", "fs.read", `{"path":".git/config"}`},
+		{"ssh key", "fs.read", `{"path":"id_rsa"}`},
+		{"aws creds", "fs.read", `{"path":".aws/credentials"}`},
+		{"bash env", "bash", `{"command":"cat .env"}`},
 	}
-	for _, tt := range tests {
+	for _, tt := range blocked {
 		t.Run(tt.name, func(t *testing.T) {
-			err := c.Check(context.Background(), ToolInfo{Name: "fs.read"}, json.RawMessage(tt.args))
+			err := c.Check(context.Background(), ToolInfo{Name: tt.toolName}, json.RawMessage(tt.args))
 			if !errors.Is(err, ErrDenied) {
 				t.Errorf("safety check should block: %v", err)
 			}
 		})
 	}
+
+	// Writing a file whose *content* mentions .env (e.g. AGENTS.md docs) must not be blocked.
+	t.Run("env mention in content not blocked", func(t *testing.T) {
+		args := json.RawMessage(`{"path":"AGENTS.md","content":"Copy .env.example to .env and fill in the values."}`)
+		err := c.Check(context.Background(), ToolInfo{Name: "fs.write"}, args)
+		if err != nil {
+			t.Errorf("fs.write to safe path should not be blocked by content mention: %v", err)
+		}
+	})
+}
+
+func TestChecker_SafetyCheck_OrchestrationToolsExempt(t *testing.T) {
+	// spawn_elfs and agent carry elf PROMPT TEXT as args — arbitrary instruction
+	// text that may legitimately mention .env, credentials, etc.
+	// Security is enforced inside each spawned elf, not at the orchestration layer.
+	c := NewChecker(ModeBypass, nil, nil)
+
+	cases := []struct {
+		name     string
+		toolName string
+		args     string
+	}{
+		{"spawn_elfs with .env mention", "spawn_elfs", `{"tasks":[{"task":"check .env config","elf":"worker"}]}`},
+		{"spawn_elfs with credentials mention", "spawn_elfs", `{"tasks":[{"task":"read credentials file","elf":"worker"}]}`},
+		{"agent with .env mention", "agent", `{"prompt":"verify .env is configured correctly"}`},
+		{"agent with ssh mention", "agent", `{"prompt":"check .ssh/config for proxy settings"}`},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := c.Check(context.Background(), ToolInfo{Name: tt.toolName}, json.RawMessage(tt.args))
+			if err != nil {
+				t.Errorf("orchestration tool %q should not be blocked by safety check: %v", tt.toolName, err)
+			}
+		})
+	}
+
+	// Non-orchestration tools with the same patterns are still blocked.
+	t.Run("bash with .env still blocked", func(t *testing.T) {
+		err := c.Check(context.Background(), ToolInfo{Name: "bash"}, json.RawMessage(`{"command":"cat .env"}`))
+		if !errors.Is(err, ErrDenied) {
+			t.Errorf("bash accessing .env should still be blocked: %v", err)
+		}
+	})
 }
 
 func TestChecker_CompoundCommand(t *testing.T) {
@@ -232,4 +301,27 @@ func TestChecker_SetMode(t *testing.T) {
 	if c.Mode() != ModePlan {
 		t.Errorf("mode should be plan after SetMode")
 	}
+}
+
+func TestChecker_ConcurrentSetModeAndCheck(t *testing.T) {
+	// Verifies no data race between SetMode (TUI goroutine) and Check (engine goroutine).
+	// Run with: go test -race ./internal/permission/...
+	c := NewChecker(ModeDefault, nil, nil)
+	ctx := context.Background()
+	info := ToolInfo{Name: "bash", IsReadOnly: true}
+	args := json.RawMessage(`{}`)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1000; i++ {
+			c.SetMode(ModeAuto)
+			c.SetMode(ModeDefault)
+		}
+	}()
+
+	for i := 0; i < 1000; i++ {
+		c.Check(ctx, info, args) //nolint:errcheck
+	}
+	<-done
 }

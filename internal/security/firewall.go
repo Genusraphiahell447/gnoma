@@ -1,6 +1,7 @@
 package security
 
 import (
+	"encoding/json"
 	"log/slog"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
@@ -96,8 +97,18 @@ func (f *Firewall) scanMessage(m message.Message) message.Message {
 			} else {
 				cleaned.Content[i] = c
 			}
+		case message.ContentToolCall:
+			// Scan LLM-generated tool arguments for accidentally embedded secrets
+			if c.ToolCall != nil {
+				tc := *c.ToolCall
+				scanned := f.scanAndRedact(string(tc.Arguments), "tool_call_args")
+				tc.Arguments = json.RawMessage(scanned)
+				cleaned.Content[i] = message.NewToolCallContent(tc)
+			} else {
+				cleaned.Content[i] = c
+			}
 		default:
-			// Tool calls, thinking blocks — pass through
+			// Thinking blocks — pass through
 			cleaned.Content[i] = c
 		}
 	}
@@ -115,11 +126,20 @@ func (f *Firewall) scanAndRedact(content, source string) string {
 	}
 
 	for _, m := range matches {
-		f.logger.Warn("secret detected",
-			"pattern", m.Pattern,
-			"action", m.Action,
-			"source", source,
-		)
+		switch m.Action {
+		case ActionBlock:
+			f.logger.Error("blocked: secret detected",
+				"pattern", m.Pattern,
+				"source", source,
+			)
+			return "[BLOCKED: content contained " + m.Pattern + "]"
+		default:
+			f.logger.Debug("secret redacted",
+				"pattern", m.Pattern,
+				"action", m.Action,
+				"source", source,
+			)
+		}
 	}
 
 	return Redact(content, matches)

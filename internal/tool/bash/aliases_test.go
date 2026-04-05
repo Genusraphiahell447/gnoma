@@ -2,6 +2,7 @@ package bash
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -262,6 +263,51 @@ func TestHarvestAliases_Integration(t *testing.T) {
 	t.Logf("Harvested %d aliases", m.Len())
 	for name, exp := range m.All() {
 		t.Logf("  %s → %s", name, exp)
+	}
+}
+
+func TestAliasMap_AliasSummary(t *testing.T) {
+	m := NewAliasMap()
+	m.mu.Lock()
+	m.aliases["find"] = "fd"
+	m.aliases["grep"] = "rg --color=auto"
+	m.aliases["ls"] = "ls --color=auto"  // flag-only, same command — should be excluded
+	m.aliases["ll"] = "ls -la"           // replacement to different command — included
+	m.mu.Unlock()
+
+	summary := m.AliasSummary()
+
+	if summary == "" {
+		t.Fatal("AliasSummary should return non-empty string")
+	}
+
+	for _, want := range []string{"find → fd", "grep → rg", "ll → ls"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("AliasSummary missing %q, got: %q", want, summary)
+		}
+	}
+
+	// ls → ls (flag-only) should NOT appear
+	if strings.Contains(summary, "ls → ls") {
+		t.Errorf("AliasSummary should exclude flag-only aliases (ls → ls), got: %q", summary)
+	}
+}
+
+func TestAliasMap_AliasSummary_Empty(t *testing.T) {
+	m := NewAliasMap()
+	m.mu.Lock()
+	m.aliases["ls"] = "ls --color=auto" // same base command, flags only — excluded
+	m.mu.Unlock()
+
+	if got := m.AliasSummary(); got != "" {
+		t.Errorf("AliasSummary for same-command aliases should be empty, got %q", got)
+	}
+}
+
+func TestAliasMap_AliasSummary_Nil(t *testing.T) {
+	var m *AliasMap
+	if got := m.AliasSummary(); got != "" {
+		t.Errorf("nil AliasMap.AliasSummary() should return empty, got %q", got)
 	}
 }
 

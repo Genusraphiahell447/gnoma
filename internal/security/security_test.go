@@ -375,3 +375,48 @@ func TestFirewall_UnicodeCleanedBeforeSecretScan(t *testing.T) {
 		t.Error("unicode tags should be stripped")
 	}
 }
+
+func TestFirewall_ActionBlockReturnsBlockedString(t *testing.T) {
+	// Pattern with ActionBlock should return a blocked marker, not the original content
+	fw := NewFirewall(FirewallConfig{
+		ScanOutgoing:     true,
+		EntropyThreshold: 3.0,
+	})
+	if err := fw.Scanner().AddPattern("test_block", `BLOCK_THIS_SECRET`, ActionBlock); err != nil {
+		t.Fatalf("AddPattern: %v", err)
+	}
+
+	msgs := []message.Message{
+		message.NewUserText("some text BLOCK_THIS_SECRET more text"),
+	}
+	cleaned := fw.ScanOutgoingMessages(msgs)
+	text := cleaned[0].TextContent()
+
+	if strings.Contains(text, "BLOCK_THIS_SECRET") {
+		t.Error("ActionBlock content should not pass through")
+	}
+	if !strings.Contains(text, "[BLOCKED:") {
+		t.Errorf("expected [BLOCKED: ...] marker, got %q", text)
+	}
+}
+
+func TestScanner_DedupKeyNoCollision(t *testing.T) {
+	// Two matches at byte offsets > 127 in the same pattern should both appear,
+	// not get deduplicated because of hash collision in the key.
+	s := NewScanner(3.0)
+	// Build a string where two matches appear after offset 127
+	prefix := strings.Repeat("x", 128) // push matches past offset 127
+	input := prefix + "sk-ant-api03-aaaaaaaabbbbbbbbcccccccc " + prefix + "sk-ant-api03-ddddddddeeeeeeeeffffffff"
+	matches := s.Scan(input)
+
+	count := 0
+	for _, m := range matches {
+		if m.Pattern == "anthropic_api_key" {
+			count++
+		}
+	}
+
+	if count < 2 {
+		t.Errorf("expected 2 distinct Anthropic key matches after offset 127, got %d (dedup key collision?)", count)
+	}
+}

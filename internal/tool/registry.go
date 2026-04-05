@@ -3,6 +3,7 @@ package tool
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -40,7 +41,7 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
-// All returns all registered tools.
+// All returns all registered tools sorted by name for deterministic ordering.
 func (r *Registry) All() []Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -48,10 +49,11 @@ func (r *Registry) All() []Tool {
 	for _, t := range r.tools {
 		all = append(all, t)
 	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Name() < all[j].Name() })
 	return all
 }
 
-// Definitions returns tool definitions for all registered tools,
+// Definitions returns tool definitions for all registered tools sorted by name,
 // suitable for sending to the LLM.
 func (r *Registry) Definitions() []Definition {
 	r.mu.RLock()
@@ -64,6 +66,7 @@ func (r *Registry) Definitions() []Definition {
 			Parameters:  t.Parameters(),
 		})
 	}
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
 }
 

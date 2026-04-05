@@ -39,6 +39,11 @@ func NewLocal(eng *engine.Engine, providerName, model string) *Local {
 }
 
 func (s *Local) Send(input string) error {
+	return s.SendWithOptions(input, engine.TurnOptions{})
+}
+
+// SendWithOptions is like Send but applies per-turn engine options.
+func (s *Local) SendWithOptions(input string, opts engine.TurnOptions) error {
 	s.mu.Lock()
 	if s.state != StateIdle {
 		s.mu.Unlock()
@@ -64,7 +69,7 @@ func (s *Local) Send(input string) error {
 			}
 		}
 
-		turn, err := s.eng.Submit(ctx, input, cb)
+		turn, err := s.eng.SubmitWithOptions(ctx, input, opts, cb)
 
 		s.mu.Lock()
 		s.turn = turn

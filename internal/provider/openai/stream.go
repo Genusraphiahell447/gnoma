@@ -25,9 +25,10 @@ type openaiStream struct {
 }
 
 type toolCallState struct {
-	id   string
-	name string
-	args string
+	id           string
+	name         string
+	args         string
+	argsComplete bool // true when args arrived in the initial chunk; skip subsequent deltas
 }
 
 func newOpenAIStream(raw *ssestream.Stream[oai.ChatCompletionChunk]) *openaiStream {
@@ -74,9 +75,10 @@ func (s *openaiStream) Next() bool {
 				if !ok {
 					// New tool call — capture initial arguments too
 					existing = &toolCallState{
-						id:   tc.ID,
-						name: tc.Function.Name,
-						args: tc.Function.Arguments,
+						id:           tc.ID,
+						name:         tc.Function.Name,
+						args:         tc.Function.Arguments,
+						argsComplete: tc.Function.Arguments != "",
 					}
 					s.toolCalls[tc.Index] = existing
 					s.hadToolCalls = true
@@ -91,8 +93,11 @@ func (s *openaiStream) Next() bool {
 					}
 				}
 
-				// Accumulate arguments (subsequent chunks)
-				if tc.Function.Arguments != "" && ok {
+				// Accumulate arguments (subsequent chunks).
+				// Skip if args were already provided in the initial chunk — some providers
+				// (e.g. Ollama) send complete args in the name chunk and then repeat them
+				// as a delta, which would cause doubled JSON and unmarshal failures.
+				if tc.Function.Arguments != "" && ok && !existing.argsComplete {
 					existing.args += tc.Function.Arguments
 					s.cur = stream.Event{
 						Type:       stream.EventToolCallDelta,
@@ -112,6 +117,29 @@ func (s *openaiStream) Next() bool {
 				Text: delta.Content,
 			}
 			return true
+		}
+
+		// Ollama thinking content — non-standard "thinking" or "reasoning" field on the delta.
+		// Ollama uses "reasoning"; some other servers use "thinking".
+		// The openai-go struct drops unknown fields, so we read the raw JSON directly.
+		if raw := delta.RawJSON(); raw != "" {
+			var extra struct {
+				Thinking  string `json:"thinking"`
+				Reasoning string `json:"reasoning"`
+			}
+			if json.Unmarshal([]byte(raw), &extra) == nil {
+				text := extra.Thinking
+				if text == "" {
+					text = extra.Reasoning
+				}
+				if text != "" {
+					s.cur = stream.Event{
+						Type: stream.EventThinkingDelta,
+						Text: text,
+					}
+					return true
+				}
+			}
 		}
 	}
 

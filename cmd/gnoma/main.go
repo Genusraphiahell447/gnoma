@@ -57,12 +57,33 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Logger
+	// Logger — detect TUI mode early so logs don't bleed into the terminal UI.
+	// TUI = stdin is a character device (interactive TTY) with no positional args.
 	logLevel := slog.LevelWarn
 	if *verbose {
 		logLevel = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	isTUI := func() bool {
+		if len(flag.Args()) > 0 {
+			return false
+		}
+		stat, _ := os.Stdin.Stat()
+		return stat.Mode()&os.ModeCharDevice != 0
+	}()
+	var logOut io.Writer = os.Stderr
+	if isTUI {
+		if *verbose {
+			if f, err := os.CreateTemp("", "gnoma-*.log"); err == nil {
+				logOut = f
+				defer f.Close()
+				fmt.Fprintf(os.Stderr, "logging to %s\n", f.Name())
+			}
+		} else {
+			logOut = io.Discard
+		}
+	}
+	logger := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: logLevel}))
+	slog.SetDefault(logger)
 
 	// Load config (defaults → global → project → env vars)
 	cfg, err := gnomacfg.Load()
@@ -156,9 +177,10 @@ func main() {
 		armModel = prov.DefaultModel()
 	}
 	armID := router.NewArmID(*providerName, armModel)
+	armProvider := limitedProvider(prov, *providerName, armModel, cfg)
 	arm := &router.Arm{
 		ID:        armID,
-		Provider:  prov,
+		Provider:  armProvider,
 		ModelName: armModel,
 		IsLocal:   localProviders[*providerName],
 		Capabilities: provider.Capabilities{ToolUse: true}, // trust CLI provider
@@ -201,20 +223,6 @@ func main() {
 		cfg.Provider.Endpoints["llamacpp"],
 		providerFactory, 30*time.Second,
 	)
-
-	// Create elf manager and register agent tool
-	elfMgr := elf.NewManager(elf.ManagerConfig{
-		Router: rtr,
-		Tools:  reg,
-		Logger: logger,
-	})
-	elfProgressCh := make(chan elf.Progress, 16)
-	agentTool := agent.New(elfMgr)
-	agentTool.SetProgressCh(elfProgressCh)
-	reg.Register(agentTool)
-	batchTool := agent.NewBatch(elfMgr)
-	batchTool.SetProgressCh(elfProgressCh)
-	reg.Register(batchTool)
 
 	// Create firewall
 	entropyThreshold := 4.5
@@ -265,15 +273,38 @@ func main() {
 	}
 	permChecker := permission.NewChecker(permission.Mode(*permMode), permRules, pipePromptFn)
 
-	// Build system prompt with compact inventory summary
+	// Create elf manager and register agent tools.
+	// Must be created after fw and permChecker so elfs inherit security layers.
+	elfMgr := elf.NewManager(elf.ManagerConfig{
+		Router:      rtr,
+		Tools:       reg,
+		Permissions: permChecker,
+		Firewall:    fw,
+		Logger:      logger,
+	})
+	elfProgressCh := make(chan elf.Progress, 16)
+	agentTool := agent.New(elfMgr)
+	agentTool.SetProgressCh(elfProgressCh)
+	reg.Register(agentTool)
+	batchTool := agent.NewBatch(elfMgr)
+	batchTool.SetProgressCh(elfProgressCh)
+	reg.Register(batchTool)
+
+	// Build system prompt with cwd + compact inventory summary
 	systemPrompt := *system
+	if cwd, err := os.Getwd(); err == nil {
+		systemPrompt = systemPrompt + "\n\nWorking directory: " + cwd
+	}
 	if summary := inventory.Summary(); summary != "" {
 		systemPrompt = systemPrompt + "\n\n" + summary
+	}
+	if aliasSummary := aliases.AliasSummary(); aliasSummary != "" {
+		systemPrompt = systemPrompt + "\n" + aliasSummary
 	}
 
 	// Load project docs as immutable context prefix
 	var prefixMsgs []message.Message
-	for _, name := range []string{"CLAUDE.md", ".gnoma/GNOMA.md"} {
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md", ".gnoma/GNOMA.md"} {
 		data, err := os.ReadFile(name)
 		if err != nil {
 			continue
@@ -378,6 +409,7 @@ func main() {
 			Engine:      eng,
 			Permissions: permChecker,
 			Router:      rtr,
+			ElfManager:  elfMgr,
 			PermCh:      permCh,
 			PermReqCh:   permReqCh,
 			ElfProgress: elfProgressCh,
@@ -528,7 +560,31 @@ func resolveRateLimitPools(armID router.ArmID, provName, modelName string, cfg *
 	return router.PoolsFromRateLimits(armID, rl)
 }
 
+// limitedProvider wraps p with a concurrency semaphore derived from rate limits.
+// All engines (main and elf) sharing the same arm share the same semaphore.
+func limitedProvider(p provider.Provider, provName, modelName string, cfg *gnomacfg.Config) provider.Provider {
+	defaults := provider.DefaultRateLimits(provName)
+	rl, _ := defaults.LookupModel(modelName)
+	if cfg.RateLimits != nil {
+		if override, ok := cfg.RateLimits[provName]; ok {
+			if override.RPS > 0 {
+				rl.RPS = override.RPS
+			}
+			if override.RPM > 0 {
+				rl.RPM = override.RPM
+			}
+		}
+	}
+	return provider.WithConcurrency(p, rl.MaxConcurrent())
+}
+
 const defaultSystem = `You are gnoma, a provider-agnostic agentic coding assistant.
 You help users with software engineering tasks by reading files, writing code, and executing commands.
 Be concise and direct. Use tools when needed to accomplish the task.
-When spawning multiple elfs (sub-agents), call ALL agent tools in a single response so they run in parallel. Do NOT spawn one elf, wait for its result, then spawn the next.`
+
+When a task involves 2 or more independent sub-tasks, use the spawn_elfs tool to run them in parallel. Examples:
+- "fix the tests and update the docs" → spawn 2 elfs (one for tests, one for docs)
+- "analyze files A, B, and C" → spawn 3 elfs (one per file)
+- "refactor this function" → single sequential workflow (one dependent task)
+
+When using spawn_elfs, list all tasks in one call — do NOT spawn one elf at a time.`

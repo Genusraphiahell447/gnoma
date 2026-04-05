@@ -94,13 +94,27 @@ func (r *Router) Select(task Task) RoutingDecision {
 		return RoutingDecision{Error: fmt.Errorf("selection failed")}
 	}
 
+	// Reserve capacity on all pools so concurrent selects don't overcommit.
+	// If a reservation fails (race between CanAfford and Reserve), return an error.
+	var reservations []*Reservation
+	for _, pool := range best.Pools {
+		res, ok := pool.Reserve(best.ID, task.EstimatedTokens)
+		if !ok {
+			for _, prev := range reservations {
+				prev.Rollback()
+			}
+			return RoutingDecision{Error: fmt.Errorf("pool capacity exhausted for arm %s", best.ID)}
+		}
+		reservations = append(reservations, res)
+	}
+
 	r.logger.Debug("arm selected",
 		"arm", best.ID,
 		"task_type", task.Type,
 		"complexity", task.ComplexityScore,
 	)
 
-	return RoutingDecision{Strategy: StrategySingleArm, Arm: best}
+	return RoutingDecision{Strategy: StrategySingleArm, Arm: best, reservations: reservations}
 }
 
 // SetLocalOnly constrains routing to local arms only (for incognito mode).
@@ -190,19 +204,21 @@ func (r *Router) RegisterProvider(ctx context.Context, prov provider.Provider, i
 	}
 }
 
-// Stream is a convenience that selects an arm and streams from it.
-func (r *Router) Stream(ctx context.Context, task Task, req provider.Request) (stream.Stream, *Arm, error) {
+// Stream selects an arm and streams from it, returning the RoutingDecision so the
+// caller can commit or rollback pool reservations when the request completes.
+// Call decision.Commit(actualTokens) on success, decision.Rollback() on failure.
+func (r *Router) Stream(ctx context.Context, task Task, req provider.Request) (stream.Stream, RoutingDecision, error) {
 	decision := r.Select(task)
 	if decision.Error != nil {
-		return nil, nil, decision.Error
+		return nil, decision, decision.Error
 	}
 
-	arm := decision.Arm
-	req.Model = arm.ModelName
+	req.Model = decision.Arm.ModelName
 
-	s, err := arm.Provider.Stream(ctx, req)
+	s, err := decision.Arm.Provider.Stream(ctx, req)
 	if err != nil {
-		return nil, arm, err
+		decision.Rollback()
+		return nil, decision, err
 	}
-	return s, arm, nil
+	return s, decision, nil
 }

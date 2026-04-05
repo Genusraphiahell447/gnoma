@@ -55,8 +55,31 @@ func globalConfigPath() string {
 	return filepath.Join(configDir, "gnoma", "config.toml")
 }
 
+// ProjectRoot walks up from cwd to find the nearest directory containing
+// a go.mod, .git, or .gnoma directory. Falls back to cwd if none found.
+func ProjectRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	dir := cwd
+	for {
+		for _, marker := range []string{"go.mod", ".git", ".gnoma"} {
+			if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+				return dir
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return cwd
+}
+
 func projectConfigPath() string {
-	return filepath.Join(".gnoma", "config.toml")
+	return filepath.Join(ProjectRoot(), ".gnoma", "config.toml")
 }
 
 func applyEnv(cfg *Config) {

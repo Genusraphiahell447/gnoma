@@ -1,9 +1,9 @@
 package security
 
 import (
+	"fmt"
 	"math"
 	"regexp"
-	"strings"
 )
 
 // ScanAction determines what to do when a secret is found.
@@ -68,7 +68,7 @@ func (s *Scanner) Scan(content string) []SecretMatch {
 	for _, p := range s.patterns {
 		locs := p.Regex.FindAllStringIndex(content, -1)
 		for _, loc := range locs {
-			key := strings.Join([]string{p.Name, string(rune(loc[0])), string(rune(loc[1]))}, ":")
+			key := fmt.Sprintf("%s:%d:%d", p.Name, loc[0], loc[1])
 			if seen[key] {
 				continue
 			}
@@ -232,7 +232,7 @@ func defaultPatterns() []SecretPattern {
 
 		// --- Generic ---
 		{"generic_secret_assign", `(?i)(?:password|secret|token|api_key|apikey|auth)\s*[:=]\s*['"][a-zA-Z0-9_/+=\-]{8,}['"]`},
-		{"env_secret", `(?i)^[A-Z_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWORD)\s*=\s*.{8,}$`},
+		{"env_secret", `(?im)^[A-Z_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWORD)\s*=\s*.{8,}$`},
 	}
 
 	var result []SecretPattern

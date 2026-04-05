@@ -1,6 +1,9 @@
 package router
 
 import (
+	"sync"
+	"time"
+
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 )
 
@@ -19,6 +22,9 @@ type Arm struct {
 	// Cost per 1k tokens (EUR, estimated)
 	CostPer1kInput  float64
 	CostPer1kOutput float64
+
+	// Live performance metrics, updated after each completed request.
+	Perf ArmPerf
 }
 
 // NewArmID creates an arm ID from provider name and model.
@@ -39,9 +45,38 @@ func (a *Arm) SupportsTools() bool {
 	return a.Capabilities.ToolUse
 }
 
-// ArmPerf holds live performance metrics for an arm.
+// perfAlpha is the EMA smoothing factor for ArmPerf updates (0.3 = ~3-sample memory).
+const perfAlpha = 0.3
+
+// ArmPerf tracks live performance metrics using an exponential moving average.
+// Updated after each completed stream. Safe for concurrent use.
 type ArmPerf struct {
-	TTFT_P50_ms   float64 // time to first token, p50
-	TTFT_P95_ms   float64 // time to first token, p95
-	ToksPerSec    float64 // tokens per second throughput
+	mu         sync.Mutex
+	TTFTMs     float64 // time to first token, EMA in milliseconds
+	ToksPerSec float64 // output throughput, EMA in tokens/second
+	Samples    int     // total observations recorded
+}
+
+// Update records a single observation into the EMA.
+// ttft: elapsed time from stream start to first text token.
+// outputTokens: tokens generated in this response.
+// streamDuration: total time the stream was active (first call to last event).
+func (p *ArmPerf) Update(ttft time.Duration, outputTokens int, streamDuration time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	ttftMs := float64(ttft.Milliseconds())
+	var tps float64
+	if streamDuration > 0 {
+		tps = float64(outputTokens) / streamDuration.Seconds()
+	}
+
+	if p.Samples == 0 {
+		p.TTFTMs = ttftMs
+		p.ToksPerSec = tps
+	} else {
+		p.TTFTMs = perfAlpha*ttftMs + (1-perfAlpha)*p.TTFTMs
+		p.ToksPerSec = perfAlpha*tps + (1-perfAlpha)*p.ToksPerSec
+	}
+	p.Samples++
 }

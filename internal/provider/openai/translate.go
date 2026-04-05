@@ -20,6 +20,10 @@ func unsanitizeToolName(name string) string {
 	if strings.HasPrefix(name, "fs_") {
 		return "fs." + name[3:]
 	}
+	// Some models (e.g. gemma4 via Ollama) use "fs:grep" instead of "fs_grep"
+	if strings.HasPrefix(name, "fs:") {
+		return "fs." + name[3:]
+	}
 	return name
 }
 
@@ -125,6 +129,12 @@ func translateRequest(req provider.Request) oai.ChatCompletionNewParams {
 	// Enable usage in streaming
 	params.StreamOptions = oai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: param.NewOpt(true),
+	}
+
+	if req.ToolChoice != "" && len(params.Tools) > 0 {
+		params.ToolChoice = oai.ChatCompletionToolChoiceOptionUnionParam{
+			OfAuto: param.NewOpt(string(req.ToolChoice)),
+		}
 	}
 
 	return params

@@ -57,10 +57,18 @@ func NewWindow(cfg WindowConfig) *Window {
 	}
 }
 
-// Append adds a message and tracks usage.
+// Append adds a message and tracks usage (legacy: accumulates InputTokens+OutputTokens).
+// Prefer AppendMessage + Tracker().Set() for accurate per-round tracking.
 func (w *Window) Append(msg message.Message, usage message.Usage) {
 	w.messages = append(w.messages, msg)
 	w.tracker.Add(usage)
+}
+
+// AppendMessage adds a message without touching the token tracker.
+// Use this for user messages, tool results, and injected context — callers
+// are responsible for updating the tracker separately (e.g., via Tracker().Set).
+func (w *Window) AppendMessage(msg message.Message) {
+	w.messages = append(w.messages, msg)
 }
 
 // Messages returns the mutable conversation history (without prefix).
@@ -162,8 +170,9 @@ func (w *Window) doCompact(force bool) (bool, error) {
 	originalLen := len(w.messages)
 	w.messages = compacted
 
-	ratio := float64(len(compacted)) / float64(originalLen+1)
-	w.tracker.Set(int64(float64(w.tracker.Used()) * ratio))
+	// Re-estimate tokens from actual message content rather than using a
+	// message-count ratio (which is unrelated to token count).
+	w.tracker.Set(EstimateMessages(compacted))
 
 	w.logger.Info("compaction complete",
 		"messages_before", originalLen,
@@ -177,6 +186,12 @@ func (w *Window) doCompact(force bool) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// AddPrefix appends messages to the immutable prefix.
+// Used to hot-load project docs (e.g., after /init generates AGENTS.md).
+func (w *Window) AddPrefix(msgs ...message.Message) {
+	w.prefix = append(w.prefix, msgs...)
 }
 
 // Reset clears all messages and usage (prefix is preserved).

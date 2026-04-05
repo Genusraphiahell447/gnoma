@@ -7,31 +7,38 @@ import (
 	"sync"
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
 
-// elfMeta tracks routing metadata for quality feedback.
+// elfMeta tracks routing metadata and pool reservations for quality feedback.
 type elfMeta struct {
 	armID    router.ArmID
 	taskType router.TaskType
+	decision router.RoutingDecision // holds pool reservations until elf completes
 }
 
 // Manager spawns, tracks, and manages elfs.
 type Manager struct {
-	mu     sync.RWMutex
-	elfs   map[string]Elf
-	meta   map[string]elfMeta // routing metadata per elf ID
-	router *router.Router
-	tools  *tool.Registry
-	logger *slog.Logger
+	mu          sync.RWMutex
+	elfs        map[string]Elf
+	meta        map[string]elfMeta // routing metadata per elf ID
+	router      *router.Router
+	tools       *tool.Registry
+	permissions *permission.Checker
+	firewall    *security.Firewall
+	logger      *slog.Logger
 }
 
 type ManagerConfig struct {
-	Router *router.Router
-	Tools  *tool.Registry
-	Logger *slog.Logger
+	Router      *router.Router
+	Tools       *tool.Registry
+	Permissions *permission.Checker  // nil = allow all (unsafe; prefer passing parent checker)
+	Firewall    *security.Firewall   // nil = no scanning
+	Logger      *slog.Logger
 }
 
 func NewManager(cfg ManagerConfig) *Manager {
@@ -40,11 +47,13 @@ func NewManager(cfg ManagerConfig) *Manager {
 		logger = slog.Default()
 	}
 	return &Manager{
-		elfs:   make(map[string]Elf),
-		meta:   make(map[string]elfMeta),
-		router: cfg.Router,
-		tools:  cfg.Tools,
-		logger: logger,
+		elfs:        make(map[string]Elf),
+		meta:        make(map[string]elfMeta),
+		router:      cfg.Router,
+		tools:       cfg.Tools,
+		permissions: cfg.Permissions,
+		firewall:    cfg.Firewall,
+		logger:      logger,
 	}
 }
 
@@ -71,16 +80,26 @@ func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, s
 		"model", arm.ModelName,
 	)
 
+	// Resolve permissions for this elf: inherit parent mode but never prompt
+	// (no TUI in elf context — prompting would deadlock).
+	elfPerms := m.permissions
+	if elfPerms != nil {
+		elfPerms = elfPerms.WithDenyPrompt()
+	}
+
 	// Create independent engine for the elf
 	eng, err := engine.New(engine.Config{
-		Provider: arm.Provider,
-		Tools:    m.tools,
-		System:   systemPrompt,
-		Model:    arm.ModelName,
-		MaxTurns: maxTurns,
-		Logger:   m.logger,
+		Provider:    arm.Provider,
+		Tools:       m.tools,
+		Permissions: elfPerms,
+		Firewall:    m.firewall,
+		System:      systemPrompt,
+		Model:       arm.ModelName,
+		MaxTurns:    maxTurns,
+		Logger:      m.logger,
 	})
 	if err != nil {
+		decision.Rollback()
 		return nil, fmt.Errorf("create elf engine: %w", err)
 	}
 
@@ -88,14 +107,14 @@ func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, s
 
 	m.mu.Lock()
 	m.elfs[elf.ID()] = elf
-	m.meta[elf.ID()] = elfMeta{armID: arm.ID, taskType: taskType}
+	m.meta[elf.ID()] = elfMeta{armID: arm.ID, taskType: taskType, decision: decision}
 	m.mu.Unlock()
 
 	m.logger.Info("elf spawned", "id", elf.ID(), "arm", arm.ID)
 	return elf, nil
 }
 
-// ReportResult reports an elf's outcome to the router for quality feedback.
+// ReportResult commits pool reservations and reports an elf's outcome to the router.
 func (m *Manager) ReportResult(result Result) {
 	m.mu.RLock()
 	meta, ok := m.meta[result.ID]
@@ -104,6 +123,11 @@ func (m *Manager) ReportResult(result Result) {
 	if !ok {
 		return
 	}
+
+	// Commit pool reservations with actual token consumption.
+	// Cancelled/failed elfs still commit what they consumed; a zero commit is
+	// safe — it just moves reserved tokens to used at rate 0.
+	meta.decision.Commit(int(result.Usage.TotalTokens()))
 
 	m.router.ReportOutcome(router.Outcome{
 		ArmID:    meta.armID,
@@ -116,13 +140,19 @@ func (m *Manager) ReportResult(result Result) {
 
 // SpawnWithProvider creates an elf using a specific provider (bypasses router).
 func (m *Manager) SpawnWithProvider(prov provider.Provider, model, prompt, systemPrompt string, maxTurns int) (Elf, error) {
+	elfPerms := m.permissions
+	if elfPerms != nil {
+		elfPerms = elfPerms.WithDenyPrompt()
+	}
 	eng, err := engine.New(engine.Config{
-		Provider: prov,
-		Tools:    m.tools,
-		System:   systemPrompt,
-		Model:    model,
-		MaxTurns: maxTurns,
-		Logger:   m.logger,
+		Provider:    prov,
+		Tools:       m.tools,
+		Permissions: elfPerms,
+		Firewall:    m.firewall,
+		System:      systemPrompt,
+		Model:       model,
+		MaxTurns:    maxTurns,
+		Logger:      m.logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create elf engine: %w", err)
@@ -207,6 +237,7 @@ func (m *Manager) Cleanup() {
 		s := e.Status()
 		if s == StatusCompleted || s == StatusFailed || s == StatusCancelled {
 			delete(m.elfs, id)
+			delete(m.meta, id)
 		}
 	}
 }
