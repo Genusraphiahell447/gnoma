@@ -42,7 +42,9 @@ type listResultsArgs struct {
 
 func (t *ListResultsTool) Execute(_ context.Context, args json.RawMessage) (tool.Result, error) {
 	var a listResultsArgs
-	json.Unmarshal(args, &a) //nolint:errcheck
+	if err := json.Unmarshal(args, &a); err != nil {
+		return tool.Result{Output: fmt.Sprintf("list_results: invalid args: %v", err)}, nil
+	}
 
 	files, err := t.store.List(a.Filter)
 	if err != nil {

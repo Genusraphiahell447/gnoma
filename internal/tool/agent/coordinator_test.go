@@ -26,7 +26,13 @@ func TestListResultsTool_EmptyStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = result // empty or "no results" — either is fine
+	if !strings.Contains(result.Output, "no results") && result.Output != "" {
+		// both "no results" message and empty string are acceptable
+	}
+	// Verify it doesn't error on empty store
+	if strings.Contains(result.Output, "error") {
+		t.Errorf("unexpected error output for empty store: %s", result.Output)
+	}
 }
 
 func TestListResultsTool_ListsFiles(t *testing.T) {
@@ -61,6 +67,9 @@ func TestListResultsTool_FilterByToolName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(result.Output, "bash") {
+		t.Errorf("filter should include bash, got: %s", result.Output)
+	}
 	if strings.Contains(result.Output, "fs") {
 		t.Errorf("filter should exclude fs.read, got: %s", result.Output)
 	}
@@ -86,9 +95,11 @@ func TestReadResultTool_RejectsPathTraversal(t *testing.T) {
 	s := makeTestStore(t)
 	tool := agent.NewReadResultTool(s)
 	args, _ := json.Marshal(map[string]string{"path": "/etc/passwd"})
-	// Path traversal: tool must reject this — either err != nil or output contains rejection message
 	result, err := tool.Execute(context.Background(), args)
-	if err == nil && !strings.Contains(result.Output, "outside") && !strings.Contains(result.Output, "permission") && !strings.Contains(result.Output, "error") {
-		t.Errorf("expected path traversal rejection, got: output=%q err=%v", result.Output, err)
+	if err != nil {
+		t.Fatalf("Execute must not return a hard error; soft rejection in Output expected, got: %v", err)
+	}
+	if !strings.Contains(result.Output, "outside") {
+		t.Errorf("expected 'outside session directory' rejection, got: %s", result.Output)
 	}
 }
