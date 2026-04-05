@@ -22,6 +22,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
+	"somegit.dev/Owlibou/gnoma/internal/tokenizer"
 	anthropicprov "somegit.dev/Owlibou/gnoma/internal/provider/anthropic"
 	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
 	googleprov "somegit.dev/Owlibou/gnoma/internal/provider/google"
@@ -329,15 +330,31 @@ func main() {
 		logger.Debug("loaded project docs as context prefix", "file", name, "size", len(data))
 	}
 
+	// Derive context window size from registered arm capabilities (accurate) or fall back to heuristic
+	contextWindowSize := int64(cfg.Provider.MaxTokens) * 20
+	if arm, ok := rtr.LookupArm(armID); ok && arm.Capabilities.ContextWindow > 0 {
+		contextWindowSize = int64(arm.Capabilities.ContextWindow)
+		logger.Debug("context window from arm capabilities", "arm", armID, "context_window", contextWindowSize)
+	}
+
 	// Create context window with summarize strategy (falls back to truncation)
 	var compactStrategy gnomactx.Strategy
 	compactStrategy = gnomactx.NewSummarizeStrategy(prov)
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{
-		MaxTokens:      cfg.Provider.MaxTokens * 20, // rough: max_tokens is per-turn, context window ~20x
+		MaxTokens:      contextWindowSize,
 		Strategy:       compactStrategy,
 		PrefixMessages: prefixMsgs,
 		Logger:         logger,
 	})
+
+	// Wire tokenizer and seed tracker with prefix cost
+	tok := tokenizer.ForProvider(prov.Name())
+	ctxWindow.Tracker().SetTokenizer(tok)
+	if len(prefixMsgs) > 0 {
+		prefixTokens := ctxWindow.Tracker().CountMessages(prefixMsgs)
+		ctxWindow.Tracker().Set(prefixTokens)
+		logger.Debug("prefix token baseline set", "tokens", prefixTokens)
+	}
 
 	// Create engine
 	eng, err := engine.New(engine.Config{

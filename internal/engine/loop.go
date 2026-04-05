@@ -76,7 +76,11 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				}
 			}
 			task := router.ClassifyTask(prompt)
-			task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+			if e.cfg.Context != nil {
+				task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
+			} else {
+				task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+			}
 
 			e.logger.Debug("routing request",
 				"task_type", task.Type,
@@ -117,7 +121,11 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 						}
 					}
 					task := router.ClassifyTask(prompt)
-					task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+					if e.cfg.Context != nil {
+						task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
+					} else {
+						task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+					}
 					var retryDecision router.RoutingDecision
 					s, retryDecision, err = e.cfg.Router.Stream(ctx, task, req)
 					decision = retryDecision // adopt new reservation on retry
@@ -455,7 +463,11 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 			}
 		}
 		task := router.ClassifyTask(prompt)
-		task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+		if e.cfg.Context != nil {
+			task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
+		} else {
+			task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+		}
 		s, _, err := e.cfg.Router.Stream(ctx, task, req)
 		return s, err
 	}
