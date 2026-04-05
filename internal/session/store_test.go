@@ -106,6 +106,25 @@ func TestSessionStore_List_SortedByUpdatedAt(t *testing.T) {
 	}
 }
 
+func TestSessionStore_Load_RejectsPathTraversal(t *testing.T) {
+	store := makeStore(t)
+	cases := []string{"../../etc/passwd", "../sibling", ""}
+	for _, id := range cases {
+		_, err := store.Load(id)
+		if err == nil {
+			t.Errorf("Load(%q): expected error for invalid ID", id)
+		}
+	}
+}
+
+func TestSessionStore_Save_RejectsPathTraversal(t *testing.T) {
+	store := makeStore(t)
+	snap := makeSnap("../../evil", time.Now().UTC())
+	if err := store.Save(snap); err == nil {
+		t.Error("Save with traversal ID: expected error")
+	}
+}
+
 func TestSessionStore_Prune_RemovesOldest(t *testing.T) {
 	store := makeStore(t) // maxKeep = 3
 	now := time.Now().UTC()

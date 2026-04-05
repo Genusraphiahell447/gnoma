@@ -196,14 +196,21 @@ func main() {
 		}
 	}
 
-	// Save QualityTracker data on exit (best-effort)
+	// Save QualityTracker data on exit (best-effort, suppressed in incognito)
 	defer func() {
+		if *incognito {
+			return
+		}
 		snap := rtr.QualityTracker().Snapshot()
 		data, err := json.Marshal(snap)
 		if err != nil {
 			return
 		}
-		userCfgDir, _ := os.UserConfigDir()
+		userCfgDir, err := os.UserConfigDir()
+		if err != nil {
+			logger.Warn("quality save skipped: no user config dir", "error", err)
+			return
+		}
 		dir := filepath.Join(userCfgDir, "gnoma")
 		os.MkdirAll(dir, 0o755)
 		os.WriteFile(filepath.Join(dir, "quality.json"), data, 0o644)
@@ -409,6 +416,7 @@ func main() {
 	}
 
 	// Resume logic: --resume/-r flag
+	resumedTurnCount := 0
 	resumeRequested := isFlagSet("resume") || isFlagSet("r")
 	if resumeRequested {
 		var snap session.Snapshot
@@ -439,6 +447,7 @@ func main() {
 		eng.SetHistory(snap.Messages)
 		eng.SetUsage(snap.Metadata.Usage)
 		sessionID = snap.ID
+		resumedTurnCount = snap.Metadata.TurnCount
 		logger.Info("session resumed", "id", snap.ID, "turns", snap.Metadata.TurnCount)
 	}
 
@@ -504,6 +513,7 @@ func main() {
 			Provider:  *providerName,
 			Model:     armModel,
 			SessionID: sessionID,
+			TurnCount: resumedTurnCount,
 			Store:     sessStore,
 			Incognito: fw.Incognito(),
 			Logger:    logger,

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
 )
@@ -27,8 +28,25 @@ func NewSessionStore(projectRoot string, maxKeep int, logger *slog.Logger) *Sess
 	}
 }
 
+// sessionDir validates a session ID and returns its absolute path within the store.
+// Rejects empty IDs and path traversal attempts.
+func (s *SessionStore) sessionDir(id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("session ID must not be empty")
+	}
+	dir := filepath.Join(s.dir, id)
+	storeRoot := filepath.Clean(s.dir) + string(os.PathSeparator)
+	if !strings.HasPrefix(dir+string(os.PathSeparator), storeRoot) {
+		return "", fmt.Errorf("invalid session ID %q", id)
+	}
+	return dir, nil
+}
+
 func (s *SessionStore) Save(snap Snapshot) error {
-	dir := filepath.Join(s.dir, snap.ID)
+	dir, err := s.sessionDir(snap.ID)
+	if err != nil {
+		return fmt.Errorf("session save: %w", err)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("session %q: create dir: %w", snap.ID, err)
 	}
@@ -45,7 +63,10 @@ func (s *SessionStore) Save(snap Snapshot) error {
 }
 
 func (s *SessionStore) Load(id string) (Snapshot, error) {
-	dir := filepath.Join(s.dir, id)
+	dir, err := s.sessionDir(id)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("session load: %w", err)
+	}
 
 	metaBytes, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
