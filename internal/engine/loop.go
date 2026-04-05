@@ -301,7 +301,33 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 		)
 	}
 
+	// Inject coordinator guidance for orchestration tasks
+	if e.cfg.Router != nil {
+		prompt := ""
+		for i := len(e.history) - 1; i >= 0; i-- {
+			if e.history[i].Role == message.RoleUser {
+				prompt = e.history[i].TextContent()
+				break
+			}
+		}
+		if router.ClassifyTask(prompt).Type == router.TaskOrchestration {
+			req.SystemPrompt = coordinatorPrompt() + "\n\n" + req.SystemPrompt
+		}
+	}
+
 	return req
+}
+
+// coordinatorPrompt returns the system prompt block injected for orchestration tasks.
+func coordinatorPrompt() string {
+	return `You are operating in coordinator mode. Your role is to decompose complex work into parallel tasks and orchestrate elfs.
+
+Rules:
+- Use spawn_elfs to dispatch N tasks in parallel when they don't share write state.
+- Use list_results to discover outputs produced by prior tool calls in this session.
+- Pass result file paths to elfs in their prompts so they can read prior outputs with read_result or fs.read.
+- Writes are serial: if two elfs would write the same file, sequence them.
+- Synthesize elf outputs into a coherent final answer.`
 }
 
 func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb Callback) ([]message.ToolResult, error) {
