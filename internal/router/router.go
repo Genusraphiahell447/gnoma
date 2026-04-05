@@ -172,6 +172,11 @@ func (r *Router) LookupArm(id ArmID) (*Arm, bool) {
 	return arm, ok
 }
 
+// QualityTracker returns the router's quality tracker for persistence.
+func (r *Router) QualityTracker() *QualityTracker {
+	return r.quality
+}
+
 // Arms returns all registered arms.
 func (r *Router) Arms() []*Arm {
 	r.mu.RLock()
