@@ -221,7 +221,7 @@ func TestSelectBest_PrefersToolSupport(t *testing.T) {
 	}
 
 	task := Task{Type: TaskGeneration, RequiresTools: true, Priority: PriorityNormal}
-	best := selectBest([]*Arm{withoutTools, withTools}, task)
+	best := selectBest(nil, []*Arm{withoutTools, withTools}, task)
 
 	if best.ID != "a/with-tools" {
 		t.Errorf("should prefer arm with tool support, got %s", best.ID)
@@ -241,7 +241,7 @@ func TestSelectBest_PrefersThinkingForPlanning(t *testing.T) {
 	}
 
 	task := Task{Type: TaskPlanning, RequiresTools: true, Priority: PriorityNormal, EstimatedTokens: 5000}
-	best := selectBest([]*Arm{noThinking, thinking}, task)
+	best := selectBest(nil, []*Arm{noThinking, thinking}, task)
 
 	if best.ID != "a/thinking" {
 		t.Errorf("should prefer thinking model for planning, got %s", best.ID)

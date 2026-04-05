@@ -135,11 +135,12 @@ func (m *Manager) ReportResult(result Result) {
 	meta.decision.Commit(int(result.Usage.TotalTokens()))
 
 	m.router.ReportOutcome(router.Outcome{
-		ArmID:    meta.armID,
-		TaskType: meta.taskType,
-		Success:  result.Status == StatusCompleted,
-		Tokens:   int(result.Usage.TotalTokens()),
-		Duration: result.Duration,
+		ArmID:           meta.armID,
+		TaskType:        meta.taskType,
+		Success:         result.Status == StatusCompleted,
+		Tokens:          int(result.Usage.TotalTokens()),
+		Duration:        result.Duration,
+		ResultFilePaths: result.ResultFilePaths,
 	})
 }
 

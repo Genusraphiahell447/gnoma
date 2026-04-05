@@ -42,13 +42,14 @@ func (s Status) String() string {
 
 // Result is the output of a completed elf.
 type Result struct {
-	ID       string
-	Status   Status
-	Messages []message.Message
-	Usage    message.Usage
-	Output   string // final text output
-	Error    error
-	Duration time.Duration
+	ID              string
+	Status          Status
+	Messages        []message.Message
+	Usage           message.Usage
+	Output          string // final text output
+	Error           error
+	Duration        time.Duration
+	ResultFilePaths []string // paths to /tmp results produced by this elf's tools
 }
 
 // Elf is a sub-agent with its own engine and conversation history.

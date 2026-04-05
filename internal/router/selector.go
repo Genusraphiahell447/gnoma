@@ -36,10 +36,9 @@ func (d RoutingDecision) Rollback() {
 	}
 }
 
-// selectBest picks the highest-scoring feasible arm using heuristic scoring.
-// No bandit learning — that's M9. Just smart defaults based on model size,
-// locality, task type, cost, and pool scarcity.
-func selectBest(arms []*Arm, task Task) *Arm {
+// selectBest picks the highest-scoring feasible arm, blending heuristic and
+// observed EMA quality when enough data is available.
+func selectBest(qt *QualityTracker, arms []*Arm, task Task) *Arm {
 	if len(arms) == 0 {
 		return nil
 	}
@@ -48,7 +47,7 @@ func selectBest(arms []*Arm, task Task) *Arm {
 	bestScore := math.Inf(-1)
 
 	for _, arm := range arms {
-		score := scoreArm(arm, task)
+		score := scoreArm(qt, arm, task)
 		if score > bestScore {
 			bestScore = score
 			best = arm
@@ -58,17 +57,23 @@ func selectBest(arms []*Arm, task Task) *Arm {
 	return best
 }
 
-// scoreArm computes a heuristic quality/cost score for an arm.
+// scoreArm computes a quality/cost score for an arm.
+// When the quality tracker has sufficient observations, blends observed EMA
+// (70%) with heuristic (30%). Falls back to pure heuristic otherwise.
 // Score = (quality × value) / effective_cost
-func scoreArm(arm *Arm, task Task) float64 {
-	quality := heuristicQuality(arm, task)
+func scoreArm(qt *QualityTracker, arm *Arm, task Task) float64 {
+	hq := heuristicQuality(arm, task)
+	quality := hq
+	if qt != nil {
+		if observed, hasData := qt.Quality(arm.ID, task.Type); hasData {
+			quality = 0.7*observed + 0.3*hq
+		}
+	}
 	value := task.ValueScore()
 	cost := effectiveCost(arm, task)
-
 	if cost <= 0 {
-		cost = 0.001 // prevent division by zero for free local models
+		cost = 0.001
 	}
-
 	return (quality * value) / cost
 }
 

@@ -22,6 +22,8 @@ type Router struct {
 	forcedArm ArmID
 	// When true, only local arms are considered (incognito mode)
 	localOnly bool
+
+	quality *QualityTracker
 }
 
 type Config struct {
@@ -34,8 +36,9 @@ func New(cfg Config) *Router {
 		logger = slog.Default()
 	}
 	return &Router{
-		arms:   make(map[ArmID]*Arm),
-		logger: logger,
+		arms:    make(map[ArmID]*Arm),
+		logger:  logger,
+		quality: NewQualityTracker(),
 	}
 }
 
@@ -89,7 +92,7 @@ func (r *Router) Select(task Task) RoutingDecision {
 	}
 
 	// Select best
-	best := selectBest(feasible, task)
+	best := selectBest(r.quality, feasible, task)
 	if best == nil {
 		return RoutingDecision{Error: fmt.Errorf("selection failed")}
 	}
@@ -140,23 +143,33 @@ func (r *Router) RemoveArm(id ArmID) {
 
 // Outcome records the result of a task execution for quality feedback.
 type Outcome struct {
-	ArmID    ArmID
-	TaskType TaskType
-	Success  bool
-	Tokens   int
-	Duration time.Duration
+	ArmID           ArmID
+	TaskType        TaskType
+	Success         bool
+	Tokens          int
+	Duration        time.Duration
+	ResultFilePaths []string // paths to /tmp tool result files (for M9 analysis)
 }
 
 // ReportOutcome records a task execution result for quality tracking.
-// M4: logs only. M9 will use this for bandit learning.
 func (r *Router) ReportOutcome(o Outcome) {
-	r.logger.Debug("outcome reported",
+	r.quality.Record(o.ArmID, o.TaskType, o.Success)
+	r.logger.Debug("outcome recorded",
 		"arm", o.ArmID,
 		"task", o.TaskType,
 		"success", o.Success,
 		"tokens", o.Tokens,
 		"duration", o.Duration,
+		"result_files", len(o.ResultFilePaths),
 	)
+}
+
+// LookupArm returns the arm with the given ID, if registered.
+func (r *Router) LookupArm(id ArmID) (*Arm, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	arm, ok := r.arms[id]
+	return arm, ok
 }
 
 // Arms returns all registered arms.

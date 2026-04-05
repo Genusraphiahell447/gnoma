@@ -86,7 +86,6 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	if t.store != nil {
 		preSave, _ = t.store.List("")
 	}
-	_ = preSave // used in Task 4 for ResultFilePaths diff
 
 	e, err := t.manager.Spawn(ctx, taskType, a.Prompt, systemPrompt, maxTurns)
 	if err != nil {
@@ -174,7 +173,19 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 		return tool.Result{Output: "Elf timed out after 5 minutes"}, nil
 	}
 
-	// Report outcome to router for quality feedback
+	// Attribute /tmp result files produced during this elf's run
+	if t.store != nil {
+		postSave, _ := t.store.List("")
+		preSet := make(map[string]bool, len(preSave))
+		for _, f := range preSave {
+			preSet[f.Path] = true
+		}
+		for _, f := range postSave {
+			if !preSet[f.Path] {
+				result.ResultFilePaths = append(result.ResultFilePaths, f.Path)
+			}
+		}
+	}
 	t.manager.ReportResult(result)
 
 	// Send done signal — stays in tree until turn completes

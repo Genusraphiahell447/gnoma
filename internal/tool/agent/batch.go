@@ -97,7 +97,6 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 	if t.store != nil {
 		preSave, _ = t.store.List("")
 	}
-	_ = preSave // used in Task 4
 
 	// Spawn all elfs with slight stagger to avoid rate limit bursts
 	type elfEntry struct {
@@ -178,7 +177,21 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 				}
 			}
 
-			// Report outcome to router
+			// For batch elfs, attribute all new /tmp files produced during the batch
+			if t.store != nil {
+				postSave, _ := t.store.List("")
+				preSet := make(map[string]bool, len(preSave))
+				for _, f := range preSave {
+					preSet[f.Path] = true
+				}
+				var newPaths []string
+				for _, f := range postSave {
+					if !preSet[f.Path] {
+						newPaths = append(newPaths, f.Path)
+					}
+				}
+				results[idx].ResultFilePaths = newPaths
+			}
 			t.manager.ReportResult(results[idx])
 
 			// Send done progress
