@@ -417,6 +417,7 @@ func main() {
 
 	// Resume logic: --resume/-r flag
 	resumedTurnCount := 0
+	openResumePicker := false
 	resumeRequested := isFlagSet("resume") || isFlagSet("r")
 	if resumeRequested {
 		var snap session.Snapshot
@@ -425,30 +426,37 @@ func main() {
 			snap, loadErr = sessStore.Load(resumeFlag)
 		}
 		if resumeFlag == "" || loadErr != nil {
-			sessions, listErr := sessStore.List()
-			if listErr != nil || len(sessions) == 0 {
-				fmt.Fprintln(os.Stderr, "no saved sessions found")
+			// No specific ID given (or ID not found): open interactive picker in TUI,
+			// or fall back to text list in pipe mode.
+			if isTUI {
+				openResumePicker = true
 			} else {
-				fmt.Fprintln(os.Stderr, "Saved sessions:")
-				fmt.Fprintln(os.Stderr, "")
-				for _, m := range sessions {
-					fmt.Fprintf(os.Stderr, "  %s  %s/%s  %d turns  %s\n",
-						m.ID, m.Provider, m.Model, m.TurnCount,
-						m.UpdatedAt.Format("2006-01-02 15:04"),
-					)
+				sessions, listErr := sessStore.List()
+				if listErr != nil || len(sessions) == 0 {
+					fmt.Fprintln(os.Stderr, "no saved sessions found")
+				} else {
+					fmt.Fprintln(os.Stderr, "Saved sessions:")
+					fmt.Fprintln(os.Stderr, "")
+					for _, m := range sessions {
+						fmt.Fprintf(os.Stderr, "  %s  %s/%s  %d turns  %s\n",
+							m.ID, m.Provider, m.Model, m.TurnCount,
+							m.UpdatedAt.Format("2006-01-02 15:04"),
+						)
+					}
+					if loadErr != nil {
+						fmt.Fprintf(os.Stderr, "\nsession %q not found\n", resumeFlag)
+					}
 				}
-				if loadErr != nil {
-					fmt.Fprintf(os.Stderr, "\nsession %q not found\n", resumeFlag)
-				}
+				os.Exit(0)
 			}
-			os.Exit(0)
+		} else {
+			// Valid session found — restore engine state
+			eng.SetHistory(snap.Messages)
+			eng.SetUsage(snap.Metadata.Usage)
+			sessionID = snap.ID
+			resumedTurnCount = snap.Metadata.TurnCount
+			logger.Info("session resumed", "id", snap.ID, "turns", snap.Metadata.TurnCount)
 		}
-		// Valid session found — restore engine state
-		eng.SetHistory(snap.Messages)
-		eng.SetUsage(snap.Metadata.Usage)
-		sessionID = snap.ID
-		resumedTurnCount = snap.Metadata.TurnCount
-		logger.Info("session resumed", "id", snap.ID, "turns", snap.Metadata.TurnCount)
 	}
 
 	// Detect mode: TUI (interactive TTY) or pipe mode
@@ -521,15 +529,16 @@ func main() {
 		defer sess.Close()
 
 		m := tui.New(sess, tui.Config{
-			Firewall:     fw,
-			Engine:       eng,
-			Permissions:  permChecker,
-			Router:       rtr,
-			ElfManager:   elfMgr,
-			PermCh:       permCh,
-			PermReqCh:    permReqCh,
-			ElfProgress:  elfProgressCh,
-			SessionStore: sessStore,
+			Firewall:              fw,
+			Engine:                eng,
+			Permissions:           permChecker,
+			Router:                rtr,
+			ElfManager:            elfMgr,
+			PermCh:                permCh,
+			PermReqCh:             permReqCh,
+			ElfProgress:           elfProgressCh,
+			SessionStore:          sessStore,
+			StartWithResumePicker: openResumePicker,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {

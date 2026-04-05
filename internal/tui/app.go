@@ -35,13 +35,16 @@ const version = "v0.1.0-dev"
 
 type streamEventMsg struct{ event stream.Event }
 type turnDoneMsg struct{ err error }
+
 // PermReqMsg carries a permission request from engine to TUI.
 type PermReqMsg struct {
 	ToolName string
 	Args     json.RawMessage
 }
+
 type elfProgressMsg struct{ progress elf.Progress }
 type clearQuitHintMsg struct{}
+type resumeListLoadedMsg struct{ sessions []session.Metadata }
 
 type chatMessage struct {
 	role    string
@@ -50,15 +53,16 @@ type chatMessage struct {
 
 // Config holds optional dependencies for TUI features.
 type Config struct {
-	Firewall     *security.Firewall    // for incognito toggle
-	Engine       *engine.Engine        // for model switching
-	Permissions  *permission.Checker   // for mode switching
-	Router       *router.Router        // for model listing
-	ElfManager   *elf.Manager          // for CancelAll on escape/quit
-	PermCh       chan bool             // TUI → engine: y/n response
-	PermReqCh    <-chan PermReqMsg    // engine → TUI: tool requesting approval
-	ElfProgress  <-chan elf.Progress   // elf → TUI: structured progress updates
-	SessionStore *session.SessionStore // nil = no persistence
+	Firewall             *security.Firewall    // for incognito toggle
+	Engine               *engine.Engine        // for model switching
+	Permissions          *permission.Checker   // for mode switching
+	Router               *router.Router        // for model listing
+	ElfManager           *elf.Manager          // for CancelAll on escape/quit
+	PermCh               chan bool             // TUI → engine: y/n response
+	PermReqCh            <-chan PermReqMsg    // engine → TUI: tool requesting approval
+	ElfProgress          <-chan elf.Progress   // elf → TUI: structured progress updates
+	SessionStore         *session.SessionStore // nil = no persistence
+	StartWithResumePicker bool                 // open session picker on launch
 }
 
 type Model struct {
@@ -89,6 +93,11 @@ type Model struct {
 	permPending    bool            // waiting for user to approve/deny a tool
 	permToolName   string          // which tool is asking
 	permArgs       json.RawMessage // tool args for display
+
+	// Session resume picker
+	resumePending  bool
+	resumeSessions []session.Metadata
+	resumeSelected int
 	initPending       bool   // true while /init turn is in-flight; triggers AGENTS.md reload on turnDone
 	initHadToolCalls  bool   // set when any tool call fires during an init turn
 	initRetried       bool   // set after first retry (no-tool-call case) so we don't retry indefinitely
@@ -145,7 +154,18 @@ func New(sess session.Session, cfg Config) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.input.Focus()
+	cmds := []tea.Cmd{m.input.Focus()}
+	if m.config.StartWithResumePicker && m.config.SessionStore != nil {
+		store := m.config.SessionStore
+		cmds = append(cmds, func() tea.Msg {
+			sessions, err := store.List()
+			if err != nil || len(sessions) == 0 {
+				return nil
+			}
+			return resumeListLoadedMsg{sessions: sessions}
+		})
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -168,6 +188,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Escape = global stop, never quits
 		if msg.String() == "escape" {
+			if m.resumePending {
+				m.resumePending = false
+				m.resumeSessions = nil
+				m.resumeSelected = 0
+				return m, nil
+			}
 			if m.permPending {
 				m.permPending = false
 				m.messages = append(m.messages, chatMessage{role: "system",
@@ -230,6 +256,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.listenForEvents() // continue listening
 			}
 			return m, nil // ignore other keys while prompting
+		}
+
+		// --- Session picker (only when resume picker is open) ---
+		if m.resumePending {
+			switch msg.String() {
+			case "up", "k":
+				if m.resumeSelected > 0 {
+					m.resumeSelected--
+				}
+			case "down", "j":
+				if m.resumeSelected < len(m.resumeSessions)-1 {
+					m.resumeSelected++
+				}
+			case "enter":
+				return m.confirmResumeSelection()
+			}
+			return m, nil // swallow all other keys
 		}
 
 		switch msg.String() {
@@ -317,6 +360,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clearQuitHintMsg:
 		m.quitHint = false
+		return m, nil
+
+	case resumeListLoadedMsg:
+		if len(msg.sessions) > 0 {
+			m.resumePending = true
+			m.resumeSessions = msg.sessions
+			m.resumeSelected = 0
+			m.scrollOffset = 0
+		}
 		return m, nil
 
 	case elfProgressMsg:
@@ -734,50 +786,27 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, chatMessage{role: "system", content: "session persistence is not configured"})
 			return m, nil
 		}
+		if args != "" {
+			snap, loadErr := m.config.SessionStore.Load(args)
+			if loadErr == nil {
+				return m.applySessionSnapshot(snap)
+			}
+			m.messages = append(m.messages, chatMessage{role: "system",
+				content: fmt.Sprintf("session %q not found", args)})
+		}
 		sessions, err := m.config.SessionStore.List()
 		if err != nil {
 			m.messages = append(m.messages, chatMessage{role: "error", content: "failed to list sessions: " + err.Error()})
 			return m, nil
 		}
-		if args != "" {
-			snap, loadErr := m.config.SessionStore.Load(args)
-			if loadErr == nil {
-				if m.config.Engine != nil {
-					m.config.Engine.SetHistory(snap.Messages)
-					m.config.Engine.SetUsage(snap.Metadata.Usage)
-				}
-				// Rebuild display history from restored messages (text only)
-				m.messages = nil
-				for _, msg := range snap.Messages {
-					if t := msg.TextContent(); t != "" {
-						m.messages = append(m.messages, chatMessage{
-							role:    string(msg.Role),
-							content: t,
-						})
-					}
-				}
-				m.messages = append(m.messages, chatMessage{role: "system",
-					content: fmt.Sprintf("Session %s resumed (%d turns, %s/%s)",
-						snap.ID, snap.Metadata.TurnCount, snap.Metadata.Provider, snap.Metadata.Model)})
-				return m, nil
-			}
-			// Session not found — fall through to show list with error note
-			m.messages = append(m.messages, chatMessage{role: "system",
-				content: fmt.Sprintf("session %q not found — available sessions:", args)})
-		}
 		if len(sessions) == 0 {
 			m.messages = append(m.messages, chatMessage{role: "system", content: "no saved sessions"})
 			return m, nil
 		}
-		var b strings.Builder
-		b.WriteString("Saved sessions:\n\n")
-		for _, s := range sessions {
-			fmt.Fprintf(&b, "  %s  %s/%s  %d turns  %s\n",
-				s.ID, s.Provider, s.Model, s.TurnCount,
-				s.UpdatedAt.Format("2006-01-02 15:04"))
-		}
-		b.WriteString("\nUse /resume <id> to restore a session.")
-		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
+		m.resumePending = true
+		m.resumeSessions = sessions
+		m.resumeSelected = 0
+		m.scrollOffset = 0
 		return m, nil
 
 	case "/help":
@@ -968,6 +997,24 @@ func (m Model) renderChat(height int) string {
 	if m.permPending {
 		lines = append(lines, "")
 		lines = append(lines, sSystem.Render("• "+formatPermissionPrompt(m.permToolName, m.permArgs)))
+		lines = append(lines, "")
+	}
+
+	// Transient: session resume picker
+	if m.resumePending && len(m.resumeSessions) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, sSystem.Render("  Sessions  ↑↓ · Enter to load · Esc to cancel"))
+		lines = append(lines, "")
+		for i, s := range m.resumeSessions {
+			age := time.Since(s.UpdatedAt).Truncate(time.Minute)
+			row := fmt.Sprintf("%-26s  %s/%s  %d turns  %s ago",
+				s.ID, s.Provider, s.Model, s.TurnCount, age)
+			if i == m.resumeSelected {
+				lines = append(lines, sText.Render("→ "+row))
+			} else {
+				lines = append(lines, sHint.Render("  "+row))
+			}
+		}
 		lines = append(lines, "")
 	}
 
@@ -1418,6 +1465,47 @@ func wrapText(text string, width int) string {
 // These often require tool_choice: required to emit function call JSON.
 func isLocalProvider(providerName string) bool {
 	return providerName == "ollama" || providerName == "llamacpp"
+}
+
+// confirmResumeSelection loads the currently highlighted session and restores it.
+func (m Model) confirmResumeSelection() (tea.Model, tea.Cmd) {
+	if m.resumeSelected < 0 || m.resumeSelected >= len(m.resumeSessions) {
+		m.resumePending = false
+		return m, nil
+	}
+	selected := m.resumeSessions[m.resumeSelected]
+	m.resumePending = false
+	m.resumeSessions = nil
+	m.resumeSelected = 0
+	snap, err := m.config.SessionStore.Load(selected.ID)
+	if err != nil {
+		m.messages = append(m.messages, chatMessage{role: "error",
+			content: fmt.Sprintf("failed to load session %q: %v", selected.ID, err)})
+		return m, nil
+	}
+	return m.applySessionSnapshot(snap)
+}
+
+// applySessionSnapshot restores engine state from a snapshot and rebuilds the display history.
+func (m Model) applySessionSnapshot(snap session.Snapshot) (tea.Model, tea.Cmd) {
+	if m.config.Engine != nil {
+		m.config.Engine.SetHistory(snap.Messages)
+		m.config.Engine.SetUsage(snap.Metadata.Usage)
+	}
+	m.messages = nil
+	for _, msg := range snap.Messages {
+		if t := msg.TextContent(); t != "" {
+			m.messages = append(m.messages, chatMessage{
+				role:    string(msg.Role),
+				content: t,
+			})
+		}
+	}
+	m.messages = append(m.messages, chatMessage{role: "system",
+		content: fmt.Sprintf("Session %s resumed (%d turns, %s/%s)",
+			snap.ID, snap.Metadata.TurnCount, snap.Metadata.Provider, snap.Metadata.Model)})
+	m.scrollOffset = 0
+	return m, nil
 }
 
 // reModelCodeBlock matches <<tool_code>>…<</tool_code>> blocks that some models
