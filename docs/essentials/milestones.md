@@ -1,7 +1,7 @@
 ---
 essential: milestones
 status: complete
-last_updated: 2026-04-03
+last_updated: 2026-04-06
 project: gnoma
 depends_on: [vision]
 ---
@@ -159,8 +159,8 @@ depends_on: [vision]
 - [x] `spawn_elfs` tool: batch N elfs in one call, all run in parallel
 - [x] CC-style tree view: ├─/└─ branches, tool uses, tokens, activity, Done(duration)
 - [x] Elf output truncated to 2000 chars for parent context protection
-- [ ] Elf results feed back to router as quality signals
-- [ ] Coordinator mode: orchestrator dispatches to worker elfs
+- [x] Elf results feed back to router as quality signals
+- [x] Coordinator mode: orchestrator dispatches to worker elfs
 
 **Exit criteria:** Parent spawns 3 elfs via `spawn_elfs`, all run in parallel (chosen by router), tree shows live progress, results synthesized.
 
