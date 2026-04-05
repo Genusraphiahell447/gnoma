@@ -11,6 +11,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 )
 
 var paramSchema = json.RawMessage(`{
@@ -37,10 +38,11 @@ var paramSchema = json.RawMessage(`{
 type Tool struct {
 	manager    *elf.Manager
 	ProgressCh chan<- elf.Progress // optional: sends structured progress to TUI
+	store      *persist.Store
 }
 
-func New(mgr *elf.Manager) *Tool {
-	return &Tool{manager: mgr}
+func New(mgr *elf.Manager, store *persist.Store) *Tool {
+	return &Tool{manager: mgr, store: store}
 }
 
 // SetProgressCh sets the channel for forwarding elf progress to the TUI.
@@ -79,6 +81,12 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 	}
 
 	systemPrompt := "You are an elf — a focused sub-agent of gnoma. Complete the given task thoroughly and concisely. Use tools as needed."
+
+	var preSave []persist.ResultFile
+	if t.store != nil {
+		preSave, _ = t.store.List("")
+	}
+	_ = preSave // used in Task 4 for ResultFilePaths diff
 
 	e, err := t.manager.Spawn(ctx, taskType, a.Prompt, systemPrompt, maxTurns)
 	if err != nil {

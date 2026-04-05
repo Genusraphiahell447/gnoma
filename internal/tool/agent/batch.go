@@ -11,6 +11,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 )
 
 var batchSchema = json.RawMessage(`{
@@ -49,10 +50,11 @@ var batchSchema = json.RawMessage(`{
 type BatchTool struct {
 	manager    *elf.Manager
 	progressCh chan<- elf.Progress
+	store      *persist.Store
 }
 
-func NewBatch(mgr *elf.Manager) *BatchTool {
-	return &BatchTool{manager: mgr}
+func NewBatch(mgr *elf.Manager, store *persist.Store) *BatchTool {
+	return &BatchTool{manager: mgr, store: store}
 }
 
 func (t *BatchTool) SetProgressCh(ch chan<- elf.Progress) {
@@ -90,6 +92,12 @@ func (t *BatchTool) Execute(ctx context.Context, args json.RawMessage) (tool.Res
 	maxTurns := a.MaxTurns
 
 	systemPrompt := "You are an elf — a focused sub-agent of gnoma. Complete the given task thoroughly and concisely. Use tools as needed."
+
+	var preSave []persist.ResultFile
+	if t.store != nil {
+		preSave, _ = t.store.List("")
+	}
+	_ = preSave // used in Task 4
 
 	// Spawn all elfs with slight stagger to avoid rate limit bursts
 	type elfEntry struct {

@@ -12,6 +12,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 )
 
 // elfMeta tracks routing metadata and pool reservations for quality feedback.
@@ -30,6 +31,7 @@ type Manager struct {
 	tools       *tool.Registry
 	permissions *permission.Checker
 	firewall    *security.Firewall
+	store       *persist.Store
 	logger      *slog.Logger
 }
 
@@ -38,6 +40,7 @@ type ManagerConfig struct {
 	Tools       *tool.Registry
 	Permissions *permission.Checker  // nil = allow all (unsafe; prefer passing parent checker)
 	Firewall    *security.Firewall   // nil = no scanning
+	Store       *persist.Store       // nil = no result persistence for elfs
 	Logger      *slog.Logger
 }
 
@@ -53,6 +56,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		tools:       cfg.Tools,
 		permissions: cfg.Permissions,
 		firewall:    cfg.Firewall,
+		store:       cfg.Store,
 		logger:      logger,
 	}
 }
@@ -96,6 +100,7 @@ func (m *Manager) Spawn(ctx context.Context, taskType router.TaskType, prompt, s
 		System:      systemPrompt,
 		Model:       arm.ModelName,
 		MaxTurns:    maxTurns,
+		Store:       m.store,
 		Logger:      m.logger,
 	})
 	if err != nil {
@@ -152,6 +157,7 @@ func (m *Manager) SpawnWithProvider(prov provider.Provider, model, prompt, syste
 		System:      systemPrompt,
 		Model:       model,
 		MaxTurns:    maxTurns,
+		Store:       m.store,
 		Logger:      m.logger,
 	})
 	if err != nil {

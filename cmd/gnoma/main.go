@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	mrand "math/rand"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"encoding/json"
+	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
 	"somegit.dev/Owlibou/gnoma/internal/message"
@@ -273,6 +275,14 @@ func main() {
 	}
 	permChecker := permission.NewChecker(permission.Mode(*permMode), permRules, pipePromptFn)
 
+	// Generate session-scoped ID for /tmp artifact directory
+	sessionID := fmt.Sprintf("%s-%06x",
+		time.Now().Format("20060102-150405"),
+		mrand.Int63()&0xffffff,
+	)
+	store := persist.New(sessionID)
+	logger.Debug("session store initialized", "dir", store.Dir())
+
 	// Create elf manager and register agent tools.
 	// Must be created after fw and permChecker so elfs inherit security layers.
 	elfMgr := elf.NewManager(elf.ManagerConfig{
@@ -280,13 +290,14 @@ func main() {
 		Tools:       reg,
 		Permissions: permChecker,
 		Firewall:    fw,
+		Store:       store,
 		Logger:      logger,
 	})
 	elfProgressCh := make(chan elf.Progress, 16)
-	agentTool := agent.New(elfMgr)
+	agentTool := agent.New(elfMgr, store)
 	agentTool.SetProgressCh(elfProgressCh)
 	reg.Register(agentTool)
-	batchTool := agent.NewBatch(elfMgr)
+	batchTool := agent.NewBatch(elfMgr, store)
 	batchTool.SetProgressCh(elfProgressCh)
 	reg.Register(batchTool)
 
@@ -337,7 +348,8 @@ func main() {
 		System:      systemPrompt,
 		Model:       *model,
 		MaxTurns:    *maxTurns,
-		Logger:   logger,
+		Store:       store,
+		Logger:      logger,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

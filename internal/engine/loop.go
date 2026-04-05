@@ -14,6 +14,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 )
 
 // Submit sends a user message and runs the agentic loop to completion.
@@ -394,10 +395,12 @@ func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t
 		output = e.cfg.Firewall.ScanToolResult(output)
 	}
 
-	// Persist large results to disk
-	if persisted, ok := gnomactx.PersistLargeResult(output, call.ID, ".gnoma/sessions"); ok {
-		e.logger.Debug("tool result persisted to disk", "name", call.Name, "size", len(output))
-		output = persisted
+	// Persist results to /tmp for cross-tool session sharing
+	if e.cfg.Store != nil {
+		if path, ok := e.cfg.Store.Save(call.Name, call.ID, output); ok {
+			e.logger.Debug("tool result persisted", "name", call.Name, "path", path)
+			output = persist.InlineReplacement(path, output)
+		}
 	}
 
 	// Emit tool result event for the UI

@@ -12,6 +12,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 )
 
 // Config holds engine configuration.
@@ -25,6 +26,7 @@ type Config struct {
 	System      string               // system prompt
 	Model    string             // override model (empty = provider default)
 	MaxTurns int                // safety limit on tool loops (0 = unlimited)
+	Store    *persist.Store     // nil = no result persistence
 	Logger   *slog.Logger
 }
 
