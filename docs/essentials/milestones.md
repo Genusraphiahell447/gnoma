@@ -170,9 +170,9 @@ depends_on: [vision]
 
 **Deliverables:**
 
-- [ ] Hook system: PreToolUse, PostToolUse, SessionStart/End, PreCompact, Stop
-- [ ] Hook protocol: stdin JSON, stdout JSON, exit codes (0=allow, 2=deny)
-- [ ] Hook command types: command (shell), prompt (LLM), agent (spawn elf)
+- [x] Hook system: PreToolUse, PostToolUse, SessionStart/End, PreCompact, Stop
+- [x] Hook protocol: stdin JSON, stdout JSON, exit codes (0=allow, 2=deny)
+- [x] Hook command types: command (shell), prompt (LLM), agent (spawn elf)
 - [ ] Skill loading from .gnoma/skills/, ~/.config/gnoma/skills/, bundled, plugins
 - [ ] Skill frontmatter: YAML (name, description, whenToUse, allowedTools, paths)
 - [ ] MCP client: JSON-RPC over stdio, tool discovery
