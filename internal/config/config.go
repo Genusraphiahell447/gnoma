@@ -10,6 +10,29 @@ type Config struct {
 	RateLimits RateLimitSection  `toml:"rate_limits"`
 	Security   SecuritySection   `toml:"security"`
 	Session    SessionSection    `toml:"session"`
+	Hooks      []HookConfig      `toml:"hooks"`
+}
+
+// HookConfig is a single hook entry from TOML config.
+//
+// Example:
+//
+//	[[hooks]]
+//	name = "block-dangerous-bash"
+//	event = "pre_tool_use"
+//	type = "command"
+//	exec = "bash-safety-check.sh"
+//	tool_pattern = "bash*"
+//	timeout = "10s"
+//	fail_open = false
+type HookConfig struct {
+	Name        string `toml:"name"`
+	Event       string `toml:"event"`
+	Type        string `toml:"type"`
+	Exec        string `toml:"exec"`
+	Timeout     string `toml:"timeout"`
+	FailOpen    bool   `toml:"fail_open"`
+	ToolPattern string `toml:"tool_pattern"`
 }
 
 type SessionSection struct {

@@ -23,12 +23,22 @@ func Load() (*Config, error) {
 	if err := loadTOML(&cfg, globalPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("loading global config %s: %w", globalPath, err)
 	}
+	// Deep copy global hooks before the project layer.
+	// toml.Decode may reuse the backing array, so a plain slice-header copy
+	// would alias into whatever the project decode writes.
+	// Also reset cfg.Hooks to nil so the project layer starts clean —
+	// if the project config is absent, cfg.Hooks stays nil and the append
+	// below just returns the global hooks unchanged.
+	globalHooks := append([]HookConfig(nil), cfg.Hooks...)
+	cfg.Hooks = nil
 
 	// Layer 2: Project config
 	projectPath := projectConfigPath()
 	if err := loadTOML(&cfg, projectPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("loading project config %s: %w", projectPath, err)
 	}
+	// User hooks run first, project hooks after.
+	cfg.Hooks = append(globalHooks, cfg.Hooks...)
 
 	// Layer 3: Environment variables
 	applyEnv(&cfg)
