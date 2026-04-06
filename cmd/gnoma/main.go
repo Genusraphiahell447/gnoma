@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"somegit.dev/Owlibou/gnoma/internal/hook"
 	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
@@ -344,6 +345,29 @@ func main() {
 	reg.Register(agent.NewListResultsTool(store))
 	reg.Register(agent.NewReadResultTool(store))
 
+	// Build hook dispatcher from config.
+	// Streamer adapter wraps the router for prompt hooks.
+	// ElfSpawnFn closure wraps elfMgr for agent hooks.
+	hookDefs, err := hook.ParseHookDefs(cfg.Hooks)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hook config error: %v\n", err)
+		os.Exit(1)
+	}
+	hookStreamer := &routerStreamer{router: rtr}
+	hookSpawnFn := hook.ElfSpawnFn(func(ctx context.Context, prompt string) (string, error) {
+		e, spawnErr := elfMgr.Spawn(ctx, router.TaskReview, prompt, "", 5)
+		if spawnErr != nil {
+			return "", spawnErr
+		}
+		result := e.Wait()
+		return result.Output, result.Error
+	})
+	dispatcher, err := hook.NewDispatcher(hookDefs, hookStreamer, hookSpawnFn, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hook dispatcher error: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Build system prompt with cwd + compact inventory summary
 	systemPrompt := *system
 	if cwd, err := os.Getwd(); err == nil {
@@ -385,6 +409,9 @@ func main() {
 		Strategy:       compactStrategy,
 		PrefixMessages: prefixMsgs,
 		Logger:         logger,
+		OnPreCompact: func(msgs []message.Message) {
+			dispatcher.Fire(hook.PreCompact, hook.MarshalPreCompactPayload(len(msgs), 0)) //nolint:errcheck
+		},
 	})
 
 	// Wire tokenizer and seed tracker with prefix cost
@@ -408,6 +435,7 @@ func main() {
 		Model:       *model,
 		MaxTurns:    *maxTurns,
 		Store:       store,
+		Hooks:       dispatcher,
 		Logger:      logger,
 	})
 	if err != nil {
@@ -465,6 +493,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Fire SessionStart / SessionEnd lifecycle hooks.
+	mode := "tui"
+	if input != "" {
+		mode = "pipe"
+	}
+	dispatcher.Fire(hook.SessionStart, hook.MarshalSessionStartPayload(sessionID, mode)) //nolint:errcheck
+	defer dispatcher.Fire(hook.SessionEnd, hook.MarshalSessionEndPayload(sessionID, 0)) //nolint:errcheck
 
 	if input != "" {
 		// Pipe mode: single input → stream to stdout
@@ -702,6 +738,25 @@ func limitedProvider(p provider.Provider, provName, modelName string, cfg *gnoma
 		}
 	}
 	return provider.WithConcurrency(p, rl.MaxConcurrent())
+}
+
+// routerStreamer adapts *router.Router to the hook.Streamer interface.
+// PromptExecutor needs only a simple Stream(ctx, prompt) call; this adapter
+// wraps the full router.Stream signature, using TaskReview for hook evaluation.
+type routerStreamer struct {
+	router *router.Router
+}
+
+func (rs *routerStreamer) Stream(ctx context.Context, prompt string) (stream.Stream, error) {
+	req := provider.Request{
+		Messages: []message.Message{message.NewUserText(prompt)},
+	}
+	s, decision, err := rs.router.Stream(ctx, router.Task{Type: router.TaskReview}, req)
+	if err != nil {
+		return nil, err
+	}
+	decision.Commit(0)
+	return s, nil
 }
 
 const defaultSystem = `You are gnoma, a provider-agnostic agentic coding assistant.
