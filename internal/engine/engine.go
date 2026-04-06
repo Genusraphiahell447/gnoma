@@ -12,6 +12,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/hook"
 	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 )
 
@@ -27,6 +28,7 @@ type Config struct {
 	Model    string             // override model (empty = provider default)
 	MaxTurns int                // safety limit on tool loops (0 = unlimited)
 	Store    *persist.Store     // nil = no result persistence
+	Hooks    *hook.Dispatcher   // nil = no hooks
 	Logger   *slog.Logger
 }
 

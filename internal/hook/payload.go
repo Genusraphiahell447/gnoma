@@ -136,6 +136,21 @@ func parseActionString(s string) (Action, error) {
 	}
 }
 
+// ExtractTransformedArgs extracts the "args" field from a transformed PreToolUse payload.
+// Returns nil if the field is absent or the payload is malformed.
+func ExtractTransformedArgs(payload []byte) json.RawMessage {
+	if payload == nil {
+		return nil
+	}
+	var v struct {
+		Args json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal(payload, &v); err != nil {
+		return nil
+	}
+	return v.Args
+}
+
 // ExtractTransformedOutput extracts the "output" string from a PostToolUse
 // transformed payload. Returns "" if the payload is nil or malformed.
 func ExtractTransformedOutput(transformed json.RawMessage) string {

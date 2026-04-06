@@ -8,6 +8,7 @@ import (
 	"time"
 
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
+	"somegit.dev/Owlibou/gnoma/internal/hook"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
@@ -55,6 +56,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 	for {
 		turn.Rounds++
 		if e.cfg.MaxTurns > 0 && turn.Rounds > e.cfg.MaxTurns {
+			e.cfg.Hooks.Fire(hook.Stop, hook.MarshalStopPayload("max_turns")) //nolint:errcheck
 			return turn, fmt.Errorf("safety limit: %d rounds exceeded", e.cfg.MaxTurns)
 		}
 
@@ -227,6 +229,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		// Decide next action
 		switch resp.StopReason {
 		case message.StopEndTurn, message.StopSequence:
+			e.cfg.Hooks.Fire(hook.Stop, hook.MarshalStopPayload("end_turn")) //nolint:errcheck
 			return turn, nil
 
 		case message.StopMaxTokens:
@@ -254,6 +257,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 		default:
 			// Unknown stop reason or empty — treat as end of turn
+			e.cfg.Hooks.Fire(hook.Stop, hook.MarshalStopPayload("unknown")) //nolint:errcheck
 			return turn, nil
 		}
 	}
@@ -411,9 +415,26 @@ func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t
 		}
 	}
 
+	// PreToolUse hook: can deny execution or transform args.
+	args := call.Arguments
+	if e.cfg.Hooks != nil {
+		payload := hook.MarshalPreToolPayload(call.Name, args)
+		transformed, action, _ := e.cfg.Hooks.Fire(hook.PreToolUse, payload)
+		if action == hook.Deny {
+			return message.ToolResult{
+				ToolCallID: call.ID,
+				Content:    "denied by hook",
+				IsError:    true,
+			}
+		}
+		if newArgs := hook.ExtractTransformedArgs(transformed); newArgs != nil {
+			args = newArgs
+		}
+	}
+
 	e.logger.Debug("executing tool", "name", call.Name, "id", call.ID)
 
-	result, err := t.Execute(ctx, call.Arguments)
+	result, err := t.Execute(ctx, args)
 	if err != nil {
 		e.logger.Error("tool execution failed", "name", call.Name, "error", err)
 		return message.ToolResult{
@@ -423,8 +444,17 @@ func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t
 		}
 	}
 
-	// Scan tool result through firewall
+	// PostToolUse hook: can transform result (Deny treated as Skip).
 	output := result.Output
+	if e.cfg.Hooks != nil {
+		payload := hook.MarshalPostToolPayload(call.Name, args, output, result.Metadata)
+		transformed, _, _ := e.cfg.Hooks.Fire(hook.PostToolUse, payload)
+		if s := hook.ExtractTransformedOutput(transformed); s != "" {
+			output = s
+		}
+	}
+
+	// Scan tool result through firewall
 	if e.cfg.Firewall != nil {
 		output = e.cfg.Firewall.ScanToolResult(output)
 	}

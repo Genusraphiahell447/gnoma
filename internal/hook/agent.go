@@ -4,25 +4,21 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"somegit.dev/Owlibou/gnoma/internal/elf"
-	"somegit.dev/Owlibou/gnoma/internal/router"
 )
 
-// ElfSpawner is the minimal interface AgentExecutor needs from elf.Manager.
-type ElfSpawner interface {
-	Spawn(ctx context.Context, taskType router.TaskType, prompt, systemPrompt string, maxTurns int) (elf.Elf, error)
-}
+// ElfSpawnFn spawns an elf with the given prompt and returns its output text.
+// This is satisfied by a closure wrapping elf.Manager.Spawn in main.go.
+type ElfSpawnFn func(ctx context.Context, prompt string) (output string, err error)
 
 // AgentExecutor spawns an elf and parses ALLOW/DENY from its output.
 type AgentExecutor struct {
 	def     HookDef
-	spawner ElfSpawner
+	spawnFn ElfSpawnFn
 }
 
 // NewAgentExecutor constructs an AgentExecutor.
-func NewAgentExecutor(def HookDef, spawner ElfSpawner) *AgentExecutor {
-	return &AgentExecutor{def: def, spawner: spawner}
+func NewAgentExecutor(def HookDef, spawnFn ElfSpawnFn) *AgentExecutor {
+	return &AgentExecutor{def: def, spawnFn: spawnFn}
 }
 
 // Execute renders the hook template, spawns an elf, waits for its result,
@@ -35,19 +31,13 @@ func (a *AgentExecutor) Execute(ctx context.Context, payload []byte) (HookResult
 	}
 
 	start := time.Now()
-	e, err := a.spawner.Spawn(ctx, router.TaskReview, prompt, "", 5)
-	if err != nil {
-		return HookResult{}, fmt.Errorf("hook %q: spawn elf: %w", a.def.Name, err)
-	}
-
-	result := e.Wait()
+	output, err := a.spawnFn(ctx, prompt)
 	duration := time.Since(start)
-
-	if result.Error != nil {
-		return HookResult{Duration: duration}, fmt.Errorf("hook %q: elf failed: %w", a.def.Name, result.Error)
+	if err != nil {
+		return HookResult{Duration: duration}, fmt.Errorf("hook %q: elf failed: %w", a.def.Name, err)
 	}
 
-	action := parseDecision(result.Output)
+	action := parseDecision(output)
 	return HookResult{
 		Action:   action,
 		Duration: duration,

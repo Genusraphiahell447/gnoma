@@ -13,9 +13,23 @@ type Dispatcher struct {
 	logger *slog.Logger
 }
 
+// SetChain replaces the handler chain for an event. Primarily for testing.
+func (d *Dispatcher) SetChain(event EventType, handlers []Handler) {
+	if d.chains == nil {
+		d.chains = make(map[EventType][]Handler)
+	}
+	d.chains[event] = handlers
+}
+
+// NewHandler constructs a Handler from a definition and executor.
+func NewHandler(def HookDef, ex Executor) Handler {
+	return Handler{def: def, executor: ex}
+}
+
 // NewDispatcher validates defs, constructs the appropriate executor per
 // CommandType, and groups handlers by EventType.
-func NewDispatcher(defs []HookDef, logger *slog.Logger, executorFn func(HookDef) (Executor, error)) (*Dispatcher, error) {
+// streamer and spawnFn may be nil if no prompt/agent hooks are configured.
+func NewDispatcher(defs []HookDef, streamer Streamer, spawnFn ElfSpawnFn, logger *slog.Logger) (*Dispatcher, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -27,13 +41,33 @@ func NewDispatcher(defs []HookDef, logger *slog.Logger, executorFn func(HookDef)
 		if err := def.Validate(); err != nil {
 			return nil, fmt.Errorf("hook.NewDispatcher: %w", err)
 		}
-		ex, err := executorFn(def)
+		ex, err := buildExecutor(def, streamer, spawnFn)
 		if err != nil {
 			return nil, fmt.Errorf("hook.NewDispatcher: building executor for %q: %w", def.Name, err)
 		}
 		d.chains[def.Event] = append(d.chains[def.Event], Handler{def: def, executor: ex})
 	}
 	return d, nil
+}
+
+// buildExecutor constructs the right Executor for a HookDef.
+func buildExecutor(def HookDef, streamer Streamer, spawnFn ElfSpawnFn) (Executor, error) {
+	switch def.Command {
+	case CommandTypeShell:
+		return NewCommandExecutor(def), nil
+	case CommandTypePrompt:
+		if streamer == nil {
+			return nil, fmt.Errorf("prompt hook %q requires a Streamer (no router configured)", def.Name)
+		}
+		return NewPromptExecutor(def, streamer), nil
+	case CommandTypeAgent:
+		if spawnFn == nil {
+			return nil, fmt.Errorf("agent hook %q requires an ElfSpawnFn (no elf manager configured)", def.Name)
+		}
+		return NewAgentExecutor(def, spawnFn), nil
+	default:
+		return nil, fmt.Errorf("unknown command type %v", def.Command)
+	}
 }
 
 // Fire runs all handlers registered for event, in order.
