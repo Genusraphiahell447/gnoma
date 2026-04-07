@@ -21,6 +21,7 @@ import (
 	"charm.land/lipgloss/v2"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
+	"somegit.dev/Owlibou/gnoma/internal/skill"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
@@ -63,6 +64,7 @@ type Config struct {
 	ElfProgress          <-chan elf.Progress   // elf → TUI: structured progress updates
 	SessionStore         *session.SessionStore // nil = no persistence
 	StartWithResumePicker bool                 // open session picker on launch
+	Skills               *skill.Registry       // nil = no skills loaded
 }
 
 type Model struct {
@@ -811,10 +813,61 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /resume [id]        list or restore saved sessions\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma"})
+			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /resume [id]        list or restore saved sessions\n  /skills             list loaded skills\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
+		return m, nil
+
+	case "/skills":
+		if m.config.Skills == nil || len(m.config.Skills.Names()) == 0 {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "No skills loaded."})
+			return m, nil
+		}
+		var b strings.Builder
+		b.WriteString("Loaded skills:\n")
+		for _, sk := range m.config.Skills.All() {
+			b.WriteString(fmt.Sprintf("  /%s", sk.Frontmatter.Name))
+			if sk.Frontmatter.Description != "" {
+				b.WriteString(fmt.Sprintf(" — %s", sk.Frontmatter.Description))
+			}
+			b.WriteString(fmt.Sprintf(" [%s]\n", sk.Source))
+		}
+		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 		return m, nil
 
 	default:
+		// Check skill registry before returning unknown command error.
+		if m.config.Skills != nil {
+			sk := m.config.Skills.Get(command[1:]) // strip leading /
+			if sk != nil {
+				args := strings.Join(parts[1:], " ")
+				rendered, err := sk.Render(skill.TemplateData{
+					Args:        args,
+					Cwd:         m.cwd,
+					ProjectRoot: gnomacfg.ProjectRoot(),
+				})
+				if err != nil {
+					m.messages = append(m.messages, chatMessage{role: "error",
+						content: fmt.Sprintf("skill %q: %v", sk.Frontmatter.Name, err)})
+					return m, nil
+				}
+				// Display the invocation in chat, then submit the rendered prompt.
+				display := command
+				if args != "" {
+					display += " " + args
+				}
+				m.messages = append(m.messages, chatMessage{role: "user", content: display})
+				m.streaming = true
+				m.currentRole = "assistant"
+				m.streamBuf.Reset()
+				m.thinkingBuf.Reset()
+				m.streamFilterClose = ""
+				if err := m.session.Send(rendered); err != nil {
+					m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+					m.streaming = false
+					return m, nil
+				}
+				return m, m.listenForEvents()
+			}
+		}
 		m.messages = append(m.messages, chatMessage{role: "error",
 			content: fmt.Sprintf("unknown command: %s (try /help)", command)})
 		return m, nil
