@@ -173,14 +173,14 @@ depends_on: [vision]
 - [x] Hook system: PreToolUse, PostToolUse, SessionStart/End, PreCompact, Stop
 - [x] Hook protocol: stdin JSON, stdout JSON, exit codes (0=allow, 2=deny)
 - [x] Hook command types: command (shell), prompt (LLM), agent (spawn elf)
-- [ ] Skill loading from .gnoma/skills/, ~/.config/gnoma/skills/, bundled, plugins
-- [ ] Skill frontmatter: YAML (name, description, whenToUse, allowedTools, paths)
+- [x] Skill loading from .gnoma/skills/, ~/.config/gnoma/skills/, bundled, plugins
+- [x] Skill frontmatter: YAML (name, description, whenToUse, allowedTools, paths)
 - [ ] MCP client: JSON-RPC over stdio, tool discovery
 - [ ] MCP tool naming: `mcp__{server}__{tool}`
 - [ ] MCP tool replaceability: `replace_default` config swaps built-in tools
 - [ ] Plugin system: plugin.json manifest, install/enable/disable lifecycle
-- [ ] `/batch` skill: decompose work into N units, spawn all via `spawn_elfs`, track progress (CC-inspired)
-- [ ] Coordinator mode prompt: fan-out guidance for parallel elf dispatch, concurrency rules (read vs write)
+- [x] `/batch` skill: decompose work into N units, spawn all via `spawn_elfs`, track progress (CC-inspired)
+- [x] Coordinator mode prompt: fan-out guidance for parallel elf dispatch, concurrency rules (read vs write)
 
 **Exit criteria:** MCP tools appear in gnoma. `replace_default` swaps built-ins. Skills invocable. Hooks fire on tool use. `/batch` decomposes and parallelizes work.
 
