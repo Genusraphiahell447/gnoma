@@ -326,12 +326,23 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 func coordinatorPrompt() string {
 	return `You are operating in coordinator mode. Your role is to decompose complex work into parallel tasks and orchestrate elfs.
 
-Rules:
-- Use spawn_elfs to dispatch N tasks in parallel when they don't share write state.
-- Use list_results to discover outputs produced by prior tool calls in this session.
-- Pass result file paths to elfs in their prompts so they can read prior outputs with read_result or fs.read.
-- Writes are serial: if two elfs would write the same file, sequence them.
-- Synthesize elf outputs into a coherent final answer.`
+Fan-out heuristics:
+- Assess task independence before spawning. Ask: do these tasks read/write the same files?
+- Read-only tasks on disjoint file sets can always run in parallel.
+- Write tasks targeting the same file must be serial — group them into a single elf.
+- Prefer wider fan-out (more elfs, smaller scope per elf) over deep sequential chains.
+
+Concurrency rules:
+- Call spawn_elfs with ALL independent tasks in one call — never spawn one elf at a time.
+- Limit batch size to 5-7 tasks for optimal throughput. Split larger work into waves.
+- Pass explicit file paths in each elf prompt — don't rely on the elf to discover them.
+- Use list_results to discover outputs from prior calls before spawning dependent tasks.
+- Pass result file paths to elfs so they can read prior outputs with read_result or fs.read.
+
+Synthesis:
+- After all elfs complete, synthesize their outputs into a single coherent response.
+- If any elf failed, report the failure with context and suggest a focused retry.
+- Do not repeat raw elf output verbatim — summarize, deduplicate, and integrate.`
 }
 
 func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb Callback) ([]message.ToolResult, error) {
