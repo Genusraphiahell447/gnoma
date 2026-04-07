@@ -55,14 +55,18 @@ func loadTOML(cfg *Config, path string) error {
 	return err
 }
 
-func globalConfigPath() string {
-	// XDG_CONFIG_HOME or ~/.config
+// GlobalConfigDir returns the gnoma global config directory (~/.config/gnoma or $XDG_CONFIG_HOME/gnoma).
+func GlobalConfigDir() string {
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
 		home, _ := os.UserHomeDir()
 		configDir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(configDir, "gnoma", "config.toml")
+	return filepath.Join(configDir, "gnoma")
+}
+
+func globalConfigPath() string {
+	return filepath.Join(GlobalConfigDir(), "config.toml")
 }
 
 // ProjectRoot walks up from cwd to find the nearest directory containing

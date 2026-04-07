@@ -16,6 +16,7 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/hook"
+	"somegit.dev/Owlibou/gnoma/internal/skill"
 	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
@@ -368,6 +369,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Build skill registry: bundled → user (~/.config/gnoma/skills/) → project (.gnoma/skills/)
+	skillReg := skill.NewRegistry()
+	skillReg.LoadBundled()                                                                      //nolint:errcheck
+	skillReg.LoadDir(filepath.Join(gnomacfg.GlobalConfigDir(), "skills"), "user")              //nolint:errcheck
+	skillReg.LoadDir(filepath.Join(gnomacfg.ProjectRoot(), ".gnoma", "skills"), "project")     //nolint:errcheck
+
 	// Build system prompt with cwd + compact inventory summary
 	systemPrompt := *system
 	if cwd, err := os.Getwd(); err == nil {
@@ -518,7 +525,28 @@ func main() {
 			}
 		}
 
-		_, err = eng.Submit(ctx, input, cb)
+		// Resolve skill invocations in pipe mode (/skillname args).
+		submitInput := input
+		if strings.HasPrefix(input, "/") {
+			parts := strings.Fields(input)
+			name := strings.TrimPrefix(parts[0], "/")
+			if sk := skillReg.Get(name); sk != nil {
+				args := strings.Join(parts[1:], " ")
+				cwd, _ := os.Getwd()
+				rendered, renderErr := sk.Render(skill.TemplateData{
+					Args:        args,
+					Cwd:         cwd,
+					ProjectRoot: gnomacfg.ProjectRoot(),
+				})
+				if renderErr != nil {
+					fmt.Fprintf(os.Stderr, "skill %q: %v\n", name, renderErr)
+					os.Exit(1)
+				}
+				submitInput = rendered
+			}
+		}
+
+		_, err = eng.Submit(ctx, submitInput, cb)
 		fmt.Println()
 
 		if err != nil {
@@ -575,6 +603,7 @@ func main() {
 			ElfProgress:           elfProgressCh,
 			SessionStore:          sessStore,
 			StartWithResumePicker: openResumePicker,
+			Skills:                skillReg,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
