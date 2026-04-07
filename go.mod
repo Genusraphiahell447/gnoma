@@ -12,6 +12,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.29.0
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/openai/openai-go v1.12.0
+	github.com/pkoukk/tiktoken-go v0.1.8
 	golang.org/x/text v0.35.0
 	google.golang.org/genai v1.52.1
 	mvdan.cc/sh/v3 v3.13.0
@@ -48,7 +49,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.21 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/pkoukk/tiktoken-go v0.1.8 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
