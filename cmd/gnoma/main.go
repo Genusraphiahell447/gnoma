@@ -46,6 +46,13 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/tool/sysinfo"
 )
 
+// Set by goreleaser ldflags.
+var (
+	buildVersion = "dev"
+	buildCommit  = "none"
+	buildDate    = "unknown"
+)
+
 func main() {
 	var resumeFlag string
 	var (
@@ -64,7 +71,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Println("gnoma v0.1.0-dev")
+		fmt.Printf("gnoma %s (%s, %s)\n", buildVersion, buildCommit, buildDate)
 		os.Exit(0)
 	}
 
@@ -123,7 +130,17 @@ func main() {
 	}
 
 	// Resolve API key: CLI flag → config → env vars
+	knownProviders := map[string]bool{
+		"mistral": true, "anthropic": true, "openai": true,
+		"google": true, "ollama": true, "llamacpp": true,
+	}
 	localProviders := map[string]bool{"ollama": true, "llamacpp": true}
+
+	if !knownProviders[*providerName] {
+		fmt.Fprintf(os.Stderr, "error: unknown provider %q\n  available: mistral, anthropic, openai, google, ollama, llamacpp\n  usage:     gnoma --provider <name>\n", *providerName)
+		os.Exit(1)
+	}
+
 	key := *apiKey
 	if key == "" {
 		if cfgKey, ok := cfg.Provider.APIKeys[*providerName]; ok && cfgKey != "" {
@@ -134,8 +151,14 @@ func main() {
 		key = resolveAPIKey(*providerName)
 	}
 	if key == "" && !localProviders[*providerName] {
-		fmt.Fprintf(os.Stderr, "error: no API key for provider %q\nSet %s environment variable or use --api-key\n",
-			*providerName, envKeyFor(*providerName))
+		envVar := envKeyFor(*providerName)
+		fmt.Fprintf(os.Stderr, "error: no API key for provider %q\n\n", *providerName)
+		fmt.Fprintf(os.Stderr, "  Option 1: export %s=<your-key>\n", envVar)
+		fmt.Fprintf(os.Stderr, "  Option 2: gnoma --api-key <your-key>\n")
+		fmt.Fprintf(os.Stderr, "  Option 3: add to .gnoma/config.toml:\n")
+		fmt.Fprintf(os.Stderr, "            [provider.api_keys]\n")
+		fmt.Fprintf(os.Stderr, "            %s = \"<your-key>\"\n\n", *providerName)
+		fmt.Fprintf(os.Stderr, "For local models (no API key needed): gnoma --provider ollama\n")
 		os.Exit(1)
 	}
 
@@ -735,7 +758,7 @@ func createProvider(name, apiKey, model, baseURL string) (provider.Provider, err
 	case "llamacpp":
 		return openaicompat.NewLlamaCpp(cfg)
 	default:
-		return nil, fmt.Errorf("unknown provider %q (supports: mistral, anthropic, openai, google, ollama, llamacpp)", name)
+		return nil, fmt.Errorf("unknown provider %q\n  available: mistral, anthropic, openai, google, ollama, llamacpp\n  usage:     gnoma --provider <name>", name)
 	}
 }
 

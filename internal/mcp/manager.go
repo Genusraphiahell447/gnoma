@@ -84,23 +84,13 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig) (*Client, e
 }
 
 func (m *Manager) registerTools(srv ServerConfig, tools []MCPTool, client *Client, registry *tool.Registry) {
-	replaceSet := make(map[string]bool, len(srv.ReplaceDefault))
-	for _, name := range srv.ReplaceDefault {
-		replaceSet[name] = true
-	}
-
 	for _, mt := range tools {
 		adapter := NewAdapter(srv.Name, mt, client)
 
-		// Check if any replace_default entry matches this MCP tool.
-		// Match by checking if the MCP tool name appears in a replace target,
-		// or assign replacements in order.
-		for _, replaceName := range srv.ReplaceDefault {
-			if replaceSet[replaceName] {
-				adapter.SetOverrideName(replaceName)
-				delete(replaceSet, replaceName)
-				break
-			}
+		// Explicit mapping: if this MCP tool name has a replace_default entry,
+		// register it under the built-in's name instead of mcp__{server}__{tool}.
+		if builtinName, ok := srv.ReplaceDefault[mt.Name]; ok {
+			adapter.SetOverrideName(builtinName)
 		}
 
 		registry.Register(adapter)

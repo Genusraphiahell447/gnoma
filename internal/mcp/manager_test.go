@@ -71,7 +71,7 @@ func TestManager_StartAll_ReplaceDefault(t *testing.T) {
 			Command:        "bash",
 			Args:           []string{script},
 			Timeout:        5 * time.Second,
-			ReplaceDefault: []string{"bash"},
+			ReplaceDefault: map[string]string{"exec": "bash"},
 		},
 	}, reg)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestManager_StartAll_ReplaceDefault_PicksMatchingTool(t *testing.T) {
 			Command:        "bash",
 			Args:           []string{script},
 			Timeout:        5 * time.Second,
-			ReplaceDefault: []string{"fs.read", "fs.write"},
+			ReplaceDefault: map[string]string{"read": "fs.read", "write": "fs.write"},
 		},
 	}, reg)
 	if err != nil {

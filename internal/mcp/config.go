@@ -16,7 +16,7 @@ type ServerConfig struct {
 	Args           []string
 	Env            map[string]string
 	Timeout        time.Duration
-	ReplaceDefault []string
+	ReplaceDefault map[string]string // MCP tool name → built-in name to replace
 }
 
 // ParseServerConfigs validates and converts raw config entries.

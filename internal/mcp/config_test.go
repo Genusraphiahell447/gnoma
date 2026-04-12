@@ -15,7 +15,7 @@ func TestParseServerConfigs_Valid(t *testing.T) {
 			Args:           []string{"--repo", "."},
 			Env:            map[string]string{"GIT_DIR": ".git"},
 			Timeout:        "10s",
-			ReplaceDefault: []string{"bash"},
+			ReplaceDefault: map[string]string{"exec": "bash"},
 		},
 		{
 			Name:    "docker",
@@ -37,8 +37,8 @@ func TestParseServerConfigs_Valid(t *testing.T) {
 	if got[0].Timeout != 10*time.Second {
 		t.Errorf("config[0].Timeout = %v, want %v", got[0].Timeout, 10*time.Second)
 	}
-	if len(got[0].ReplaceDefault) != 1 || got[0].ReplaceDefault[0] != "bash" {
-		t.Errorf("config[0].ReplaceDefault = %v, want [bash]", got[0].ReplaceDefault)
+	if got[0].ReplaceDefault["exec"] != "bash" {
+		t.Errorf("config[0].ReplaceDefault = %v, want map[exec:bash]", got[0].ReplaceDefault)
 	}
 
 	// Second config should get default timeout.

@@ -165,8 +165,8 @@ func TestAdapter_Execute_RPCError(t *testing.T) {
 	content := `#!/bin/bash
 DIR="` + dir + `"
 while IFS= read -r line; do
-  method=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin).get('method',''))" 2>/dev/null)
-  id=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',0))" 2>/dev/null)
+  method=$(echo "$line" | grep -o '"method":"[^"]*"' | head -1 | sed 's/"method":"//;s/"//')
+  id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
 
   case "$method" in
     initialize)

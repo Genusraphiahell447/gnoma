@@ -25,14 +25,14 @@ type Config struct {
 //	args = ["--repo", "."]
 //	env = { GIT_DIR = ".git" }
 //	timeout = "30s"
-//	replace_default = ["bash"]
+//	replace_default = { exec = "bash" }  # MCP tool "exec" replaces built-in "bash"
 type MCPServerConfig struct {
 	Name           string            `toml:"name"`
 	Command        string            `toml:"command"`
 	Args           []string          `toml:"args"`
 	Env            map[string]string `toml:"env"`
 	Timeout        string            `toml:"timeout"`
-	ReplaceDefault []string          `toml:"replace_default"`
+	ReplaceDefault map[string]string `toml:"replace_default"` // MCP tool name → built-in name
 }
 
 // PluginsSection controls plugin loading.

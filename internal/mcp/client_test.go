@@ -28,14 +28,14 @@ func writeMCPServer(t *testing.T, tools []MCPTool, callResult string) string {
 	os.WriteFile(filepath.Join(dir, "tools.json"), toolsJSON, 0o644)
 	os.WriteFile(filepath.Join(dir, "call.json"), []byte(callResult), 0o644)
 
-	// The script uses jq-free JSON construction: reads response payload from
-	// file and wraps it in a JSON-RPC envelope using python (widely available).
+	// The script uses pure bash for JSON parsing — no python3 or jq dependency.
+	// We extract "method" and "id" with grep since the JSON-RPC format is predictable.
 	script := filepath.Join(dir, "mcp-server.sh")
 	content := `#!/bin/bash
 DIR="` + dir + `"
 while IFS= read -r line; do
-  method=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin).get('method',''))" 2>/dev/null)
-  id=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',0))" 2>/dev/null)
+  method=$(echo "$line" | grep -o '"method":"[^"]*"' | head -1 | sed 's/"method":"//;s/"//')
+  id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
 
   case "$method" in
     initialize)

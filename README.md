@@ -1,7 +1,28 @@
 # gnoma
 
-Provider-agnostic agentic coding assistant in Go.
-Named after the northern pygmy-owl (*Glaucidium gnoma*). Agents are called **elfs** (elf owl).
+**A provider-agnostic agentic coding assistant built in Go.** gnoma routes tasks to the best available LLM — cloud or local — through a multi-armed bandit router, while tools, hooks, skills, MCP servers, and plugins keep it extensible. Named after the northern pygmy-owl (*Glaucidium gnoma*); agents are called **elfs** (elf owl).
+
+<!-- TODO: replace with actual demo recording -->
+<!-- ![demo](docs/assets/demo.gif) -->
+
+## Quickstart
+
+```sh
+# Install
+go install somegit.dev/Owlibou/gnoma/cmd/gnoma@latest
+
+# Or build from source
+git clone https://somegit.dev/Owlibou/gnoma && cd gnoma
+make build    # binary at ./bin/gnoma
+
+# Set at least one provider key
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, MISTRAL_API_KEY, GEMINI_API_KEY
+
+# Run
+gnoma                                 # interactive TUI
+echo "list files" | gnoma             # pipe mode
+gnoma --provider ollama               # use a local model
+```
 
 ## Build
 
@@ -100,6 +121,61 @@ Default endpoint: `http://localhost:8080/v1`. Override:
 ```sh
 [provider.endpoints]
 llamacpp = "http://localhost:9090/v1"
+```
+
+---
+
+## Extensibility (M8)
+
+gnoma supports hooks, skills, MCP servers, and plugins.
+
+### MCP Servers
+
+Connect any [MCP](https://modelcontextprotocol.io)-compatible tool server:
+
+```toml
+[[mcp_servers]]
+name    = "git"
+command = "mcp-server-git"
+args    = ["--repo", "."]
+timeout = "30s"
+
+# Replace a built-in tool with an MCP tool
+[mcp_servers.replace_default]
+exec = "bash"   # MCP tool "exec" replaces gnoma's built-in "bash"
+```
+
+MCP tools appear as `mcp__{server}__{tool}` (e.g., `mcp__git__status`), or under the built-in name when using `replace_default`.
+
+### Skills
+
+Drop markdown files into `.gnoma/skills/` or `~/.config/gnoma/skills/`:
+
+```
+/skillname          # invoke a skill
+/skills             # list available skills
+```
+
+### Hooks
+
+Run shell commands on tool events:
+
+```toml
+[[hooks]]
+name         = "block-rm-rf"
+event        = "pre_tool_use"
+type         = "command"
+exec         = "bash-safety-check.sh"
+tool_pattern = "bash*"
+```
+
+### Plugins
+
+Bundle skills, hooks, and MCP configs into installable plugins:
+
+```sh
+gnoma plugin install ./my-plugin    # install from directory
+gnoma plugin list                   # list installed plugins
 ```
 
 ---
