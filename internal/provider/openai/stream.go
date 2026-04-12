@@ -2,8 +2,10 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
+	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 
 	oai "github.com/openai/openai-go"
@@ -172,10 +174,31 @@ func (s *openaiStream) Next() bool {
 		return true
 	}
 
-	s.err = s.raw.Err()
+	s.err = wrapSDKError(s.raw.Err())
 	return false
 }
 
 func (s *openaiStream) Current() stream.Event { return s.cur }
 func (s *openaiStream) Err() error            { return s.err }
 func (s *openaiStream) Close() error           { return s.raw.Close() }
+
+// wrapSDKError converts an OpenAI SDK apierror.Error into a ProviderError
+// so the engine's retry logic can classify it properly.
+func wrapSDKError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *oai.Error
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	kind, retryable := provider.ClassifyHTTPError(apiErr.StatusCode, apiErr.Message)
+	return &provider.ProviderError{
+		Kind:       kind,
+		Provider:   "openai",
+		StatusCode: apiErr.StatusCode,
+		Message:    apiErr.Message,
+		Retryable:  retryable,
+		Err:        err,
+	}
+}

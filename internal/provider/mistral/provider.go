@@ -105,7 +105,7 @@ func inferCapabilities(m model.ModelCard) provider.Capabilities {
 
 func (p *Provider) wrapError(err error) error {
 	if apiErr, ok := err.(*mistralgo.APIError); ok {
-		kind, retryable := provider.ClassifyHTTPStatus(apiErr.StatusCode)
+		kind, retryable := provider.ClassifyHTTPError(apiErr.StatusCode, apiErr.Message)
 		return &provider.ProviderError{
 			Kind:       kind,
 			Provider:   p.name,

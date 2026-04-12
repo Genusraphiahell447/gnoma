@@ -500,6 +500,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.config.Engine.Reset()
 			}
 			nudge := "Call spawn_elfs now. Spawn 3 elfs in parallel: (1) explore project structure, read go.mod/Makefile/existing AI config files; (2) find non-standard Go conventions and idioms; (3) check README/docs for env vars and setup requirements. Then write AGENTS.md using fs.write."
+			if retryStatus := m.session.Status(); isLocalProvider(retryStatus.Provider) {
+				nudge = "Call fs_ls on the project root now. Then fs_read go.mod and Makefile. Then fs_glob **/*.go to find source files. Finally fs_write AGENTS.md. Do not explain — call the tools."
+			}
 			if err := m.session.Send(nudge); err != nil {
 				m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
 				m.streaming = false
@@ -917,7 +920,15 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			existingPath = agentsPath
 		}
 
-		prompt := initPrompt(root, existingPath)
+		status := m.session.Status()
+		local := isLocalProvider(status.Provider)
+
+		var prompt string
+		if local {
+			prompt = localInitPrompt(root, existingPath)
+		} else {
+			prompt = initPrompt(root, existingPath)
+		}
 
 		m.messages = append(m.messages, chatMessage{role: "user", content: "/init"})
 		m.streaming = true
@@ -930,11 +941,12 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.initRetried = false
 		m.initWriteNudged = false
 
-		// Local models (Ollama, llama.cpp) often narrate tool calls as text instead of
-		// invoking them. Force tool_choice: required so the API response includes actual
-		// function call JSON rather than a prose description.
+		// Cloud models: use spawn_elfs for parallel analysis.
+		// Local models: use the simplified prompt with sequential fs_* tools.
+		// Force tool_choice: required for local models so the API emits function
+		// call JSON rather than narrating the tool calls as text.
 		opts := engine.TurnOptions{}
-		if status := m.session.Status(); isLocalProvider(status.Provider) {
+		if local {
 			opts.ToolChoice = provider.ToolChoiceRequired
 		}
 		if err := m.session.SendWithOptions(prompt, opts); err != nil {

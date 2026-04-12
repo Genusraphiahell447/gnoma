@@ -98,6 +98,48 @@ func TestClassifyHTTPStatus(t *testing.T) {
 	}
 }
 
+func TestClassifyHTTPError_DeterministicToolParse500(t *testing.T) {
+	kind, retry := ClassifyHTTPError(500, "Failed to parse tool call arguments as JSON")
+	if kind != ErrBadRequest {
+		t.Errorf("kind = %v, want %v", kind, ErrBadRequest)
+	}
+	if retry {
+		t.Error("deterministic tool parse failure should not be retryable")
+	}
+}
+
+func TestClassifyHTTPError_Genuine500(t *testing.T) {
+	kind, retry := ClassifyHTTPError(500, "internal server error")
+	if kind != ErrTransient {
+		t.Errorf("kind = %v, want %v", kind, ErrTransient)
+	}
+	if !retry {
+		t.Error("genuine 500 should be retryable")
+	}
+}
+
+func TestClassifyHTTPError_EmptyMessage(t *testing.T) {
+	kind, retry := ClassifyHTTPError(500, "")
+	if kind != ErrTransient {
+		t.Errorf("kind = %v, want %v (empty message should fallthrough)", kind, ErrTransient)
+	}
+	if !retry {
+		t.Error("500 with empty message should be retryable")
+	}
+}
+
+func TestClassifyHTTPError_Non500(t *testing.T) {
+	// Non-500 status codes should pass through to ClassifyHTTPStatus unchanged
+	kind, retry := ClassifyHTTPError(429, "rate limited")
+	if kind != ErrTransient || !retry {
+		t.Errorf("429 should be transient+retryable, got %v/%v", kind, retry)
+	}
+	kind, retry = ClassifyHTTPError(400, "bad request")
+	if kind != ErrBadRequest || retry {
+		t.Errorf("400 should be bad_request+non-retryable, got %v/%v", kind, retry)
+	}
+}
+
 func TestErrorKind_String(t *testing.T) {
 	tests := []struct {
 		kind ErrorKind

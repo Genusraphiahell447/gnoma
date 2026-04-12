@@ -10,6 +10,36 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/message"
 )
 
+// localInitPrompt builds a simplified /init prompt for local models (Ollama, llama.cpp).
+// Instead of spawn_elfs (complex nested JSON that local models can't produce reliably),
+// this uses sequential simple tool calls: fs_ls, fs_read, fs_glob, fs_write.
+func localInitPrompt(root, existingPath string) string {
+	existing := ""
+	if existingPath != "" {
+		existing = fmt.Sprintf("\n\nAn existing AGENTS.md exists at %s. Read it first, then update it — keep accurate sections, fix stale ones, remove bloat.", existingPath)
+	}
+
+	return fmt.Sprintf(`You are creating an AGENTS.md project documentation file for the project at %s.%s
+
+Use ONLY these tools: fs_ls, fs_read, fs_glob, fs_grep, fs_write.
+Do NOT use bash or spawn_elfs.
+
+Steps:
+1. fs_ls on the project root to see the directory structure.
+2. fs_read on go.mod (or package.json/Cargo.toml) to get the module path, runtime version, and dependencies.
+3. fs_read on Makefile to find build/test commands.
+4. fs_glob for **/*.go to discover source files, then fs_read 3-4 key files to understand code conventions and patterns.
+5. fs_read any existing AI config files: CLAUDE.md, .cursor/rules, .cursorrules.
+
+Then fs_write AGENTS.md to %s/AGENTS.md.
+
+AGENTS.md must contain ONLY information not already in CLAUDE.md or other AI config files.
+Include: module path, key dependencies with import paths, non-standard build targets, language-specific idioms with code examples, domain terminology, testing conventions, required env vars.
+Exclude: anything already in CLAUDE.md, standard conventions, generic advice, file listings.
+Format: terse directive-style bullets. Short code examples where non-obvious.
+Do not fabricate. Only write what you observed.`, root, existing, root)
+}
+
 // initPrompt builds the prompt sent to the LLM for /init.
 // existingPath is the absolute path to an existing AGENTS.md, or "" if none exists.
 // The 3 base elfs always run. When existingPath is set, a 4th elf reads the current file.

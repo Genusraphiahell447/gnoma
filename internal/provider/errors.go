@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -53,6 +54,31 @@ func (e *ProviderError) Error() string {
 
 func (e *ProviderError) Unwrap() error {
 	return e.Err
+}
+
+// nonRetryable500Substrings lists error messages from servers (e.g. llama.cpp)
+// that return 500 for deterministic client-side failures. These should not be
+// retried because the same request will always produce the same error.
+var nonRetryable500Substrings = []string{
+	"Failed to parse tool call",   // llama.cpp: model output invalid tool call JSON
+	"failed to parse tool call",   // lowercase variant
+	"tool_call_error",             // some servers use this error type
+	"invalid_tool_call",           // OpenAI-compat servers
+}
+
+// ClassifyHTTPError classifies an HTTP error using both status code and the
+// error message. This catches deterministic 500s (e.g. llama.cpp tool parse
+// failures) that should not be retried.
+func ClassifyHTTPError(status int, message string) (ErrorKind, bool) {
+	if status == 500 && message != "" {
+		lower := strings.ToLower(message)
+		for _, substr := range nonRetryable500Substrings {
+			if strings.Contains(lower, strings.ToLower(substr)) {
+				return ErrBadRequest, false
+			}
+		}
+	}
+	return ClassifyHTTPStatus(status)
 }
 
 // ClassifyHTTPStatus returns the ErrorKind and retryability for an HTTP status code.
