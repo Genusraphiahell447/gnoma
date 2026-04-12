@@ -99,6 +99,45 @@ func TestScanner_DetectsDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestScanner_DetectsMistralKey(t *testing.T) {
+	s := NewScanner(6.0)
+
+	// Should detect Mistral key in assignment contexts.
+	positives := []string{
+		`MISTRAL_API_KEY=abcdefghijklmnop1234567890abcdef`,
+		`mistral_key = "abcdefghijklmnop1234567890abcdef"`,
+		`MISTRAL_API_KEY: abcdefghijklmnop1234567890abcdef`,
+		`export MISTRAL_API_KEY='abcdefghijklmnop1234567890abcdef'`,
+	}
+	for _, text := range positives {
+		matches := s.Scan(text)
+		found := false
+		for _, m := range matches {
+			if m.Pattern == "mistral_api_key" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("should detect Mistral key in: %s", text)
+		}
+	}
+
+	// Should NOT false-positive on bare 32-char strings.
+	negatives := []string{
+		`commit abcdefabcdefabcdefabcdefabcdefab`,               // git hash
+		`uuid: 550e8400e29b41d4a716446655440000`,                // UUID without dashes
+		`checksum = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"`,        // generic checksum
+	}
+	for _, text := range negatives {
+		matches := s.Scan(text)
+		for _, m := range matches {
+			if m.Pattern == "mistral_api_key" {
+				t.Errorf("false positive on: %s", text)
+			}
+		}
+	}
+}
+
 func TestScanner_NoFalsePositives(t *testing.T) {
 	s := NewScanner(6.0) // high entropy threshold to avoid false positives
 	safe := []string{

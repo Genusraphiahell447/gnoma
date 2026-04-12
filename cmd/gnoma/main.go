@@ -325,8 +325,14 @@ func main() {
 		logger.Debug("incognito mode enabled")
 	}
 
-	// Permission checker with console prompt for pipe mode
+	// Permission checker with console prompt for pipe mode.
+	// In pure pipe mode (no TTY on stdin), auto-deny — Scanln would block on EOF.
 	pipePromptFn := func(ctx context.Context, toolName string, args json.RawMessage) (bool, error) {
+		stat, _ := os.Stdin.Stat()
+		if stat.Mode()&os.ModeCharDevice == 0 {
+			fmt.Fprintf(os.Stderr, "⚠ Tool %s denied (no TTY for prompt, use --permission bypass to allow)\n", toolName)
+			return false, nil
+		}
 		fmt.Fprintf(os.Stderr, "⚠ Tool %s wants to execute. Allow? [y/N] ", toolName)
 		var response string
 		fmt.Scanln(&response)
@@ -388,7 +394,9 @@ func main() {
 	// Build hook dispatcher from config + plugin hooks.
 	// Streamer adapter wraps the router for prompt hooks.
 	// ElfSpawnFn closure wraps elfMgr for agent hooks.
-	allHooks := append(cfg.Hooks, pluginResult.Hooks...)
+	allHooks := make([]gnomacfg.HookConfig, 0, len(cfg.Hooks)+len(pluginResult.Hooks))
+	allHooks = append(allHooks, cfg.Hooks...)
+	allHooks = append(allHooks, pluginResult.Hooks...)
 	hookDefs, err := hook.ParseHookDefs(allHooks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook config error: %v\n", err)
@@ -410,7 +418,9 @@ func main() {
 	}
 
 	// Start MCP servers (config + plugin) and register tools in the tool registry.
-	allMCPServers := append(cfg.MCPServers, pluginResult.MCPServers...)
+	allMCPServers := make([]gnomacfg.MCPServerConfig, 0, len(cfg.MCPServers)+len(pluginResult.MCPServers))
+	allMCPServers = append(allMCPServers, cfg.MCPServers...)
+	allMCPServers = append(allMCPServers, pluginResult.MCPServers...)
 	var mcpMgr *mcp.Manager
 	if len(allMCPServers) > 0 {
 		serverCfgs, err := mcp.ParseServerConfigs(allMCPServers)
@@ -665,6 +675,7 @@ func main() {
 			StartWithResumePicker: openResumePicker,
 			Skills:                skillReg,
 		PluginInfos:           buildPluginInfos(discoveredPlugins, enabledSet),
+			Version:               buildVersion,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {

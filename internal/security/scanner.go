@@ -175,7 +175,7 @@ func defaultPatterns() []SecretPattern {
 		{"openai_api_key", `sk-(?:proj-)?[a-zA-Z0-9_-]{20,}`},
 		{"openai_svcacct_key", `sk-svcacct-[a-zA-Z0-9_-]{20,}`},
 		{"openai_admin_key", `sk-admin-[a-zA-Z0-9_-]{20,}`},
-		{"mistral_api_key", `[a-zA-Z0-9]{32}(?:[a-zA-Z0-9]{0})`}, // 32-char; entropy-gated
+		{"mistral_api_key", `(?i)(?:mistral|MISTRAL)[_\s]*(?:api[_\s]*)?key[=:\s"']+([a-zA-Z0-9]{32})\b`}, // context-gated: requires "mistral" nearby
 		{"huggingface_token", `hf_[a-zA-Z0-9]{34,}`},
 
 		// --- Cloud Providers ---

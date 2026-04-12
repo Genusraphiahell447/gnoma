@@ -2,9 +2,6 @@
 
 **A provider-agnostic agentic coding assistant built in Go.** gnoma routes tasks to the best available LLM — cloud or local — through a multi-armed bandit router, while tools, hooks, skills, MCP servers, and plugins keep it extensible. Named after the northern pygmy-owl (*Glaucidium gnoma*); agents are called **elfs** (elf owl).
 
-<!-- TODO: replace with actual demo recording -->
-<!-- ![demo](docs/assets/demo.gif) -->
-
 ## Quickstart
 
 ```sh

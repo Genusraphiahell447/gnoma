@@ -31,11 +31,26 @@ go test -bench=. -benchmem ./internal/router/
 go run ./cmd/gnoma-bench/ --arms=5 --tasks=1000 --seed=42
 ```
 
-## Results
+## Results (M4 heuristic, 2026-04-12)
 
-No benchmark results yet. This scaffold will be populated as M9 (Router Advanced) lands.
+5 arms (Sonnet, Opus, GPT-4o, Qwen3:8b local, Mistral Large), 10 task types. AMD Ryzen 7 3700X.
 
-### Planned comparisons
+```
+BenchmarkScoreArm-16                   3046383     392.5 ns/op     0 B/op    0 allocs/op
+BenchmarkSelectBest-16                   276529      4347 ns/op     0 B/op    0 allocs/op
+BenchmarkFilterFeasible-16              1200006      1003 ns/op   504 B/op   10 allocs/op
+BenchmarkRouterSelect-16                 177916      6794 ns/op  1224 B/op   40 allocs/op
+BenchmarkRouterSelectWithQuality-16      152180      7885 ns/op  1224 B/op   40 allocs/op
+BenchmarkClassifyTask-16                 122278      9780 ns/op  1536 B/op   14 allocs/op
+```
+
+Key observations:
+- `ScoreArm` is zero-alloc at ~400ns — good headroom for M9 bandit sampling overhead
+- Full `Select` (filter + score + pool reserve + commit) is ~7us per routing decision
+- Quality tracker adds ~1us overhead (7.9us vs 6.8us) — acceptable for EMA lookups
+- `ClassifyTask` at ~10us is dominated by `strings.Contains` keyword matching; a trie or compiled regex could reduce this if it becomes a bottleneck, but for per-request overhead it's negligible
+
+### Planned comparisons (M9)
 
 - Heuristic-only (M4) vs. bandit (M9) after 50, 200, 1000 observations
 - 2-arm (local + cloud) vs. 5-arm (mixed providers) scenarios

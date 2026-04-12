@@ -32,7 +32,8 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
-const version = "v0.1.0-dev"
+// version is set from Config.Version at init; falls back to "dev".
+var version = "dev"
 
 type streamEventMsg struct{ event stream.Event }
 type turnDoneMsg struct{ err error }
@@ -66,6 +67,7 @@ type Config struct {
 	StartWithResumePicker bool                 // open session picker on launch
 	Skills               *skill.Registry       // nil = no skills loaded
 	PluginInfos          []PluginInfo          // discovered plugins for /plugins command
+	Version              string                // build version string (from ldflags)
 }
 
 // PluginInfo is a summary of an installed plugin for TUI display.
@@ -118,6 +120,9 @@ type Model struct {
 }
 
 func New(sess session.Session, cfg Config) Model {
+	if cfg.Version != "" {
+		version = cfg.Version
+	}
 	ti := textarea.New()
 	ti.Placeholder = "Type a message... (Enter to send, Shift+Enter for newline)"
 	ti.ShowLineNumbers = false
