@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
@@ -246,6 +247,14 @@ func main() {
 	if armModel == "" {
 		armModel = prov.DefaultModel()
 	}
+	// When the provider returns a placeholder ("default"), query that specific
+	// provider's server for the real model name before registering the arm.
+	if armModel == "default" && localProviders[*providerName] {
+		if resolved := discoverActiveModel(*providerName, cfg, logger); resolved != "" {
+			logger.Debug("resolved placeholder model name", "from", armModel, "to", resolved)
+			armModel = resolved
+		}
+	}
 	armID := router.NewArmID(*providerName, armModel)
 	armProvider := limitedProvider(prov, *providerName, armModel, cfg)
 	arm := &router.Arm{
@@ -278,7 +287,13 @@ func main() {
 		logger.Debug("local models discovered", "count", len(localModels))
 	}
 
-	// Start background discovery polling (30s interval)
+	// Start background discovery polling (30s interval).
+	// modelUpdater is set after the session is created so the discovery loop
+	// can update the displayed model name when it reconciles the forced arm.
+	// modelUpdateCh notifies the TUI to re-render when the model changes.
+	var modelMu sync.Mutex
+	var modelUpdater func(string)
+	modelUpdateCh := make(chan struct{}, 1)
 	discoveryCtx, discoveryCancel := context.WithCancel(context.Background())
 	defer discoveryCancel()
 	providerFactory := func(provName, model string) provider.Provider {
@@ -292,6 +307,18 @@ func main() {
 		cfg.Provider.Endpoints["ollama"],
 		cfg.Provider.Endpoints["llamacpp"],
 		providerFactory, 30*time.Second,
+		func(newID router.ArmID) {
+			modelMu.Lock()
+			fn := modelUpdater
+			modelMu.Unlock()
+			if fn != nil {
+				fn(newID.Model())
+			}
+			select {
+			case modelUpdateCh <- struct{}{}:
+			default:
+			}
+		},
 	)
 
 	// Create firewall
@@ -661,6 +688,9 @@ func main() {
 			Logger:    logger,
 		})
 		defer sess.Close()
+		modelMu.Lock()
+		modelUpdater = sess.SetModel
+		modelMu.Unlock()
 
 		m := tui.New(sess, tui.Config{
 			Firewall:              fw,
@@ -676,6 +706,7 @@ func main() {
 			Skills:                skillReg,
 		PluginInfos:           buildPluginInfos(discoveredPlugins, enabledSet),
 			Version:               buildVersion,
+			ModelUpdateCh:         modelUpdateCh,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
@@ -746,6 +777,31 @@ func isFlagSet(name string) bool {
 		}
 	})
 	return set
+}
+
+// discoverActiveModel queries the specific local provider's server for the model
+// it's currently serving. Returns the model ID or "" if discovery fails.
+func discoverActiveModel(provName string, cfg *gnomacfg.Config, logger *slog.Logger) string {
+	ctx := context.Background()
+	var models []router.DiscoveredModel
+	var err error
+
+	switch provName {
+	case "llamacpp":
+		models, err = router.DiscoverLlamaCpp(ctx, cfg.Provider.Endpoints["llamacpp"])
+	case "ollama":
+		models, err = router.DiscoverOllama(ctx, cfg.Provider.Endpoints["ollama"])
+	default:
+		return ""
+	}
+	if err != nil {
+		logger.Debug("active model discovery failed (non-fatal)", "provider", provName, "error", err)
+		return ""
+	}
+	if len(models) > 0 {
+		return models[0].ID
+	}
+	return ""
 }
 
 func createProvider(name, apiKey, model, baseURL string) (provider.Provider, error) {

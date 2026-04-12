@@ -45,6 +45,7 @@ type PermReqMsg struct {
 }
 
 type elfProgressMsg struct{ progress elf.Progress }
+type modelUpdatedMsg struct{} // sent when background discovery reconciles the model name
 type clearQuitHintMsg struct{}
 type resumeListLoadedMsg struct{ sessions []session.Metadata }
 
@@ -68,6 +69,7 @@ type Config struct {
 	Skills               *skill.Registry       // nil = no skills loaded
 	PluginInfos          []PluginInfo          // discovered plugins for /plugins command
 	Version              string                // build version string (from ldflags)
+	ModelUpdateCh        <-chan struct{}        // signals when the model name changes (discovery reconciliation)
 }
 
 // PluginInfo is a summary of an installed plugin for TUI display.
@@ -187,7 +189,21 @@ func (m Model) Init() tea.Cmd {
 			return resumeListLoadedMsg{sessions: sessions}
 		})
 	}
+	if m.config.ModelUpdateCh != nil {
+		cmds = append(cmds, m.listenForModelUpdate())
+	}
 	return tea.Batch(cmds...)
+}
+
+func (m Model) listenForModelUpdate() tea.Cmd {
+	ch := m.config.ModelUpdateCh
+	return func() tea.Msg {
+		_, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return modelUpdatedMsg{}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -445,6 +461,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			content: fmt.Sprintf("⚠ %s requires approval — press y to allow, n to deny", msg.ToolName)})
 		return m, nil
 
+	case modelUpdatedMsg:
+		// Discovery reconciled the model name — re-render picks up the new
+		// value from session.Status(). Re-listen for further updates.
+		if m.config.ModelUpdateCh != nil {
+			return m, m.listenForModelUpdate()
+		}
+		return m, nil
+
 	case streamEventMsg:
 		return m.handleStreamEvent(msg.event)
 
@@ -566,7 +590,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.initPending {
 			m.initPending = false
-			m = m.loadAgentsMD()
+			if msg.err != nil {
+				m = m.loadAgentsMDStale()
+			} else {
+				m = m.loadAgentsMD()
+			}
 		}
 		// Inline cost: show token usage for this turn
 		if msg.usage.TotalTokens() > 0 {

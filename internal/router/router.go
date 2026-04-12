@@ -120,6 +120,30 @@ func (r *Router) Select(task Task) RoutingDecision {
 	return RoutingDecision{Strategy: StrategySingleArm, Arm: best, reservations: reservations}
 }
 
+// ForcedArm returns the currently forced arm ID, or "" if none.
+func (r *Router) ForcedArm() ArmID {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.forcedArm
+}
+
+// reconcileForcedArm atomically renames the forced arm from oldID to newID.
+// The arm's Provider, Pools, and other fields are preserved; only ID, ModelName,
+// and the forcedArm pointer are updated.
+func (r *Router) reconcileForcedArm(oldID, newID ArmID, newModelName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	arm, ok := r.arms[oldID]
+	if !ok {
+		return
+	}
+	arm.ID = newID
+	arm.ModelName = newModelName
+	delete(r.arms, oldID)
+	r.arms[newID] = arm
+	r.forcedArm = newID
+}
+
 // SetLocalOnly constrains routing to local arms only (for incognito mode).
 func (r *Router) SetLocalOnly(v bool) {
 	r.mu.Lock()

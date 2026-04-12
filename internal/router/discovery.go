@@ -170,10 +170,12 @@ func DiscoverLocalModels(ctx context.Context, logger *slog.Logger, ollamaURL, ll
 }
 
 // StartDiscoveryLoop periodically polls for local models and reconciles with the router.
+// onReconcile is called when the forced arm identity changes (may be nil).
 func StartDiscoveryLoop(ctx context.Context, r *Router, logger *slog.Logger,
 	ollamaURL, llamacppURL string,
 	providerFactory func(name, model string) provider.Provider,
 	interval time.Duration,
+	onReconcile func(ArmID),
 ) {
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -184,25 +186,58 @@ func StartDiscoveryLoop(ctx context.Context, r *Router, logger *slog.Logger,
 				return
 			case <-ticker.C:
 				models := DiscoverLocalModels(ctx, logger, ollamaURL, llamacppURL)
-				reconcileArms(r, models, providerFactory, logger)
+				reconcileArms(r, models, providerFactory, logger, onReconcile)
 			}
 		}
 	}()
 }
 
-// reconcileArms adds newly discovered models and removes disappeared ones.
-func reconcileArms(r *Router, discovered []DiscoveredModel, providerFactory func(name, model string) provider.Provider, logger *slog.Logger) {
+// reconcileArms adds newly discovered models, removes disappeared ones, and
+// reconciles the forced arm when discovery reveals its real model name.
+// onReconcile is called (if non-nil) when the forced arm identity changes.
+func reconcileArms(r *Router, discovered []DiscoveredModel, providerFactory func(name, model string) provider.Provider, logger *slog.Logger, onReconcile func(ArmID)) {
 	discoveredSet := make(map[ArmID]bool, len(discovered))
 	for _, m := range discovered {
 		discoveredSet[NewArmID(m.Provider, m.ID)] = true
 	}
 
+	// Reconcile forced arm if it uses a placeholder "default" model name
+	// and discovery found the real model name for the same provider.
+	forcedID := r.ForcedArm()
+	if forcedID != "" && forcedID.Model() == "default" {
+		provName := forcedID.Provider()
+		var candidates []DiscoveredModel
+		for _, m := range discovered {
+			if m.Provider == provName {
+				candidates = append(candidates, m)
+			}
+		}
+		if len(candidates) >= 1 {
+			chosen := candidates[0]
+			newID := NewArmID(provName, chosen.ID)
+			if len(candidates) > 1 {
+				logger.Warn("multiple models discovered for forced provider, using first",
+					"provider", provName, "chosen", chosen.ID, "total", len(candidates))
+			}
+			logger.Debug("reconciling forced arm identity", "old", forcedID, "new", newID)
+			r.reconcileForcedArm(forcedID, newID, chosen.ID)
+			if onReconcile != nil {
+				onReconcile(newID)
+			}
+		}
+	}
+
 	// Register new models
 	RegisterDiscoveredModels(r, discovered, providerFactory)
 
-	// Remove arms whose models have disappeared (only local arms)
+	// Remove arms whose models have disappeared (only local arms).
+	// Never remove the forced arm — the user explicitly chose it.
+	currentForced := r.ForcedArm()
 	for _, arm := range r.Arms() {
 		if !arm.IsLocal {
+			continue
+		}
+		if arm.ID == currentForced {
 			continue
 		}
 		if !discoveredSet[arm.ID] {

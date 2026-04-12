@@ -110,6 +110,16 @@ When updating: tighten as well as correct. Remove duplication and bloat even if 
 
 // loadAgentsMD reads AGENTS.md from disk and appends it to the context window prefix.
 func (m Model) loadAgentsMD() Model {
+	return m.loadAgentsMDWithMessage("")
+}
+
+// loadAgentsMDStale loads an existing AGENTS.md after a failed /init, using
+// different messaging so the user knows the file is stale.
+func (m Model) loadAgentsMDStale() Model {
+	return m.loadAgentsMDWithMessage("stale")
+}
+
+func (m Model) loadAgentsMDWithMessage(variant string) Model {
 	root := gnomacfg.ProjectRoot()
 	path := filepath.Join(root, "AGENTS.md")
 	data, err := os.ReadFile(path)
@@ -124,8 +134,11 @@ func (m Model) loadAgentsMD() Model {
 			)
 		}
 	}
-	m.messages = append(m.messages, chatMessage{role: "system",
-		content: fmt.Sprintf("AGENTS.md written to %s — loaded into context for this session.", path)})
+	msg := fmt.Sprintf("AGENTS.md written to %s — loaded into context for this session.", path)
+	if variant == "stale" {
+		msg = fmt.Sprintf("AGENTS.md loaded from %s (init failed, using existing file).", path)
+	}
+	m.messages = append(m.messages, chatMessage{role: "system", content: msg})
 	return m
 }
 

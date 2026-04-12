@@ -1,6 +1,7 @@
 package router
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,22 @@ type Arm struct {
 // NewArmID creates an arm ID from provider name and model.
 func NewArmID(providerName, model string) ArmID {
 	return ArmID(providerName + "/" + model)
+}
+
+// Provider returns the provider portion of the arm ID (before the first "/").
+func (id ArmID) Provider() string {
+	if i := strings.IndexByte(string(id), '/'); i >= 0 {
+		return string(id[:i])
+	}
+	return string(id)
+}
+
+// Model returns the model portion of the arm ID (after the first "/").
+func (id ArmID) Model() string {
+	if i := strings.IndexByte(string(id), '/'); i >= 0 {
+		return string(id[i+1:])
+	}
+	return string(id)
 }
 
 // EstimateCost returns estimated cost in EUR for a task.
