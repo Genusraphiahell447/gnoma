@@ -38,6 +38,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
+	"somegit.dev/Owlibou/gnoma/internal/mcp"
+	"somegit.dev/Owlibou/gnoma/internal/plugin"
 	"somegit.dev/Owlibou/gnoma/internal/tool/agent"
 	"somegit.dev/Owlibou/gnoma/internal/tool/bash"
 	"somegit.dev/Owlibou/gnoma/internal/tool/fs"
@@ -346,10 +348,25 @@ func main() {
 	reg.Register(agent.NewListResultsTool(store))
 	reg.Register(agent.NewReadResultTool(store))
 
-	// Build hook dispatcher from config.
+	// Discover plugins and merge their capabilities.
+	pluginLoader := plugin.NewLoader(logger)
+	globalPluginDir := filepath.Join(gnomacfg.GlobalConfigDir(), "plugins")
+	projectPluginDir := filepath.Join(gnomacfg.ProjectRoot(), ".gnoma", "plugins")
+	discoveredPlugins, err := pluginLoader.Discover(globalPluginDir, projectPluginDir)
+	if err != nil {
+		logger.Warn("plugin discovery error", "error", err)
+	}
+	enabledSet := resolveEnabledPlugins(cfg.Plugins, discoveredPlugins)
+	pluginResult, err := pluginLoader.Load(discoveredPlugins, enabledSet)
+	if err != nil {
+		logger.Warn("plugin load error", "error", err)
+	}
+
+	// Build hook dispatcher from config + plugin hooks.
 	// Streamer adapter wraps the router for prompt hooks.
 	// ElfSpawnFn closure wraps elfMgr for agent hooks.
-	hookDefs, err := hook.ParseHookDefs(cfg.Hooks)
+	allHooks := append(cfg.Hooks, pluginResult.Hooks...)
+	hookDefs, err := hook.ParseHookDefs(allHooks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook config error: %v\n", err)
 		os.Exit(1)
@@ -369,11 +386,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Build skill registry: bundled → user (~/.config/gnoma/skills/) → project (.gnoma/skills/)
+	// Start MCP servers (config + plugin) and register tools in the tool registry.
+	allMCPServers := append(cfg.MCPServers, pluginResult.MCPServers...)
+	var mcpMgr *mcp.Manager
+	if len(allMCPServers) > 0 {
+		serverCfgs, err := mcp.ParseServerConfigs(allMCPServers)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp config error: %v\n", err)
+			os.Exit(1)
+		}
+		mcpMgr = mcp.NewManager(logger)
+		if err := mcpMgr.StartAll(context.Background(), serverCfgs, reg); err != nil {
+			fmt.Fprintf(os.Stderr, "mcp startup error: %v\n", err)
+			os.Exit(1)
+		}
+		defer mcpMgr.Shutdown()
+	}
+
+	// Build skill registry: bundled → user → plugins → project (precedence order).
 	skillReg := skill.NewRegistry()
-	skillReg.LoadBundled()                                                                      //nolint:errcheck
-	skillReg.LoadDir(filepath.Join(gnomacfg.GlobalConfigDir(), "skills"), "user")              //nolint:errcheck
-	skillReg.LoadDir(filepath.Join(gnomacfg.ProjectRoot(), ".gnoma", "skills"), "project")     //nolint:errcheck
+	skillReg.LoadBundled()                                                                 //nolint:errcheck
+	skillReg.LoadDir(filepath.Join(gnomacfg.GlobalConfigDir(), "skills"), "user")          //nolint:errcheck
+	for _, ps := range pluginResult.Skills {
+		skillReg.LoadDir(ps.Dir, ps.Source)                                                //nolint:errcheck
+	}
+	skillReg.LoadDir(filepath.Join(gnomacfg.ProjectRoot(), ".gnoma", "skills"), "project") //nolint:errcheck
 
 	// Build system prompt with cwd + compact inventory summary
 	systemPrompt := *system
@@ -604,6 +641,7 @@ func main() {
 			SessionStore:          sessStore,
 			StartWithResumePicker: openResumePicker,
 			Skills:                skillReg,
+		PluginInfos:           buildPluginInfos(discoveredPlugins, enabledSet),
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
@@ -798,3 +836,48 @@ When a task involves 2 or more independent sub-tasks, use the spawn_elfs tool to
 - "refactor this function" → single sequential workflow (one dependent task)
 
 When using spawn_elfs, list all tasks in one call — do NOT spawn one elf at a time.`
+
+// buildPluginInfos converts discovered plugins into TUI display info.
+func buildPluginInfos(plugins []plugin.Plugin, enabledSet map[string]bool) []tui.PluginInfo {
+	infos := make([]tui.PluginInfo, 0, len(plugins))
+	for _, p := range plugins {
+		infos = append(infos, tui.PluginInfo{
+			Name:    p.Manifest.Name,
+			Version: p.Manifest.Version,
+			Scope:   p.Scope,
+			Enabled: enabledSet[p.Manifest.Name],
+		})
+	}
+	return infos
+}
+
+// resolveEnabledPlugins determines which plugins are enabled based on config.
+// If Enabled is empty, all plugins are enabled by default (opt-out via Disabled).
+// If Enabled is non-empty, only listed plugins are enabled (opt-in).
+// Disabled always takes precedence (veto).
+func resolveEnabledPlugins(cfg gnomacfg.PluginsSection, plugins []plugin.Plugin) map[string]bool {
+	disabled := make(map[string]bool, len(cfg.Disabled))
+	for _, name := range cfg.Disabled {
+		disabled[name] = true
+	}
+
+	result := make(map[string]bool, len(plugins))
+
+	if len(cfg.Enabled) == 0 {
+		// Opt-out mode: all plugins enabled unless in disabled list.
+		for _, p := range plugins {
+			if !disabled[p.Manifest.Name] {
+				result[p.Manifest.Name] = true
+			}
+		}
+	} else {
+		// Opt-in mode: only listed plugins enabled.
+		for _, name := range cfg.Enabled {
+			if !disabled[name] {
+				result[name] = true
+			}
+		}
+	}
+
+	return result
+}

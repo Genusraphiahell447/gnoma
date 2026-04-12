@@ -65,6 +65,15 @@ type Config struct {
 	SessionStore         *session.SessionStore // nil = no persistence
 	StartWithResumePicker bool                 // open session picker on launch
 	Skills               *skill.Registry       // nil = no skills loaded
+	PluginInfos          []PluginInfo          // discovered plugins for /plugins command
+}
+
+// PluginInfo is a summary of an installed plugin for TUI display.
+type PluginInfo struct {
+	Name    string
+	Version string
+	Scope   string
+	Enabled bool
 }
 
 type Model struct {
@@ -813,7 +822,24 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /provider           show current provider\n  /resume [id]        list or restore saved sessions\n  /skills             list loaded skills\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
+			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /provider           show current provider\n  /resume [id]        list or restore saved sessions\n  /skills             list loaded skills\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
+		return m, nil
+
+	case "/plugins":
+		if len(m.config.PluginInfos) == 0 {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "No plugins installed."})
+			return m, nil
+		}
+		var b strings.Builder
+		b.WriteString("Installed plugins:\n")
+		for _, p := range m.config.PluginInfos {
+			status := "enabled"
+			if !p.Enabled {
+				status = "disabled"
+			}
+			b.WriteString(fmt.Sprintf("  %s v%s [%s] (%s)\n", p.Name, p.Version, p.Scope, status))
+		}
+		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 		return m, nil
 
 	case "/skills":

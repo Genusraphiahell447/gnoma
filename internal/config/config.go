@@ -11,6 +11,40 @@ type Config struct {
 	Security   SecuritySection   `toml:"security"`
 	Session    SessionSection    `toml:"session"`
 	Hooks      []HookConfig      `toml:"hooks"`
+	MCPServers []MCPServerConfig `toml:"mcp_servers"`
+	Plugins    PluginsSection    `toml:"plugins"`
+}
+
+// MCPServerConfig defines an MCP server to start and connect to.
+//
+// Example:
+//
+//	[[mcp_servers]]
+//	name = "git"
+//	command = "mcp-server-git"
+//	args = ["--repo", "."]
+//	env = { GIT_DIR = ".git" }
+//	timeout = "30s"
+//	replace_default = ["bash"]
+type MCPServerConfig struct {
+	Name           string            `toml:"name"`
+	Command        string            `toml:"command"`
+	Args           []string          `toml:"args"`
+	Env            map[string]string `toml:"env"`
+	Timeout        string            `toml:"timeout"`
+	ReplaceDefault []string          `toml:"replace_default"`
+}
+
+// PluginsSection controls plugin loading.
+//
+// Example:
+//
+//	[plugins]
+//	enabled = ["git-tools", "docker-tools"]
+//	disabled = ["experimental-plugin"]
+type PluginsSection struct {
+	Enabled  []string `toml:"enabled"`
+	Disabled []string `toml:"disabled"`
 }
 
 // HookConfig is a single hook entry from TOML config.
