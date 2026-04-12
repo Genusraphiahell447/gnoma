@@ -19,6 +19,7 @@ const (
 	EventToolResult    // tool execution output
 	EventPermissionReq // permission prompt needed
 	EventUsage
+	EventRouting // router arm selection
 	EventError
 )
 
@@ -40,6 +41,8 @@ func (et EventType) String() string {
 		return "permission_req"
 	case EventUsage:
 		return "usage"
+	case EventRouting:
+		return "routing"
 	case EventError:
 		return "error"
 	default:
@@ -71,6 +74,10 @@ type Event struct {
 
 	// Usage
 	Usage *message.Usage
+
+	// Routing — arm selected by router
+	RoutingModel string // e.g. "anthropic/claude-sonnet-4-20250514"
+	RoutingTask  string // classified task type
 
 	// Error
 	Err error

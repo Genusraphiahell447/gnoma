@@ -9,6 +9,7 @@ import (
 // Metadata holds session summary information persisted alongside messages.
 type Metadata struct {
 	ID           string        `json:"id"`
+	Title        string        `json:"title,omitempty"` // auto-set from first user message
 	Provider     string        `json:"provider"`
 	Model        string        `json:"model"`
 	TurnCount    int           `json:"turn_count"`

@@ -100,6 +100,13 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 					"tools", len(req.Tools),
 					"round", turn.Rounds,
 				)
+				if turn.Rounds == 1 {
+					cb(stream.Event{
+						Type:         stream.EventRouting,
+						RoutingModel: string(decision.Arm.ID),
+						RoutingTask:  task.Type.String(),
+					})
+				}
 			}
 		} else {
 			e.logger.Debug("streaming request",

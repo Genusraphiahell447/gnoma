@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ type Local struct {
 	// Stats
 	provider  string
 	model     string
+	title     string
 	turnCount int
 
 	// Persistence
@@ -95,6 +97,9 @@ func (s *Local) SendWithOptions(input string, opts engine.TurnOptions) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.turnCount++
+	if s.title == "" {
+		s.title = sessionTitle(input)
+	}
 	s.mu.Unlock()
 
 	// Run engine in background goroutine
@@ -130,6 +135,7 @@ func (s *Local) SendWithOptions(input string, opts engine.TurnOptions) error {
 				ID: s.sessionID,
 				Metadata: Metadata{
 					ID:           s.sessionID,
+					Title:        s.title,
 					Provider:     s.provider,
 					Model:        s.model,
 					TurnCount:    s.turnCount,
@@ -207,4 +213,22 @@ func (s *Local) Status() Status {
 	}
 
 	return st
+}
+
+// sessionTitle derives a short title from the first user message.
+func sessionTitle(input string) string {
+	// Take first line, trim whitespace
+	line := input
+	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+		line = line[:idx]
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	const maxLen = 60
+	if len(line) > maxLen {
+		line = line[:maxLen] + "…"
+	}
+	return line
 }

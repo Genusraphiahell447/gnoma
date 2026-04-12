@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -323,6 +324,26 @@ func TestLocal_SessionID(t *testing.T) {
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "m", SessionID: "my-id"})
 	if sess.SessionID() != "my-id" {
 		t.Errorf("SessionID() = %q, want %q", sess.SessionID(), "my-id")
+	}
+}
+
+func TestSessionTitle(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"fix the login bug", "fix the login bug"},
+		{"first line\nsecond line", "first line"},
+		{"  whitespace  ", "whitespace"},
+		{"", ""},
+		{strings.Repeat("a", 80), strings.Repeat("a", 60) + "…"},
+		{strings.Repeat("b", 60), strings.Repeat("b", 60)}, // exactly 60 — no truncation
+	}
+	for _, tt := range tests {
+		got := sessionTitle(tt.input)
+		if got != tt.want {
+			t.Errorf("sessionTitle(%q) = %q, want %q", tt.input, got, tt.want)
+		}
 	}
 }
 
