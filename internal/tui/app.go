@@ -91,7 +91,10 @@ type Model struct {
 	currentRole  string
 
 	input          textarea.Model
+	suggestion     string   // ghost-text completion (dimmed, accepted with Tab)
+	completionSrc  []string // sorted slash commands for completion
 	mdRenderer     *glamour.TermRenderer
+	mdRendererWidth int // cached width to avoid recreating on same-width resizes
 	expandOutput   bool   // ctrl+o toggles expanded tool output
 	elfStates      map[string]*elf.Progress // active elf states keyed by ID
 	elfOrder       []string                 // insertion-ordered elf IDs for tree rendering
@@ -157,15 +160,16 @@ func New(sess session.Session, cfg Config) Model {
 	)
 
 	return Model{
-		session:     sess,
-		config:      cfg,
-		input:       ti,
-		mdRenderer:  mdRenderer,
-		elfStates:   make(map[string]*elf.Progress),
-		cwd:         cwd,
-		gitBranch:   gitBranch,
-		streamBuf:   &strings.Builder{},
-		thinkingBuf: &strings.Builder{},
+		session:       sess,
+		config:        cfg,
+		input:         ti,
+		completionSrc: completionSource(cfg.Skills),
+		mdRenderer:    mdRenderer,
+		elfStates:     make(map[string]*elf.Progress),
+		cwd:           cwd,
+		gitBranch:     gitBranch,
+		streamBuf:     &strings.Builder{},
+		thinkingBuf:   &strings.Builder{},
 	}
 }
 
@@ -192,11 +196,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(m.width - 4)
-		// Recreate markdown renderer with new width (account for "◆ "/"  " prefix)
-		m.mdRenderer, _ = glamour.NewTermRenderer(
-			glamour.WithStandardStyle("dark"),
-			glamour.WithWordWrap(m.width-6),
-		)
+		// Only recreate markdown renderer when width actually changes.
+		wrapWidth := m.width - 6
+		if wrapWidth != m.mdRendererWidth {
+			m.mdRendererWidth = wrapWidth
+			m.mdRenderer, _ = glamour.NewTermRenderer(
+				glamour.WithStandardStyle("dark"),
+				glamour.WithWordWrap(wrapWidth),
+			)
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -229,10 +237,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Ctrl+C = clear input (single) or quit (double within 1s)
+		// Ctrl+C = clear input (single) or quit (double within 2s)
 		if msg.String() == "ctrl+c" {
 			now := time.Now()
-			if m.quitHint && now.Sub(m.lastCtrlC) < time.Second {
+			if m.quitHint && now.Sub(m.lastCtrlC) < 2*time.Second {
 				// Second press within window → clean shutdown
 				if m.permPending {
 					m.permPending = false
@@ -250,7 +258,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("")
 			m.lastCtrlC = now
 			m.quitHint = true
-			return m, tea.Tick(time.Second, func(time.Time) tea.Msg {
+			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 				return clearQuitHintMsg{}
 			})
 		}
@@ -342,6 +350,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+]":
 			m.copyMode = !m.copyMode
 			return m, nil
+		case "tab":
+			if m.suggestion != "" {
+				m.input.SetValue(m.suggestion)
+				m.suggestion = ""
+				return m, nil
+			}
 		case "pgup", "shift+up":
 			m.scrollOffset += 5
 			return m, nil
@@ -401,6 +415,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.permToolName = msg.ToolName
 		m.permArgs = msg.Args
 		m.scrollOffset = 0
+		// Inline notification so the user sees the prompt even if focused on input.
+		m.messages = append(m.messages, chatMessage{role: "system",
+			content: fmt.Sprintf("⚠ %s requires approval — press y to allow, n to deny", msg.ToolName)})
 		return m, nil
 
 	case streamEventMsg:
@@ -532,6 +549,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
+
+	// Update slash-command ghost completion.
+	m.suggestion = matchCompletion(m.input.Value(), m.completionSrc)
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -578,11 +599,15 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/compact":
 		if m.config.Engine != nil {
 			if w := m.config.Engine.ContextWindow(); w != nil {
+				before := w.Tracker().Used()
 				compacted, err := w.ForceCompact()
 				if err != nil {
 					m.messages = append(m.messages, chatMessage{role: "error", content: "compaction failed: " + err.Error()})
 				} else if compacted {
-					m.messages = append(m.messages, chatMessage{role: "system", content: "context compacted — older messages summarized"})
+					after := w.Tracker().Used()
+					msg := fmt.Sprintf("context compacted — %dk → %dk tokens (saved %dk)",
+						before/1000, after/1000, (before-after)/1000)
+					m.messages = append(m.messages, chatMessage{role: "system", content: msg})
 				} else {
 					m.messages = append(m.messages, chatMessage{role: "system", content: "no compaction strategy configured"})
 				}
@@ -751,14 +776,43 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/provider":
-		if args == "" {
-			status := m.session.Status()
+		if args != "" {
 			m.messages = append(m.messages, chatMessage{role: "system",
-				content: fmt.Sprintf("current provider: %s\nUsage: /provider <name> (mistral, anthropic, openai, google, ollama)", status.Provider)})
+				content: fmt.Sprintf("provider switching requires restart: gnoma --provider %s", args)})
 			return m, nil
 		}
-		m.messages = append(m.messages, chatMessage{role: "system",
-			content: fmt.Sprintf("provider switching requires restart: gnoma --provider %s", args)})
+		status := m.session.Status()
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Active: %s/%s\n", status.Provider, status.Model))
+		if m.config.Router != nil {
+			arms := m.config.Router.Arms()
+			if len(arms) > 0 {
+				// Group arms by provider prefix
+				providers := make(map[string][]string)
+				for _, arm := range arms {
+					parts := strings.SplitN(string(arm.ID), "/", 2)
+					prov := parts[0]
+					model := string(arm.ID)
+					if len(parts) == 2 {
+						model = parts[1]
+					}
+					tag := ""
+					if arm.IsLocal {
+						tag = " (local)"
+					}
+					providers[prov] = append(providers[prov], model+tag)
+				}
+				b.WriteString("\nRegistered arms:\n")
+				for prov, models := range providers {
+					b.WriteString(fmt.Sprintf("  %s:\n", prov))
+					for _, model := range models {
+						b.WriteString(fmt.Sprintf("    - %s\n", model))
+					}
+				}
+			}
+		}
+		b.WriteString("\nTo switch: gnoma --provider <name>")
+		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 		return m, nil
 
 	case "/init":
@@ -827,7 +881,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /provider           show current provider\n  /resume [id]        list or restore saved sessions\n  /skills             list loaded skills\n  /shell              interactive shell (coming soon)\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
+			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /provider           show current provider\n  /resume [id]        list or restore saved sessions\n  /skills             list loaded skills\n  /usage              show token usage and cost\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
 		return m, nil
 
 	case "/plugins":
@@ -861,6 +915,32 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			}
 			b.WriteString(fmt.Sprintf(" [%s]\n", sk.Source))
 		}
+		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
+		return m, nil
+
+	case "/usage":
+		var b strings.Builder
+		b.WriteString("Session usage:\n")
+		if m.config.Engine != nil {
+			u := m.config.Engine.Usage()
+			b.WriteString(fmt.Sprintf("  Input tokens:  %d\n", u.InputTokens))
+			b.WriteString(fmt.Sprintf("  Output tokens: %d\n", u.OutputTokens))
+			b.WriteString(fmt.Sprintf("  Total tokens:  %d\n", u.TotalTokens()))
+			if u.CacheReadTokens > 0 {
+				b.WriteString(fmt.Sprintf("  Cache reads:   %d\n", u.CacheReadTokens))
+			}
+			if w := m.config.Engine.ContextWindow(); w != nil {
+				tr := w.Tracker()
+				pct := float64(0)
+				if tr.MaxTokens() > 0 {
+					pct = float64(tr.Used()) / float64(tr.MaxTokens()) * 100
+				}
+				b.WriteString(fmt.Sprintf("  Context:       %dk / %dk (%.0f%%)\n", tr.Used()/1000, tr.MaxTokens()/1000, pct))
+			}
+		}
+		status := m.session.Status()
+		b.WriteString(fmt.Sprintf("  Provider:      %s/%s\n", status.Provider, status.Model))
+		b.WriteString(fmt.Sprintf("  Turns:         %d\n", status.TurnCount))
 		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 		return m, nil
 
@@ -1017,6 +1097,12 @@ func (m Model) View() tea.View {
 	chatH := m.height - statusH - inputH - 2
 
 	chat := m.renderChat(chatH)
+
+	// Show "new content below" indicator when scrolled up during streaming
+	if m.scrollOffset > 0 && m.streaming {
+		indicator := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("  ⬇ new content below")
+		topLine = indicator + topLine[len(indicator):]
+	}
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left,
 		chat,
@@ -1471,7 +1557,16 @@ func (m Model) renderSeparators() (string, string) {
 }
 
 func (m Model) renderInput() string {
-	return m.input.View()
+	view := m.input.View()
+	if m.suggestion != "" {
+		// Show the untyped remainder as dim ghost text.
+		rest := strings.TrimPrefix(m.suggestion, m.input.Value())
+		if rest != "" {
+			ghost := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(rest + " (tab)")
+			view += ghost
+		}
+	}
+	return view
 }
 
 func (m Model) renderStatus() string {
@@ -1654,7 +1749,7 @@ func filterModelCodeBlocks(closeTag *string, text string) string {
 		} else {
 			// Not filtering — scan for any known open tag.
 			earliest := -1
-			var openLen, closeLen int
+			var openLen int
 			var chosenClose string
 			for _, pair := range modelBlockPairs {
 				idx := strings.Index(text, pair[0])
@@ -1662,8 +1757,6 @@ func filterModelCodeBlocks(closeTag *string, text string) string {
 					earliest = idx
 					openLen = len(pair[0])
 					chosenClose = pair[1]
-					closeLen = len(chosenClose)
-					_ = closeLen
 				}
 			}
 			if earliest < 0 {
