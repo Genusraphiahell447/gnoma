@@ -12,6 +12,8 @@ const (
 	llamacppDefaultURL = "http://localhost:8080/v1"
 )
 
+func intPtr(v int) *int { return &v }
+
 // NewOllama creates a provider for a local Ollama instance.
 func NewOllama(cfg provider.ProviderConfig) (provider.Provider, error) {
 	if cfg.BaseURL == "" {
@@ -22,6 +24,9 @@ func NewOllama(cfg provider.ProviderConfig) (provider.Provider, error) {
 	}
 	if cfg.Model == "" {
 		cfg.Model = "qwen3:8b"
+	}
+	if cfg.MaxRetries == nil {
+		cfg.MaxRetries = intPtr(0) // local 500s are deterministic, not transient
 	}
 	return oaiprov.New(cfg)
 }
@@ -36,6 +41,9 @@ func NewLlamaCpp(cfg provider.ProviderConfig) (provider.Provider, error) {
 	}
 	if cfg.Model == "" {
 		cfg.Model = "default"
+	}
+	if cfg.MaxRetries == nil {
+		cfg.MaxRetries = intPtr(0) // local 500s are deterministic, not transient
 	}
 	return oaiprov.New(cfg)
 }

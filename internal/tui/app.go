@@ -22,7 +22,6 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
-	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
@@ -479,6 +478,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.elfOrder = nil
 		m.runningTools = nil
 
+		// If /init failed with a tool-parse error on a local model, the model can
+		// generate text but not valid tool-call JSON. Retry without tools — ask the
+		// model to output AGENTS.md as plain markdown text instead.
+		if m.initPending && !m.initRetried && msg.err != nil &&
+			strings.Contains(msg.err.Error(), "parse tool call") {
+			m.initRetried = true
+			m.streaming = true
+			m.thinkingBuf.Reset()
+			m.streamBuf.Reset()
+			if m.config.Engine != nil {
+				m.config.Engine.Reset()
+			}
+			m.messages = append(m.messages, chatMessage{
+				role:    "system",
+				content: "tool-call JSON failed — retrying without tools (text-only fallback)",
+			})
+			root := gnomacfg.ProjectRoot()
+			textPrompt := fmt.Sprintf(`You are creating an AGENTS.md project documentation file for the project at %s.
+
+You have NO tools available. Based on common Go project conventions, generate a useful AGENTS.md skeleton.
+
+Output the complete document as markdown text, starting with a # heading. Include sections for:
+- Module path (use the project directory name as a hint)
+- Key dependencies (common for a Go TUI/LLM project)
+- Build commands (make build/test/lint/cover)
+- Code conventions
+- Environment variables
+- Domain terminology
+
+Mark anything you're unsure about with TODO. Be terse — directive-style bullets, no prose.`, root)
+			// Reset session from StateError so it accepts a new Send.
+			m.session.ResetError()
+			// Send with empty AllowedTools to suppress all tool schemas.
+			opts := engine.TurnOptions{AllowedTools: []string{}}
+			if err := m.session.SendWithOptions(textPrompt, opts); err != nil {
+				m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+				m.streaming = false
+				m.initPending = false
+			}
+			// Mark as write-nudged so the disk-write logic at turnDone catches the output.
+			m.initHadToolCalls = true
+			m.initWriteNudged = true
+			return m, m.listenForEvents()
+		}
+
 		// If /init completed with any content but no tool calls, the model described or
 		// planned but didn't call spawn_elfs. Retry once with a fresh context and a
 		// short direct prompt that's easier for local models to act on.
@@ -924,13 +968,30 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		local := isLocalProvider(status.Provider)
 
 		var prompt string
-		if local {
-			prompt = localInitPrompt(root, existingPath)
-		} else {
-			prompt = initPrompt(root, existingPath)
+		if m.config.Skills != nil {
+			if sk := m.config.Skills.Get("init"); sk != nil {
+				rendered, err := sk.Render(skill.TemplateData{
+					Args:        existingPath,
+					ProjectRoot: root,
+					Cwd:         m.cwd,
+					Local:       local,
+				})
+				if err == nil {
+					prompt = rendered
+				}
+			}
+		}
+		// Fallback to hardcoded prompts if skill not found.
+		if prompt == "" {
+			if local {
+				prompt = localInitPrompt(root, existingPath)
+			} else {
+				prompt = initPrompt(root, existingPath)
+			}
 		}
 
 		m.messages = append(m.messages, chatMessage{role: "user", content: "/init"})
+
 		m.streaming = true
 		m.currentRole = "assistant"
 		m.streamBuf.Reset()
@@ -941,14 +1002,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.initRetried = false
 		m.initWriteNudged = false
 
-		// Cloud models: use spawn_elfs for parallel analysis.
-		// Local models: use the simplified prompt with sequential fs_* tools.
-		// Force tool_choice: required for local models so the API emits function
-		// call JSON rather than narrating the tool calls as text.
 		opts := engine.TurnOptions{}
-		if local {
-			opts.ToolChoice = provider.ToolChoiceRequired
-		}
 		if err := m.session.SendWithOptions(prompt, opts); err != nil {
 			m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
 			m.streaming = false
@@ -1092,6 +1146,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 					Args:        args,
 					Cwd:         m.cwd,
 					ProjectRoot: gnomacfg.ProjectRoot(),
+					Local:       isLocalProvider(m.session.Status().Provider),
 				})
 				if err != nil {
 					m.messages = append(m.messages, chatMessage{role: "error",

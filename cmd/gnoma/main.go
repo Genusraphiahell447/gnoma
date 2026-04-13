@@ -275,6 +275,7 @@ func main() {
 	localModels := router.DiscoverLocalModels(context.Background(), logger,
 		cfg.Provider.Endpoints["ollama"],
 		cfg.Provider.Endpoints["llamacpp"],
+		nil, // no cache for initial one-shot discovery
 	)
 	router.RegisterDiscoveredModels(rtr, localModels, func(provName, model string) provider.Provider {
 		p, err := createProvider(provName, "", model, cfg.Provider.Endpoints[provName])
@@ -634,6 +635,7 @@ func main() {
 					Args:        args,
 					Cwd:         cwd,
 					ProjectRoot: gnomacfg.ProjectRoot(),
+					Local:       localProviders[*providerName],
 				})
 				if renderErr != nil {
 					fmt.Fprintf(os.Stderr, "skill %q: %v\n", name, renderErr)
@@ -790,7 +792,7 @@ func discoverActiveModel(provName string, cfg *gnomacfg.Config, logger *slog.Log
 	case "llamacpp":
 		models, err = router.DiscoverLlamaCpp(ctx, cfg.Provider.Endpoints["llamacpp"])
 	case "ollama":
-		models, err = router.DiscoverOllama(ctx, cfg.Provider.Endpoints["ollama"])
+		models, err = router.DiscoverOllama(ctx, cfg.Provider.Endpoints["ollama"], nil)
 	default:
 		return ""
 	}

@@ -3,6 +3,7 @@ package openai
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
@@ -80,7 +81,7 @@ func (s *openaiStream) Next() bool {
 						id:           tc.ID,
 						name:         tc.Function.Name,
 						args:         tc.Function.Arguments,
-						argsComplete: tc.Function.Arguments != "",
+						argsComplete: tc.Function.Arguments != "" && json.Valid([]byte(tc.Function.Arguments)),
 					}
 					s.toolCalls[tc.Index] = existing
 					s.hadToolCalls = true
@@ -193,6 +194,12 @@ func wrapSDKError(err error) error {
 		return err
 	}
 	kind, retryable := provider.ClassifyHTTPError(apiErr.StatusCode, apiErr.Message)
+	slog.Debug("openai SDK error wrapped",
+		"status", apiErr.StatusCode,
+		"kind", kind,
+		"retryable", retryable,
+		"message", apiErr.Message,
+	)
 	return &provider.ProviderError{
 		Kind:       kind,
 		Provider:   "openai",

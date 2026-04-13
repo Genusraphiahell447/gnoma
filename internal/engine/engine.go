@@ -51,7 +51,8 @@ type Turn struct {
 
 // TurnOptions carries per-turn overrides that apply for a single Submit call.
 type TurnOptions struct {
-	ToolChoice provider.ToolChoiceMode // "" = use provider default
+	ToolChoice   provider.ToolChoiceMode // "" = use provider default
+	AllowedTools []string                // if non-nil, only these tools are sent (matched by name)
 }
 
 // Engine orchestrates the conversation.
@@ -71,6 +72,55 @@ type Engine struct {
 
 	// Per-turn options, set for the duration of SubmitWithOptions.
 	turnOpts TurnOptions
+}
+
+// ToolsAvailable reports whether the current model supports tool calling.
+func (e *Engine) ToolsAvailable() bool {
+	return e.forcedArmSupportsTools()
+}
+
+// forcedArmSupportsTools returns true if tool definitions should be included
+// in the request. When the router has a forced arm, checks its ToolUse
+// capability. Returns true for multi-arm routing (feasibility filter handles it)
+// or when no router is configured.
+func (e *Engine) forcedArmSupportsTools() bool {
+	if e.cfg.Router == nil {
+		return true
+	}
+	id := e.cfg.Router.ForcedArm()
+	if id == "" {
+		return true // multi-arm routing: router handles feasibility
+	}
+	arm, ok := e.cfg.Router.LookupArm(id)
+	if !ok {
+		if e.logger != nil {
+			e.logger.Debug("forced arm not found in router, assuming tool support", "arm", id)
+		}
+		return true
+	}
+	if e.logger != nil {
+		e.logger.Debug("forced arm tool support check",
+			"arm", id,
+			"tool_use", arm.Capabilities.ToolUse,
+		)
+	}
+	return arm.Capabilities.ToolUse
+}
+
+// isLocalArm returns true if the forced arm is a local provider (Ollama, llama.cpp).
+func (e *Engine) isLocalArm() bool {
+	if e.cfg.Router == nil {
+		return false
+	}
+	id := e.cfg.Router.ForcedArm()
+	if id == "" {
+		return false
+	}
+	arm, ok := e.cfg.Router.LookupArm(id)
+	if !ok {
+		return false
+	}
+	return arm.IsLocal
 }
 
 // New creates an engine.

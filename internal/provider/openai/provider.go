@@ -39,6 +39,9 @@ func NewWithStreamOptions(cfg provider.ProviderConfig, streamOpts []option.Reque
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
+	if cfg.MaxRetries != nil {
+		opts = append(opts, option.WithMaxRetries(*cfg.MaxRetries))
+	}
 
 	client := oai.NewClient(opts...)
 

@@ -520,6 +520,9 @@ func (m Model) renderStatus() string {
 	if m.incognito {
 		provModel += " " + sStatusIncognito.Render("🔒")
 	}
+	if !status.ToolsAvailable {
+		provModel += " " + sStatusDim.Render("text-only")
+	}
 	left := sStatusHighlight.Render(provModel)
 
 	// Center: cwd + git branch

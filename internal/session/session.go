@@ -38,14 +38,15 @@ func (s SessionState) String() string {
 
 // Status holds observable session state.
 type Status struct {
-	State        SessionState
-	Provider     string
-	Model        string
-	TokensUsed   int64
-	TokensMax    int64
-	TokenPercent int // 0-100
-	TokenState   string // "ok", "warning", "critical"
-	TurnCount    int
+	State          SessionState
+	Provider       string
+	Model          string
+	TokensUsed     int64
+	TokensMax      int64
+	TokenPercent   int    // 0-100
+	TokenState     string // "ok", "warning", "critical"
+	TurnCount      int
+	ToolsAvailable bool // false when model does not support tool calling
 }
 
 // Session is the boundary between UI and engine.
@@ -62,6 +63,9 @@ type Session interface {
 	TurnResult() (*engine.Turn, error)
 	// Cancel aborts the current turn.
 	Cancel()
+	// ResetError transitions the session from StateError back to StateIdle
+	// so a retry can be attempted. No-op if not in StateError.
+	ResetError()
 	// Close shuts down the session.
 	Close() error
 	// Status returns current session state.

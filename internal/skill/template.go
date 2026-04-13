@@ -12,6 +12,7 @@ type TemplateData struct {
 	Args        string // raw user arguments after the skill name
 	Cwd         string // current working directory
 	ProjectRoot string // detected project root
+	Local       bool   // true if using a local provider (Ollama, llama.cpp)
 }
 
 // Render executes the skill body as a Go text/template with data.

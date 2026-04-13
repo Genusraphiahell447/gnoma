@@ -7,11 +7,12 @@ import (
 
 // ProviderConfig is the common configuration for any provider.
 type ProviderConfig struct {
-	Name    string
-	APIKey  string
-	BaseURL string         // override for OpenAI-compat endpoints
-	Model   string         // default model for this provider
-	Options map[string]any // provider-specific options
+	Name       string
+	APIKey     string
+	BaseURL    string         // override for OpenAI-compat endpoints
+	Model      string         // default model for this provider
+	Options    map[string]any // provider-specific options
+	MaxRetries *int           // nil = SDK default; ptr(0) = no retries
 }
 
 // Factory creates a Provider from configuration.

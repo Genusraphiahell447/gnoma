@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,9 +186,13 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		}
 		streamEnd := time.Now()
 		if err := s.Err(); err != nil {
+			e.logger.Debug("stream terminated with error",
+				"error", err,
+				"rounds", turn.Rounds,
+			)
 			s.Close()
 			decision.Rollback()
-			return nil, fmt.Errorf("stream error: %w", err)
+			return nil, e.annotateStreamError(err, len(req.Tools))
 		}
 		s.Close()
 
@@ -276,6 +282,11 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 	if e.cfg.Context != nil {
 		messages = e.cfg.Context.AllMessages()
 	}
+	// For local models, compact tool results from previous rounds to stay
+	// within small context windows. Cloud models keep full results.
+	if e.isLocalArm() {
+		messages = compactPreviousToolResults(messages)
+	}
 	systemPrompt := e.cfg.System
 	if e.cfg.Firewall != nil {
 		messages = e.cfg.Firewall.ScanOutgoingMessages(messages)
@@ -290,14 +301,25 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 	}
 
 	// Only include tools if the model supports them.
-	// When Router is active, skip capability gating — the router selects the arm
-	// and already knows its capabilities. Gating here would use the wrong provider.
+	// When a forced arm is set, check its ToolUse capability directly.
+	// For multi-arm routing (no forced arm), include tools and let the
+	// router's feasibility filter handle capability matching.
 	caps := e.resolveCapabilities(ctx)
-	if e.cfg.Router != nil || caps == nil || caps.ToolUse {
-		// Router active, nil caps (unknown model), or model supports tools
+	includeTools := false
+	if e.cfg.Router != nil {
+		includeTools = e.forcedArmSupportsTools()
+	} else {
+		includeTools = caps == nil || caps.ToolUse
+	}
+	if includeTools {
+		allowed := e.turnOpts.AllowedTools
 		for _, t := range e.cfg.Tools.All() {
 			// Skip deferred tools until the model requests them
 			if dt, ok := t.(tool.DeferrableTool); ok && dt.ShouldDefer() && !e.activatedTools[t.Name()] {
+				continue
+			}
+			// Filter to allowed tools when a restrict list is set
+			if allowed != nil && !slices.Contains(allowed, t.Name()) {
 				continue
 			}
 			req.Tools = append(req.Tools, provider.ToolDefinition{
@@ -306,6 +328,10 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 				Parameters:  t.Parameters(),
 			})
 		}
+		e.logger.Debug("tools included in request",
+			"model", req.Model,
+			"count", len(req.Tools),
+		)
 	} else {
 		e.logger.Debug("tools omitted — model does not support tool use",
 			"model", req.Model,
@@ -553,6 +579,10 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 func (e *Engine) retryOnTransient(ctx context.Context, firstErr error, fn func() (stream.Stream, error)) (stream.Stream, error) {
 	var provErr *provider.ProviderError
 	if !errors.As(firstErr, &provErr) || !provErr.Retryable {
+		e.logger.Debug("error not retryable",
+			"is_provider_error", errors.As(firstErr, &provErr),
+			"error", firstErr,
+		)
 		return nil, firstErr
 	}
 
@@ -593,5 +623,21 @@ func (e *Engine) retryOnTransient(ctx context.Context, firstErr error, fn func()
 	}
 
 	return nil, firstErr
+}
+
+// annotateStreamError wraps a stream error with diagnostic context when the
+// failure is a deterministic tool-parse error from a local server. The extra
+// context is visible in the TUI (slog.Debug goes to a file).
+func (e *Engine) annotateStreamError(err error, toolCount int) error {
+	var provErr *provider.ProviderError
+	if errors.As(err, &provErr) && provErr.StatusCode == 500 &&
+		strings.Contains(strings.ToLower(provErr.Message), "parse tool call") {
+		toolSupport := e.forcedArmSupportsTools()
+		return fmt.Errorf("stream error (tools_sent=%d, probe_tool_support=%v): %w\n"+
+			"hint: the model's chat template claims tool support but it generated invalid tool JSON. "+
+			"Ensure llama.cpp is started with --jinja, or try a model with better tool-calling ability",
+			toolCount, toolSupport, err)
+	}
+	return fmt.Errorf("stream error: %w", err)
 }
 

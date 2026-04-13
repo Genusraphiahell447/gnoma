@@ -72,7 +72,7 @@ func translateMessage(m message.Message) []oai.ChatCompletionMessageParamUnion {
 			msg.OfAssistant.ToolCalls = append(msg.OfAssistant.ToolCalls, oai.ChatCompletionMessageToolCallParam{
 				ID: tc.ID,
 				Function: oai.ChatCompletionMessageToolCallFunctionParam{
-					Name:      tc.Name,
+					Name:      sanitizeToolName(tc.Name),
 					Arguments: string(tc.Arguments),
 				},
 			})
@@ -131,9 +131,13 @@ func translateRequest(req provider.Request) oai.ChatCompletionNewParams {
 		IncludeUsage: param.NewOpt(true),
 	}
 
-	if req.ToolChoice != "" && len(params.Tools) > 0 {
+	if len(params.Tools) > 0 {
+		choice := "auto"
+		if req.ToolChoice != "" {
+			choice = string(req.ToolChoice)
+		}
 		params.ToolChoice = oai.ChatCompletionToolChoiceOptionUnionParam{
-			OfAuto: param.NewOpt(string(req.ToolChoice)),
+			OfAuto: param.NewOpt(choice),
 		}
 	}
 

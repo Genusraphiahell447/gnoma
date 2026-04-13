@@ -177,6 +177,15 @@ func (s *Local) Cancel() {
 	}
 }
 
+func (s *Local) ResetError() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state == StateError {
+		s.state = StateIdle
+		s.err = nil
+	}
+}
+
 func (s *Local) Close() error {
 	s.Cancel()
 	s.mu.Lock()
@@ -197,12 +206,13 @@ func (s *Local) Status() Status {
 	defer s.mu.Unlock()
 
 	st := Status{
-		State:      s.state,
-		Provider:   s.provider,
-		Model:      s.model,
-		TokensUsed: s.eng.Usage().TotalTokens(),
-		TurnCount:  s.turnCount,
-		TokenState: "ok",
+		State:          s.state,
+		Provider:       s.provider,
+		Model:          s.model,
+		TokensUsed:     s.eng.Usage().TotalTokens(),
+		TurnCount:      s.turnCount,
+		TokenState:     "ok",
+		ToolsAvailable: s.eng.ToolsAvailable(),
 	}
 
 	if w := s.eng.ContextWindow(); w != nil {
