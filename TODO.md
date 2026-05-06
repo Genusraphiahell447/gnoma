@@ -1,7 +1,73 @@
-# Gnoma ELF Support - TODO List
+# Gnoma - TODO List
 
-## Overview
-This document outlines the steps to add **ELF (Executable and Linkable Format)** support to Gnoma, enabling features like ELF parsing, disassembly, security analysis, and binary manipulation.
+---
+
+## Gemma Integration (Local Model Routing)
+
+See [`gemma-integration-analysis.md`](gemma-integration-analysis.md) for full architecture analysis, routing prompts, and implementation checklist.
+
+- [ ] Infrastructure & asset management (platform detection, safe installer, model manager)
+- [ ] Process & server management (background daemon, state tracking, auto-start)
+- [ ] Routing logic (complexity rubric, context flattener, strategy implementation)
+- [ ] UX (management commands, slash command, status UI)
+- [ ] Configuration & safety (scoped settings, failure resilience)
+
+---
+
+## Built-in Security Pilot (USP Integration)
+
+### Overview
+Ship the [Universal Security Pilot](https://github.com/VikingOwl91/universal-security-pilot) capabilities as first-class features in gnoma's core, rather than relying on external Markdown files and tool-specific adapters. Gnoma becomes the runtime for USP — the audit engine, remediation workflow, and AI hardening logic live inside the binary.
+
+### Core Capabilities to Internalize
+- [ ] **Security audit engine** — the eight-rule zero-trust review (adversarial input, context-aware footguns, identity integrity, atomicity, secret hygiene, AI guarding, SSRF/Dial-Control, multilingual defense)
+- [ ] **Wave Protocol enforcement** — mandatory remediation ordering (W0→W1→W2→W3→W4→W5→W6), blast-radius-descending within each wave, cross-wave dependency resolution
+- [ ] **Iron Law** — no fix ships without a failing PoC test; enforce this in the remediation workflow
+- [ ] **Standards citation** — every finding must map to OWASP Top 10 / ASVS / LLM Top 10 / MITRE ATLAS / CWE IDs
+- [ ] **AI hardening** — six-axis LLM hardening (prompt boundaries, output sanitization, BudgetGate, Dial-Control, injection vectors, multilingual defense)
+
+### Implementation Steps
+- [ ] **Skill system**: implement `sec-audit`, `sec-fix`, `ai-harden`, `sec-init` as built-in gnoma skills (not external file reads)
+- [ ] **Footgun library**: embed the universal footgun catalog (categories A–D) and framework-specific instances as structured data gnoma can query during audits
+- [ ] **Severity grading**: Critical/High/Medium/Low/Info with the canonical definitions, used in audit report output
+- [ ] **Complexity rubric**: language-specific footgun tables (Go, TS/JS, Rust, Python, etc.) as queryable rules
+- [ ] **Canonical patterns**: ship BudgetGate, Dial-Control, Envelope Encryption, OIDC state-verification as referenceable code templates gnoma can suggest or scaffold
+- [ ] **Project-local override**: support `.gnoma/security/project-pilot.toml` (or similar) for per-project tightening (never loosening)
+- [ ] **Rationalization resistance**: the anti-pressure table from `sec-fix` ("approved", "rushed deadline" do not override discipline)
+- [ ] **Report generation**: structured Markdown audit reports with standards citations, severity, and wave assignment
+
+### Considerations
+- USP is tool-agnostic by design; gnoma's implementation should preserve the framework's principles while making them native
+- The Wave Protocol ordering is load-bearing — W1 (auth) must complete before W2 (network), etc.
+- Project-local overrides can tighten but never loosen the canonical rules
+- Embed the footgun library as Go structs, not as runtime-parsed Markdown
+
+---
+
+## Local Tmp Folder (`.gnoma/tmp/`)
+
+### Overview
+Per-project temporary directory at `.gnoma/tmp/[current-working-dir]` for scratch files, intermediate outputs, and ephemeral state that shouldn't pollute the project tree or system tmp.
+
+### Implementation Steps
+- [ ] Create `.gnoma/tmp/` directory structure on first use (lazy initialization)
+- [ ] Derive subdirectory name from current working directory (hash or sanitized path)
+- [ ] Add helpers to resolve tmp paths: `gnoma.TmpDir(cwd string) string`
+- [ ] Auto-cleanup policy (e.g., prune entries older than N days, or on session end)
+- [ ] Add `.gnoma/tmp/` to default `.gitignore` generation
+- [ ] Use for tool scratch space (e.g., ELF analysis intermediates, diff staging, etc.)
+
+### Considerations
+- Avoid collisions when multiple gnoma instances target the same project
+- Keep path derivation deterministic so the same project always maps to the same tmp dir
+- Respect XDG conventions where applicable (fallback to `~/.gnoma/tmp/` if no project-local `.gnoma/`)
+
+---
+
+## ELF Support
+
+### Overview
+This section outlines the steps to add **ELF (Executable and Linkable Format)** support to Gnoma, enabling features like ELF parsing, disassembly, security analysis, and binary manipulation.
 
 ---
 
