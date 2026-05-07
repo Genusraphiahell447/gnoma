@@ -61,7 +61,7 @@ func main() {
 	var (
 		providerName = flag.String("provider", "mistral", "LLM provider")
 		model        = flag.String("model", "", "model name (empty = provider default)")
-		system       = flag.String("system", defaultSystem, "system prompt")
+		system       = flag.String("system", "", "system prompt override (empty = built-in default)")
 		apiKey       = flag.String("api-key", "", "API key (or set MISTRAL_API_KEY env)")
 		maxTurns     = flag.Int("max-turns", 50, "max tool-calling rounds per turn")
 		permMode     = flag.String("permission", "auto", "permission mode (default, accept_edits, bypass, deny, plan, auto)")
@@ -71,6 +71,16 @@ func main() {
 	)
 	flag.StringVar(&resumeFlag, "resume", "", "resume session by ID (omit ID to list sessions)")
 	flag.StringVar(&resumeFlag, "r", "", "resume session (shorthand)")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage:\n")
+		fmt.Fprintf(os.Stderr, "  gnoma [flags]           open interactive TUI\n")
+		fmt.Fprintf(os.Stderr, "  gnoma [flags] <prompt>  run a single prompt (pipe mode)\n")
+		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
+		fmt.Fprintf(os.Stderr, "  gnoma slm setup         download and verify the llamafile model\n")
+		fmt.Fprintf(os.Stderr, "  gnoma slm status        show SLM setup state\n")
+		fmt.Fprintf(os.Stderr, "\nFlags:\n")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if *version {
@@ -160,14 +170,21 @@ func main() {
 	}
 	if key == "" && !localProviders[*providerName] {
 		envVar := envKeyFor(*providerName)
-		fmt.Fprintf(os.Stderr, "error: no API key for provider %q\n\n", *providerName)
-		fmt.Fprintf(os.Stderr, "  Option 1: export %s=<your-key>\n", envVar)
-		fmt.Fprintf(os.Stderr, "  Option 2: gnoma --api-key <your-key>\n")
-		fmt.Fprintf(os.Stderr, "  Option 3: add to .gnoma/config.toml:\n")
-		fmt.Fprintf(os.Stderr, "            [provider.api_keys]\n")
-		fmt.Fprintf(os.Stderr, "            %s = \"<your-key>\"\n\n", *providerName)
-		fmt.Fprintf(os.Stderr, "For local models (no API key needed): gnoma --provider ollama\n")
-		os.Exit(1)
+		if !isTUI {
+			// Pipe / single-prompt mode: fail fast with instructions.
+			fmt.Fprintf(os.Stderr, "error: no API key for provider %q\n\n", *providerName)
+			fmt.Fprintf(os.Stderr, "  Option 1: export %s=<your-key>\n", envVar)
+			fmt.Fprintf(os.Stderr, "  Option 2: gnoma --api-key <your-key>\n")
+			fmt.Fprintf(os.Stderr, "  Option 3: add to ~/.config/gnoma/config.toml:\n")
+			fmt.Fprintf(os.Stderr, "            [provider]\n")
+			fmt.Fprintf(os.Stderr, "            default = \"%s\"\n", *providerName)
+			fmt.Fprintf(os.Stderr, "            [provider.api_keys]\n")
+			fmt.Fprintf(os.Stderr, "            %s = \"<your-key>\"\n\n", *providerName)
+			fmt.Fprintf(os.Stderr, "For local models (no API key needed): gnoma --provider ollama\n")
+			os.Exit(1)
+		}
+		// TUI mode: allow startup; the first request will surface the auth error inline.
+		logger.Warn("no API key configured", "provider", *providerName, "env", envVar)
 	}
 
 	// Resolve base URL from config endpoints
@@ -504,6 +521,9 @@ func main() {
 
 	// Build system prompt with cwd + compact inventory summary
 	systemPrompt := *system
+	if systemPrompt == "" {
+		systemPrompt = defaultSystem
+	}
 	if cwd, err := os.Getwd(); err == nil {
 		systemPrompt = systemPrompt + "\n\nWorking directory: " + cwd
 	}
@@ -1039,18 +1059,24 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 		if cfg.SLM.ModelURL == "" {
 			fmt.Fprintln(os.Stderr, "error: [slm] model_url must be set in config before running setup")
 			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Example (~/.config/gnoma/config.toml):")
+			fmt.Fprintln(os.Stderr, "Add to ~/.config/gnoma/config.toml:")
 			fmt.Fprintln(os.Stderr, "  [slm]")
-			fmt.Fprintln(os.Stderr, `  model_url = "https://huggingface.co/mozilla-ai/TinyLlama-1.1B-Chat-v1.0-llamafile/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q5_K_M.llamafile"`)
+			fmt.Fprintln(os.Stderr, `  model_url = "<url to a .llamafile>"`)
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Find llamafiles at: https://github.com/Mozilla-Ocho/llamafile/releases")
 			return 1
 		}
-		fmt.Printf("downloading llamafile from %s\n", cfg.SLM.ModelURL)
+		fmt.Printf("downloading %s\n", cfg.SLM.ModelURL)
+		var start = time.Now()
 		err := mgr.Setup(context.Background(), func(downloaded, total int64) {
+			elapsed := time.Since(start).Seconds()
+			speed := float64(downloaded) / elapsed
 			if total > 0 {
 				pct := float64(downloaded) / float64(total) * 100
-				fmt.Printf("\r  %.1f%%  (%s / %s)   ", pct, humanBytes(downloaded), humanBytes(total))
+				fmt.Printf("\r  %5.1f%%  %s / %s  (%s/s)   ",
+					pct, humanBytes(downloaded), humanBytes(total), humanBytes(int64(speed)))
 			} else {
-				fmt.Printf("\r  %s downloaded   ", humanBytes(downloaded))
+				fmt.Printf("\r  %s  (%s/s)   ", humanBytes(downloaded), humanBytes(int64(speed)))
 			}
 		})
 		fmt.Println()
@@ -1058,8 +1084,10 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}
-		fmt.Printf("SLM ready at: %s\n", dataDir)
-		fmt.Println("Enable in config:")
+		fmt.Println("verifying... done")
+		fmt.Printf("stored at: %s\n", dataDir)
+		fmt.Println("")
+		fmt.Println("To enable, add to your config:")
 		fmt.Println("  [slm]")
 		fmt.Println("  enabled = true")
 		return 0
