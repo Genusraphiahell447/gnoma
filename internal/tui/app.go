@@ -95,8 +95,10 @@ type Model struct {
 	currentRole  string
 
 	input          textarea.Model
-	suggestion     string   // ghost-text completion (dimmed, accepted with Tab)
-	completionSrc  []string // sorted slash commands for completion
+	suggestion     string      // ghost-text completion (dimmed, accepted with Tab)
+	completionSrc  []cmdEntry  // sorted slash commands for completion
+	suggestions    []cmdEntry  // live dropdown matches for current input
+	suggIdx        int         // selected index in dropdown
 	mdRenderer     *glamour.TermRenderer
 	mdRendererWidth int // cached width to avoid recreating on same-width resizes
 	expandOutput   bool   // ctrl+o toggles expanded tool output
@@ -411,9 +413,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+]":
 			m.copyMode = !m.copyMode
 			return m, nil
+		case "up":
+			if len(m.suggestions) > 0 {
+				if m.suggIdx > 0 {
+					m.suggIdx--
+				}
+				return m, nil
+			}
+		case "down":
+			if len(m.suggestions) > 0 {
+				if m.suggIdx < len(m.suggestions)-1 {
+					m.suggIdx++
+				}
+				return m, nil
+			}
 		case "tab":
+			if len(m.suggestions) > 0 {
+				// Accept highlighted suggestion and add trailing space for args
+				m.input.SetValue(m.suggestions[m.suggIdx].name + " ")
+				m.input.CursorEnd()
+				m.suggestions = nil
+				m.suggestion = ""
+				return m, nil
+			}
 			if m.suggestion != "" {
 				m.input.SetValue(m.suggestion)
+				m.suggestion = ""
+				return m, nil
+			}
+		case "esc":
+			if len(m.suggestions) > 0 {
+				m.suggestions = nil
 				m.suggestion = ""
 				return m, nil
 			}
@@ -691,8 +721,15 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
 
-	// Update slash-command ghost completion.
-	m.suggestion = matchCompletion(m.input.Value(), m.completionSrc)
+	// Update slash-command ghost completion and dropdown suggestions.
+	val := m.input.Value()
+	m.suggestion = matchCompletion(val, m.completionSrc)
+	m.suggestions = matchSuggestions(val, m.completionSrc)
+	if len(m.suggestions) == 0 || !strings.HasPrefix(val, "/") {
+		m.suggIdx = 0
+	} else if m.suggIdx >= len(m.suggestions) {
+		m.suggIdx = len(m.suggestions) - 1
+	}
 
 	return m, tea.Batch(cmds...)
 }

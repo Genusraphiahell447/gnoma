@@ -7,28 +7,34 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/skill"
 )
 
-// builtinCommands is the static list of slash commands.
-var builtinCommands = []string{
-	"/clear",
-	"/compact",
-	"/config",
-	"/exit",
-	"/help",
-	"/incognito",
-	"/init",
-	"/keys",
-	"/model",
-	"/new",
-	"/perm",
-	"/permission",
-	"/plugins",
-	"/provider",
-	"/quit",
-	"/replay",
-	"/resume",
-	"/shell",
-	"/skills",
-	"/usage",
+// cmdEntry is a slash command with a short description.
+type cmdEntry struct {
+	name string
+	desc string
+}
+
+// builtinCommands is the static list of slash commands with descriptions.
+var builtinCommands = []cmdEntry{
+	{"/clear", "clear conversation history"},
+	{"/compact", "summarize and compact conversation context"},
+	{"/config", "open settings panel"},
+	{"/exit", "exit gnoma"},
+	{"/help", "show available commands and shortcuts"},
+	{"/incognito", "toggle incognito mode (no persistence, local-only routing)"},
+	{"/init", "initialize project — create AGENTS.md"},
+	{"/keys", "show keyboard shortcuts"},
+	{"/model", "list or switch active model"},
+	{"/new", "start a new conversation"},
+	{"/perm", "show or set permission mode"},
+	{"/permission", "show or set permission mode"},
+	{"/plugins", "list installed plugins"},
+	{"/provider", "list or switch provider"},
+	{"/quit", "quit gnoma"},
+	{"/replay", "replay last assistant response"},
+	{"/resume", "browse and resume a saved session"},
+	{"/shell", "open interactive shell"},
+	{"/skills", "list available skills"},
+	{"/usage", "show token usage for this session"},
 }
 
 // permissionModes lists valid modes for /permission completion.
@@ -37,45 +43,55 @@ var permissionModes = []string{
 }
 
 // completionSource builds a sorted command list from builtins + skills.
-func completionSource(skills *skill.Registry) []string {
-	cmds := make([]string, len(builtinCommands))
-	copy(cmds, builtinCommands)
+func completionSource(skills *skill.Registry) []cmdEntry {
+	entries := make([]cmdEntry, len(builtinCommands))
+	copy(entries, builtinCommands)
 
 	if skills != nil {
 		for _, s := range skills.All() {
-			cmds = append(cmds, "/"+s.Frontmatter.Name)
+			desc := s.Frontmatter.Description
+			if desc == "" {
+				desc = "skill"
+			}
+			entries = append(entries, cmdEntry{"/" + s.Frontmatter.Name, desc})
 		}
 	}
-	sort.Strings(cmds)
-	return cmds
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].name < entries[j].name
+	})
+	return entries
 }
 
-// matchCompletion finds the best completion for the current input.
-// Returns the full command string if a unique prefix match exists, or empty string.
-func matchCompletion(input string, commands []string) string {
+// matchSuggestions returns all commands whose name has the given prefix.
+// Returns nil if input is empty, doesn't start with '/', or contains a space.
+func matchSuggestions(input string, commands []cmdEntry) []cmdEntry {
+	if !strings.HasPrefix(input, "/") || len(input) < 2 || strings.Contains(input, " ") {
+		return nil
+	}
+	lower := strings.ToLower(input)
+	var matches []cmdEntry
+	for _, c := range commands {
+		if strings.HasPrefix(c.name, lower) {
+			matches = append(matches, c)
+		}
+	}
+	return matches
+}
+
+// matchCompletion returns the unique ghost-text completion, or "".
+// Used for Tab acceptance of a single unambiguous match.
+func matchCompletion(input string, commands []cmdEntry) string {
 	if !strings.HasPrefix(input, "/") || len(input) < 2 {
 		return ""
 	}
-
-	// Don't complete if there are args (space after command).
 	if strings.Contains(input, " ") {
 		return matchArgCompletion(input)
 	}
-
-	lower := strings.ToLower(input)
-	var match string
-	for _, cmd := range commands {
-		if strings.HasPrefix(cmd, lower) {
-			if match != "" {
-				return "" // ambiguous — multiple matches, no ghost text
-			}
-			match = cmd
-		}
+	suggestions := matchSuggestions(input, commands)
+	if len(suggestions) == 1 && suggestions[0].name != input {
+		return suggestions[0].name
 	}
-	if match == input {
-		return "" // already complete
-	}
-	return match
+	return ""
 }
 
 // matchArgCompletion handles second-level completion for commands with args.

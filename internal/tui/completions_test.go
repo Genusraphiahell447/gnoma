@@ -3,7 +3,15 @@ package tui
 import "testing"
 
 func TestMatchCompletion(t *testing.T) {
-	cmds := []string{"/clear", "/compact", "/config", "/help", "/model", "/permission", "/quit"}
+	cmds := []cmdEntry{
+		{"/clear", "clear history"},
+		{"/compact", "compact context"},
+		{"/config", "settings"},
+		{"/help", "show help"},
+		{"/model", "switch model"},
+		{"/permission", "set permission"},
+		{"/quit", "quit"},
+	}
 
 	tests := []struct {
 		input string

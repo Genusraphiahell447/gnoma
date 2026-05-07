@@ -235,20 +235,52 @@ func main() {
 		reg.Register(fs.NewWriteTool(fs.WithMaxFileSize(cfg.Tools.MaxFileSize)))
 	}
 
-	// Harvest shell aliases
-	aliases, err := bash.HarvestAliases(context.Background())
-	if err != nil {
-		logger.Debug("alias harvest failed (non-fatal)", "error", err)
-	} else {
+	// Harvest aliases, inventory, CLI agents, and local models in parallel.
+	// These are independent and together account for most startup latency.
+	var (
+		aliases     *bash.AliasMap
+		inventory   *bash.SystemInventory
+		cliAgents   []subprocprov.DiscoveredAgent
+		localModels []router.DiscoveredModel
+	)
+	{
+		var wg sync.WaitGroup
+		wg.Add(4)
+		go func() {
+			defer wg.Done()
+			a, err := bash.HarvestAliases(context.Background())
+			if err != nil {
+				logger.Debug("alias harvest failed (non-fatal)", "error", err)
+			} else {
+				aliases = a
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			inventory = bash.HarvestInventory(context.Background())
+		}()
+		go func() {
+			defer wg.Done()
+			cliAgents = subprocprov.DiscoverCLIAgents(context.Background())
+		}()
+		go func() {
+			defer wg.Done()
+			localModels = router.DiscoverLocalModels(context.Background(), logger,
+				cfg.Provider.Endpoints["ollama"],
+				cfg.Provider.Endpoints["llamacpp"],
+				nil,
+			)
+		}()
+		wg.Wait()
+	}
+	if aliases != nil {
 		logger.Debug("harvested aliases", "count", aliases.Len())
 	}
-
-	// Harvest system inventory
-	inventory := bash.HarvestInventory(context.Background())
-	logger.Debug("system inventory",
-		"tools", len(inventory.Tools),
-		"runtimes", len(inventory.Runtimes),
-	)
+	if inventory != nil {
+		logger.Debug("system inventory", "tools", len(inventory.Tools), "runtimes", len(inventory.Runtimes))
+	} else {
+		inventory = &bash.SystemInventory{}
+	}
 
 	// Re-register bash tool with aliases and config timeout
 	bashOpts := []bash.Option{bash.WithAliases(aliases)}
@@ -333,12 +365,7 @@ func main() {
 		}
 	}
 
-	// Discover local models (ollama + llama.cpp) and register as additional arms
-	localModels := router.DiscoverLocalModels(context.Background(), logger,
-		cfg.Provider.Endpoints["ollama"],
-		cfg.Provider.Endpoints["llamacpp"],
-		nil, // no cache for initial one-shot discovery
-	)
+	// Register local models discovered above in parallel.
 	router.RegisterDiscoveredModels(rtr, localModels, func(provName, model string) provider.Provider {
 		p, err := createProvider(provName, "", model, cfg.Provider.Endpoints[provName])
 		if err != nil {
@@ -350,8 +377,7 @@ func main() {
 		logger.Debug("local models discovered", "count", len(localModels))
 	}
 
-	// Discover CLI agents (claude, gemini, vibe) and register as arms.
-	cliAgents := subprocprov.DiscoverCLIAgents(context.Background())
+	// Register CLI agents discovered above in parallel.
 	for _, agent := range cliAgents {
 		cliArmID := router.NewArmID("subprocess", agent.Name)
 		if _, exists := rtr.LookupArm(cliArmID); !exists {

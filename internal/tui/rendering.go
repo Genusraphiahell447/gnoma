@@ -108,6 +108,11 @@ func (m Model) renderChat(height int) string {
 		lines = append(lines, m.renderConfigPanel(m.width)...)
 	}
 
+	// Slash-command suggestion dropdown
+	if len(m.suggestions) > 0 {
+		lines = append(lines, m.renderSuggestions()...)
+	}
+
 	// Transient: session resume picker
 	if m.resumePending && len(m.resumeSessions) > 0 {
 		lines = append(lines, "")
@@ -616,6 +621,85 @@ func formatTurnUsage(u message.Usage) string {
 		parts = append(parts, fmt.Sprintf("cache: %d", u.CacheReadTokens))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// renderSuggestions renders the slash-command autocomplete dropdown.
+func (m Model) renderSuggestions() []string {
+	const maxVisible = 6
+
+	sCmd := lipgloss.NewStyle().Foreground(cPurple).Bold(true)
+	sDesc := lipgloss.NewStyle().Foreground(cSubtext)
+	sSelectedCmd := lipgloss.NewStyle().
+		Background(cSurface).
+		Foreground(cPurple).
+		Bold(true)
+	sSelectedDesc := lipgloss.NewStyle().
+		Background(cSurface).
+		Foreground(cText)
+
+	// Determine visible window around selected item
+	start := 0
+	end := len(m.suggestions)
+	if end > maxVisible {
+		end = maxVisible
+		start = m.suggIdx - maxVisible/2
+		if start < 0 {
+			start = 0
+		}
+		if start+maxVisible > len(m.suggestions) {
+			start = len(m.suggestions) - maxVisible
+		}
+		end = start + maxVisible
+	}
+
+	// Measure widest command name for alignment
+	maxCmdW := 0
+	for _, s := range m.suggestions[start:end] {
+		if len(s.name) > maxCmdW {
+			maxCmdW = len(s.name)
+		}
+	}
+
+	innerW := m.width - 6
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	var bodyLines []string
+	for i, entry := range m.suggestions[start:end] {
+		idx := start + i
+		pad := strings.Repeat(" ", maxCmdW-len(entry.name)+1)
+		desc := entry.desc
+		// Truncate desc to fit
+		maxDescW := innerW - maxCmdW - 2
+		if maxDescW > 0 && len(desc) > maxDescW {
+			desc = desc[:maxDescW-1] + "…"
+		}
+		if idx == m.suggIdx {
+			line := sSelectedCmd.Render(entry.name) + sSelectedDesc.Render(pad+desc)
+			// Pad to fill width
+			lineW := lipgloss.Width(line)
+			if lineW < innerW {
+				line += sSelectedDesc.Render(strings.Repeat(" ", innerW-lineW))
+			}
+			bodyLines = append(bodyLines, line)
+		} else {
+			bodyLines = append(bodyLines, sCmd.Render(entry.name)+sDesc.Render(pad+desc))
+		}
+	}
+	if len(m.suggestions) > maxVisible {
+		extra := len(m.suggestions) - maxVisible
+		bodyLines = append(bodyLines, sHint.Render(fmt.Sprintf("  +%d more", extra)))
+	}
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cSurface).
+		Padding(0, 1).
+		Width(innerW + 2).
+		Render(strings.Join(bodyLines, "\n"))
+
+	return []string{box}
 }
 
 // renderConfigPanel renders the interactive /config settings overlay.
