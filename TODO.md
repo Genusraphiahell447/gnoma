@@ -2,6 +2,31 @@
 
 ---
 
+## Routing Revisit (Post-SLM)
+
+Once the native SLM runtime is in place, revisit the entire routing stack:
+
+- **Replace heuristic tier selection** (`armTier` + `selectBest` in `internal/router/selector.go`)
+  with SLM-driven decisions. The current deterministic tier order (CLI > local > API) is a
+  pragmatic placeholder — the SLM will have richer context (task semantics, model performance
+  history, cost envelope) to make smarter calls.
+
+- **Rethink `QualityTracker` / bandit learning** (`internal/router/feedback.go`,
+  `internal/router/quality_json.go`). The EMA-based quality tracker and M9 bandit plan were
+  designed before SLM routing existed. With an SLM as the preflight dispatcher, the question
+  becomes: does the bandit layer still add value on top of SLM intent classification, or does
+  it introduce conflicting signals? Options to evaluate:
+  - Keep bandit as a feedback loop the SLM can read (outcome telemetry → SLM context)
+  - Retire the numeric EMA in favour of qualitative outcome summaries fed back to the SLM
+  - Keep both layers but make their responsibilities explicit (SLM = intent routing,
+    bandit = cost/quality feedback within a tier)
+
+- **Re-evaluate `filterFeasible` quality thresholds** — the current static `DefaultThresholds`
+  map (`internal/router/task.go`) may be redundant once the SLM is classifying task complexity
+  dynamically.
+
+---
+
 ## Native SLM Runtime (The Preflight Engine)
 
 Integrating a native **Tiny LLM (SLM)** into Gnoma for preflight is a brilliant move. In 2026, using an SLM as a "Dispatcher" or "Gatekeeper" is the industry standard for low-latency, privacy-first agentic tools.
