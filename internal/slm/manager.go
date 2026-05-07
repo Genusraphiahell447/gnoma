@@ -147,7 +147,9 @@ func (m *Manager) Start(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("slm: find free port: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, mf.FilePath,
+	// Invoke via sh to bypass Wine binfmt_misc interception of APE polyglot binaries.
+	// llamafile is a valid POSIX shell script; sh executes the embedded launcher header.
+	cmd := exec.CommandContext(ctx, "sh", mf.FilePath,
 		"--server",
 		"--host", "127.0.0.1",
 		"--port", strconv.Itoa(port),
