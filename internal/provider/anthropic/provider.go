@@ -83,15 +83,23 @@ func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 		{
 			ID: "claude-opus-4-20250514", Name: "Claude Opus 4", Provider: p.name,
 			Capabilities: provider.Capabilities{
-				ToolUse: true, JSONOutput: true, Thinking: true, Vision: true,
-				ContextWindow: 200000, MaxOutput: 32000,
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				Vision:        true,
+				ContextWindow: 200000,
+				MaxOutput:     32000,
 			},
 		},
 		{
 			ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Provider: p.name,
 			Capabilities: provider.Capabilities{
-				ToolUse: true, JSONOutput: true, Thinking: true, Vision: true,
-				ContextWindow: 200000, MaxOutput: 16000,
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				Vision:        true,
+				ContextWindow: 200000,
+				MaxOutput:     16000,
 			},
 		},
 		{

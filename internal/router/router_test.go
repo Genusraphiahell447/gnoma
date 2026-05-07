@@ -272,7 +272,7 @@ func TestSelectBest_PrefersToolSupport(t *testing.T) {
 func TestSelectBest_PrefersThinkingForPlanning(t *testing.T) {
 	thinking := &Arm{
 		ID: "a/thinking", ModelName: "thinking",
-		Capabilities:   provider.Capabilities{ToolUse: true, Thinking: true, ContextWindow: 200000},
+		Capabilities:   provider.Capabilities{ToolUse: true, ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}, ContextWindow: 200000},
 		CostPer1kInput: 0.01, CostPer1kOutput: 0.05,
 	}
 	noThinking := &Arm{
@@ -503,7 +503,7 @@ func TestFilterFeasible_RejectsLowQualityArm(t *testing.T) {
 		ID: "b/powerful",
 		Capabilities: provider.Capabilities{
 			ToolUse:       true,
-			Thinking:      true, // thinking boosts score for security review
+			ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
 			ContextWindow: 200000,
 		},
 	}

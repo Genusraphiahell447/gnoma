@@ -3,6 +3,8 @@ package router
 import (
 	"fmt"
 	"strings"
+
+	"somegit.dev/Owlibou/gnoma/internal/provider"
 )
 
 // TaskType classifies a task for routing purposes.
@@ -64,7 +66,8 @@ type Task struct {
 	Priority        Priority
 	EstimatedTokens int
 	RequiresTools   bool
-	ComplexityScore float64 // 0-1
+	ComplexityScore float64             // 0-1
+	RequiredEffort  provider.EffortLevel // EffortAuto = no constraint on thinking
 }
 
 // ValueScore computes a routing value based on priority and type.
@@ -114,6 +117,39 @@ var DefaultThresholds = map[TaskType]QualityThreshold{
 	TaskExplain:        {0.40, 0.55, 0.72},
 }
 
+// inferEffort derives the minimum required reasoning effort from task type and complexity.
+func inferEffort(task Task) provider.EffortLevel {
+	switch task.Type {
+	case TaskSecurityReview:
+		return provider.EffortHigh
+	case TaskOrchestration:
+		if task.ComplexityScore >= 0.5 {
+			return provider.EffortHigh
+		}
+		return provider.EffortMedium
+	case TaskPlanning:
+		if task.ComplexityScore >= 0.7 {
+			return provider.EffortHigh
+		}
+		return provider.EffortMedium
+	case TaskDebug, TaskRefactor, TaskReview:
+		if task.ComplexityScore >= 0.7 {
+			return provider.EffortMedium
+		}
+		if task.ComplexityScore >= 0.4 {
+			return provider.EffortLow
+		}
+		return provider.EffortAuto
+	case TaskGeneration:
+		if task.ComplexityScore >= 0.8 {
+			return provider.EffortMedium
+		}
+		return provider.EffortAuto
+	default:
+		return provider.EffortAuto
+	}
+}
+
 // ClassifyTask infers a TaskType from the user's prompt using keyword heuristics.
 func ClassifyTask(prompt string) Task {
 	lower := strings.ToLower(prompt)
@@ -158,6 +194,8 @@ func ClassifyTask(prompt string) Task {
 
 	// Estimate complexity from prompt length and keywords
 	task.ComplexityScore = estimateComplexity(lower)
+
+	task.RequiredEffort = inferEffort(task)
 
 	return task
 }

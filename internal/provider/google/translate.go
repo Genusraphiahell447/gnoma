@@ -148,6 +148,23 @@ func schemaFromMap(m map[string]any) *genai.Schema {
 	return s
 }
 
+// effortToThinkingBudget maps a normalized EffortLevel to a Gemini thinking budget in tokens.
+// Returns nil for EffortAuto to let Google decide.
+func effortToThinkingBudget(level provider.EffortLevel) *int32 {
+	var budget int32
+	switch level {
+	case provider.EffortLow:
+		budget = 1024
+	case provider.EffortMedium:
+		budget = 8192
+	case provider.EffortHigh:
+		budget = 16384
+	default: // EffortAuto
+		return nil
+	}
+	return &budget
+}
+
 func translateConfig(req provider.Request) *genai.GenerateContentConfig {
 	cfg := &genai.GenerateContentConfig{
 		Tools: translateTools(req.Tools),
@@ -176,6 +193,11 @@ func translateConfig(req provider.Request) *genai.GenerateContentConfig {
 	}
 	if len(req.StopSequences) > 0 {
 		cfg.StopSequences = req.StopSequences
+	}
+
+	if req.Thinking != nil {
+		budget := effortToThinkingBudget(req.Thinking.Level)
+		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: budget}
 	}
 
 	return cfg

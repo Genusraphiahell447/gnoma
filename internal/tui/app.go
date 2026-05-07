@@ -799,7 +799,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 					if arm.Capabilities.ToolUse {
 						caps = append(caps, "tools")
 					}
-					if arm.Capabilities.Thinking {
+					if arm.Capabilities.SupportsThinking() {
 						caps = append(caps, "thinking")
 					}
 					if arm.Capabilities.Vision {

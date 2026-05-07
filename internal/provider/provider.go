@@ -40,9 +40,33 @@ type ToolDefinition struct {
 	Parameters  json.RawMessage `json:"parameters"` // JSON Schema passthrough
 }
 
+// EffortLevel is the normalized effort/thinking level across providers.
+type EffortLevel int
+
+const (
+	EffortAuto   EffortLevel = iota // no preference; provider decides
+	EffortLow                       // fast / minimal reasoning
+	EffortMedium                    // balanced
+	EffortHigh                      // maximum reasoning
+)
+
+func (e EffortLevel) String() string {
+	switch e {
+	case EffortLow:
+		return "low"
+	case EffortMedium:
+		return "medium"
+	case EffortHigh:
+		return "high"
+	default:
+		return "auto"
+	}
+}
+
 // ThinkingConfig controls extended thinking / reasoning.
 type ThinkingConfig struct {
-	BudgetTokens int64
+	BudgetTokens int64       // explicit token budget (0 = derive from Level)
+	Level        EffortLevel // normalized effort; used when BudgetTokens == 0
 }
 
 // ResponseFormat controls the output format.
@@ -68,12 +92,31 @@ type JSONSchema struct {
 
 // Capabilities describes what a model can do.
 type Capabilities struct {
-	ToolUse       bool `json:"tool_use"`
-	JSONOutput    bool `json:"json_output"`
-	Thinking      bool `json:"thinking"`
-	Vision        bool `json:"vision"`
-	ContextWindow int  `json:"context_window"`
-	MaxOutput     int  `json:"max_output"`
+	ToolUse       bool          `json:"tool_use"`
+	JSONOutput    bool          `json:"json_output"`
+	ThinkingModes []EffortLevel `json:"thinking_modes,omitempty"` // nil = no thinking support
+	Vision        bool          `json:"vision"`
+	ContextWindow int           `json:"context_window"`
+	MaxOutput     int           `json:"max_output"`
+}
+
+// SupportsThinking returns true if the model supports any extended reasoning mode.
+func (c Capabilities) SupportsThinking() bool {
+	return len(c.ThinkingModes) > 0
+}
+
+// SupportsEffort returns true if the model supports the given effort level.
+// EffortAuto always returns true (it means "no constraint").
+func (c Capabilities) SupportsEffort(level EffortLevel) bool {
+	if level == EffortAuto {
+		return true
+	}
+	for _, m := range c.ThinkingModes {
+		if m == level {
+			return true
+		}
+	}
+	return false
 }
 
 // ModelInfo describes a model available from a provider.

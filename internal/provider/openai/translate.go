@@ -12,6 +12,18 @@ import (
 	"github.com/openai/openai-go/shared"
 )
 
+// effortToReasoningEffort maps a normalized EffortLevel to an OpenAI reasoning_effort value.
+func effortToReasoningEffort(level provider.EffortLevel) oai.ReasoningEffort {
+	switch level {
+	case provider.EffortLow:
+		return oai.ReasoningEffortLow
+	case provider.EffortHigh:
+		return oai.ReasoningEffortHigh
+	default: // EffortAuto, EffortMedium
+		return oai.ReasoningEffortMedium
+	}
+}
+
 func sanitizeToolName(name string) string {
 	return strings.ReplaceAll(name, ".", "_")
 }
@@ -129,6 +141,10 @@ func translateRequest(req provider.Request) oai.ChatCompletionNewParams {
 	// Enable usage in streaming
 	params.StreamOptions = oai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: param.NewOpt(true),
+	}
+
+	if req.Thinking != nil {
+		params.ReasoningEffort = effortToReasoningEffort(req.Thinking.Level)
 	}
 
 	if len(params.Tools) > 0 {

@@ -11,12 +11,12 @@ func benchArms() []*Arm {
 	return []*Arm{
 		{
 			ID: "anthropic/claude-sonnet", ModelName: "claude-sonnet",
-			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 200000, Thinking: false},
+			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 200000},
 			CostPer1kInput:  0.003, CostPer1kOutput: 0.015,
 		},
 		{
 			ID: "anthropic/claude-opus", ModelName: "claude-opus",
-			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 200000, Thinking: true},
+			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 200000, ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}},
 			CostPer1kInput:  0.015, CostPer1kOutput: 0.075,
 		},
 		{

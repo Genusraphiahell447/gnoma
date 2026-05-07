@@ -11,6 +11,20 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 )
 
+// effortToBudgetTokens maps a normalized EffortLevel to an Anthropic thinking budget.
+func effortToBudgetTokens(level provider.EffortLevel) int64 {
+	switch level {
+	case provider.EffortLow:
+		return 1024
+	case provider.EffortMedium:
+		return 8000
+	case provider.EffortHigh:
+		return 16000
+	default: // EffortAuto
+		return 4096
+	}
+}
+
 // unsanitizeToolName reverses the name transformation for tool calls from the model.
 func unsanitizeToolName(name string) string {
 	// Only reverse fs_ prefix since those are our tool names
@@ -164,11 +178,17 @@ func translateRequest(req provider.Request) anthropic.MessageNewParams {
 		params.StopSequences = req.StopSequences
 	}
 
-	if req.Thinking != nil && req.Thinking.BudgetTokens > 0 {
-		params.Thinking = anthropic.ThinkingConfigParamUnion{
-			OfEnabled: &anthropic.ThinkingConfigEnabledParam{
-				BudgetTokens: req.Thinking.BudgetTokens,
-			},
+	if req.Thinking != nil {
+		budget := req.Thinking.BudgetTokens
+		if budget == 0 {
+			budget = effortToBudgetTokens(req.Thinking.Level)
+		}
+		if budget > 0 {
+			params.Thinking = anthropic.ThinkingConfigParamUnion{
+				OfEnabled: &anthropic.ThinkingConfigEnabledParam{
+					BudgetTokens: budget,
+				},
+			}
 		}
 	}
 

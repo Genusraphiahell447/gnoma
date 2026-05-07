@@ -90,7 +90,7 @@ func heuristicQuality(arm *Arm, task Task) float64 {
 	}
 
 	// Thinking capability valuable for planning/orchestration/security
-	if arm.Capabilities.Thinking {
+	if arm.Capabilities.SupportsThinking() {
 		switch task.Type {
 		case TaskPlanning, TaskOrchestration, TaskSecurityReview:
 			score += 0.2
@@ -155,6 +155,11 @@ func filterFeasible(arms []*Arm, task Task) []*Arm {
 	for _, arm := range arms {
 		// Must support tools if task requires them
 		if task.RequiresTools && !arm.SupportsTools() {
+			continue
+		}
+
+		// Must support the required effort level (EffortAuto always passes)
+		if !arm.Capabilities.SupportsEffort(task.RequiredEffort) {
 			continue
 		}
 

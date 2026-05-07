@@ -99,15 +99,21 @@ func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 		{
 			ID: "o3", Name: "o3", Provider: p.name,
 			Capabilities: provider.Capabilities{
-				ToolUse: true, JSONOutput: true, Thinking: true,
-				ContextWindow: 200000, MaxOutput: 100000,
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				ContextWindow: 200000,
+				MaxOutput:     100000,
 			},
 		},
 		{
 			ID: "o3-mini", Name: "o3 Mini", Provider: p.name,
 			Capabilities: provider.Capabilities{
-				ToolUse: true, JSONOutput: true, Thinking: true,
-				ContextWindow: 200000, MaxOutput: 100000,
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				ContextWindow: 200000,
+				MaxOutput:     100000,
 			},
 		},
 	}, nil

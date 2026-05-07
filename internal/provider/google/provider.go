@@ -72,15 +72,23 @@ func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 		{
 			ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: p.name,
 			Capabilities: provider.Capabilities{
-				ToolUse: true, JSONOutput: true, Thinking: true, Vision: true,
-				ContextWindow: 1048576, MaxOutput: 65536,
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				Vision:        true,
+				ContextWindow: 1048576,
+				MaxOutput:     65536,
 			},
 		},
 		{
 			ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Provider: p.name,
 			Capabilities: provider.Capabilities{
-				ToolUse: true, JSONOutput: true, Thinking: true, Vision: true,
-				ContextWindow: 1048576, MaxOutput: 65536,
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				Vision:        true,
+				ContextWindow: 1048576,
+				MaxOutput:     65536,
 			},
 		},
 		{
