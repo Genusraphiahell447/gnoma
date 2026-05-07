@@ -79,8 +79,36 @@ func (p *Provider) Name() string { return p.name }
 // DefaultModel returns the configured default model.
 func (p *Provider) DefaultModel() string { return p.model }
 
-// Models returns known OpenAI models with capabilities.
-func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
+// Models returns available OpenAI models with capabilities by querying the API.
+func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
+	pager := p.client.Models.ListAutoPaging(ctx)
+	
+	var models []provider.ModelInfo
+	for pager.Next() {
+		m := pager.Current()
+		caps := inferOpenAIModelCapabilities(m.ID)
+		models = append(models, provider.ModelInfo{
+			ID:           m.ID,
+			Name:         m.ID,
+			Provider:     p.name,
+			Capabilities: caps,
+		})
+	}
+	if err := pager.Err(); err != nil {
+		// Fallback to hardcoded list if API call fails
+		return p.fallbackModels(), nil
+	}
+
+	if len(models) == 0 {
+		// API returned no models, use fallback
+		return p.fallbackModels(), nil
+	}
+
+	return models, nil
+}
+
+// fallbackModels returns a hardcoded list of known OpenAI models.
+func (p *Provider) fallbackModels() []provider.ModelInfo {
 	return []provider.ModelInfo{
 		{
 			ID: "gpt-4o", Name: "GPT-4o", Provider: p.name,
@@ -116,5 +144,39 @@ func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 				MaxOutput:     100000,
 			},
 		},
-	}, nil
+	}
+}
+
+// inferOpenAIModelCapabilities infers capabilities from model ID.
+func inferOpenAIModelCapabilities(modelID string) provider.Capabilities {
+	// Default capabilities for most modern OpenAI models
+	caps := provider.Capabilities{
+		ToolUse:       true,
+		JSONOutput:    true,
+		Vision:        true,
+		ContextWindow: 128000,
+		MaxOutput:     16384,
+	}
+
+	// Model-specific overrides
+	switch modelID {
+	case "gpt-4o", "gpt-4o-mini":
+		caps.ContextWindow = 128000
+		caps.MaxOutput = 16384
+	case "o3", "o3-mini":
+		caps.ThinkingModes = []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}
+		caps.ContextWindow = 200000
+		caps.MaxOutput = 100000
+	case "gpt-4", "gpt-4-0613", "gpt-4-32k", "gpt-4-32k-0613":
+		caps.Vision = false
+		caps.ContextWindow = 8192
+		caps.MaxOutput = 8192
+	case "gpt-3.5-turbo", "gpt-3.5-turbo-0613", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-16k-0613":
+		caps.Vision = false
+		caps.ToolUse = false
+		caps.ContextWindow = 16384
+		caps.MaxOutput = 4096
+	}
+
+	return caps
 }

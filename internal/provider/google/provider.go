@@ -66,8 +66,34 @@ func (p *Provider) Name() string { return p.name }
 // DefaultModel returns the configured default model.
 func (p *Provider) DefaultModel() string { return p.model }
 
-// Models returns known Google models with capabilities.
-func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
+// Models returns available Google models with capabilities by querying the API.
+func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
+	var models []provider.ModelInfo
+	for model, err := range p.client.Models.All(ctx) {
+		if err != nil {
+			// Fallback to hardcoded list if API call fails
+			return p.fallbackModels(), nil
+		}
+		
+		caps := inferGoogleModelCapabilities(model)
+		models = append(models, provider.ModelInfo{
+			ID:           model.Name,
+			Name:         model.DisplayName,
+			Provider:     p.name,
+			Capabilities: caps,
+		})
+	}
+
+	if len(models) == 0 {
+		// API returned no models, use fallback
+		return p.fallbackModels(), nil
+	}
+
+	return models, nil
+}
+
+// fallbackModels returns a hardcoded list of known Google models.
+func (p *Provider) fallbackModels() []provider.ModelInfo {
 	return []provider.ModelInfo{
 		{
 			ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: p.name,
@@ -98,5 +124,34 @@ func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 				ContextWindow: 1048576, MaxOutput: 8192,
 			},
 		},
-	}, nil
+	}
+}
+
+// inferGoogleModelCapabilities infers capabilities from the Google Model.
+func inferGoogleModelCapabilities(m *genai.Model) provider.Capabilities {
+	// Default capabilities for most modern Gemini models
+	caps := provider.Capabilities{
+		ToolUse:       true,
+		JSONOutput:    true,
+		Vision:        true,
+		ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+		ContextWindow: 1048576,
+		MaxOutput:     65536,
+	}
+
+	// Model-specific overrides based on model name
+	name := m.Name
+	switch {
+	case name == "gemini-2.5-pro", name == "gemini-2.5-flash":
+		caps.ContextWindow = 1048576
+		caps.MaxOutput = 65536
+	case name == "gemini-2.0-pro", name == "gemini-2.0-flash":
+		caps.ContextWindow = 1048576
+		caps.MaxOutput = 8192
+	case name == "gemini-1.5-pro", name == "gemini-1.5-flash":
+		caps.ContextWindow = 1048576
+		caps.MaxOutput = 8192
+	}
+
+	return caps
 }

@@ -76,9 +76,36 @@ func (p *Provider) DefaultModel() string {
 	return p.model
 }
 
-// Models returns known Anthropic models with capabilities.
-// Anthropic doesn't have a model listing API, so these are hardcoded.
-func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
+// Models returns available Anthropic models with capabilities by querying the API.
+func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
+	pager := p.client.Models.ListAutoPaging(ctx, anthropic.ModelListParams{})
+	
+	var models []provider.ModelInfo
+	for pager.Next() {
+		m := pager.Current()
+		caps := inferAnthropicModelCapabilities(m.ID)
+		models = append(models, provider.ModelInfo{
+			ID:           m.ID,
+			Name:         m.ID,
+			Provider:     p.name,
+			Capabilities: caps,
+		})
+	}
+	if err := pager.Err(); err != nil {
+		// Fallback to hardcoded list if API call fails
+		return p.fallbackModels(), nil
+	}
+
+	if len(models) == 0 {
+		// API returned no models, use fallback
+		return p.fallbackModels(), nil
+	}
+
+	return models, nil
+}
+
+// fallbackModels returns a hardcoded list of known Anthropic models.
+func (p *Provider) fallbackModels() []provider.ModelInfo {
 	return []provider.ModelInfo{
 		{
 			ID: "claude-opus-4-20250514", Name: "Claude Opus 4", Provider: p.name,
@@ -109,5 +136,38 @@ func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 				ContextWindow: 200000, MaxOutput: 8192,
 			},
 		},
-	}, nil
+	}
+}
+
+// inferAnthropicModelCapabilities infers capabilities from model ID.
+func inferAnthropicModelCapabilities(modelID string) provider.Capabilities {
+	// Default capabilities for most modern Claude models
+	caps := provider.Capabilities{
+		ToolUse:       true,
+		JSONOutput:    true,
+		Vision:        true,
+		ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+		ContextWindow: 200000,
+		MaxOutput:     16000,
+	}
+
+	// Model-specific overrides
+	switch modelID {
+	case "claude-opus-4-20250514", "claude-opus-4-20250612":
+		caps.MaxOutput = 32000
+	case "claude-3-opus-20240229", "claude-3-sonnet-20240229":
+		caps.ThinkingModes = []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}
+		caps.ContextWindow = 200000
+		caps.MaxOutput = 4096
+	case "claude-3-haiku-20240307":
+		caps.ThinkingModes = []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}
+		caps.ContextWindow = 200000
+		caps.MaxOutput = 4096
+	case "claude-2", "claude-2:1", "claude-instant-1":
+		caps.ThinkingModes = nil // No extended thinking support
+		caps.ContextWindow = 100000
+		caps.MaxOutput = 4096
+	}
+
+	return caps
 }
