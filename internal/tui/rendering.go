@@ -103,6 +103,11 @@ func (m Model) renderChat(height int) string {
 		lines = append(lines, "")
 	}
 
+	// Settings panel (/config)
+	if m.configPanelOpen {
+		lines = append(lines, m.renderConfigPanel(m.width)...)
+	}
+
 	// Transient: session resume picker
 	if m.resumePending && len(m.resumeSessions) > 0 {
 		lines = append(lines, "")
@@ -611,6 +616,97 @@ func formatTurnUsage(u message.Usage) string {
 		parts = append(parts, fmt.Sprintf("cache: %d", u.CacheReadTokens))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// renderConfigPanel renders the interactive /config settings overlay.
+func (m Model) renderConfigPanel(width int) []string {
+	rtr := m.config.Router
+	perm := m.config.Permissions
+
+	// Build the three setting rows
+	type row struct{ label, value string }
+	rows := make([]row, 3)
+
+	// Row 0: Model
+	modelVal := "none"
+	if rtr != nil {
+		forced := rtr.ForcedArm()
+		if forced != "" {
+			modelVal = string(forced)
+		} else {
+			arms := configPanelArms(rtr.Arms())
+			if len(arms) > 0 {
+				modelVal = string(arms[0].ID) + "  (press Enter to select)"
+			} else {
+				modelVal = "none discovered"
+			}
+		}
+	}
+	rows[0] = row{"Model", modelVal}
+
+	// Row 1: Permission
+	permVal := "—"
+	if perm != nil {
+		permVal = string(perm.Mode())
+	}
+	rows[1] = row{"Permission", permVal}
+
+	// Row 2: Incognito
+	incogVal := "Off"
+	if m.incognito {
+		incogVal = "On"
+	}
+	rows[2] = row{"Incognito", incogVal}
+
+	// Measure widest label for alignment
+	maxLabel := 0
+	for _, r := range rows {
+		if len(r.label) > maxLabel {
+			maxLabel = len(r.label)
+		}
+	}
+
+	sSelected := lipgloss.NewStyle().
+		Background(cTeal).
+		Foreground(cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(cText)
+	sLabel := lipgloss.NewStyle().Foreground(cSubtext)
+
+	innerW := width - 8 // border(2) + padding(2) each side = 8
+	if innerW < 30 {
+		innerW = 30
+	}
+
+	var bodyLines []string
+	for i, r := range rows {
+		labelPad := strings.Repeat(" ", maxLabel-len(r.label))
+		if i == m.configSelected {
+			line := fmt.Sprintf("%s%s: %s", r.label, labelPad, r.value)
+			// Pad to full inner width so the highlight fills the row
+			if lipgloss.Width(line) < innerW {
+				line += strings.Repeat(" ", innerW-lipgloss.Width(line))
+			}
+			bodyLines = append(bodyLines, sSelected.Render(line))
+		} else {
+			bodyLines = append(bodyLines, sLabel.Render(r.label+labelPad+": ")+sItem.Render(r.value))
+		}
+	}
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, sHint.Render("↑↓ Navigate  Enter Select/Toggle  Esc Exit"))
+
+	body := strings.Join(bodyLines, "\n")
+
+	titleStyle := lipgloss.NewStyle().Foreground(cTeal).Bold(true)
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cTeal).
+		Padding(0, 1).
+		Width(innerW + 2) // +2 for padding
+
+	box := boxStyle.Render(titleStyle.Render("Settings") + "\n\n" + body)
+
+	return []string{"", box, ""}
 }
 
 // wrapText word-wraps text at word boundaries, preserving existing newlines.

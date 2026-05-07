@@ -114,6 +114,10 @@ type Model struct {
 	permToolName   string          // which tool is asking
 	permArgs       json.RawMessage // tool args for display
 
+	// Settings panel (/config)
+	configPanelOpen bool
+	configSelected  int
+
 	// Session resume picker
 	resumePending  bool
 	resumeSessions []session.Metadata
@@ -317,6 +321,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.listenForEvents() // continue listening
 			}
 			return m, nil // ignore other keys while prompting
+		}
+
+		// --- Settings panel (when /config is open) ---
+		if m.configPanelOpen {
+			const numSettings = 3
+			switch msg.String() {
+			case "up", "k":
+				if m.configSelected > 0 {
+					m.configSelected--
+				}
+			case "down", "j":
+				if m.configSelected < numSettings-1 {
+					m.configSelected++
+				}
+			case "enter":
+				m = m.applyConfigSetting()
+			case "esc", "ctrl+c", "q":
+				m.configPanelOpen = false
+			}
+			return m, nil
 		}
 
 		// --- Session picker (only when resume picker is open) ---
@@ -860,7 +884,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/config":
-		// /config set <key> <value>
+		// /config set <key> <value> — direct write, no panel
 		if strings.HasPrefix(args, "set ") {
 			parts := strings.SplitN(strings.TrimPrefix(args, "set "), " ", 2)
 			if len(parts) != 2 {
@@ -876,38 +900,9 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		status := m.session.Status()
-		var b strings.Builder
-		b.WriteString("Current configuration:\n")
-		fmt.Fprintf(&b, "  provider:   %s\n", status.Provider)
-		fmt.Fprintf(&b, "  model:      %s\n", status.Model)
-		if m.config.Permissions != nil {
-			fmt.Fprintf(&b, "  permission: %s\n", m.config.Permissions.Mode())
-		}
-		fmt.Fprintf(&b, "  incognito:  %v\n", m.incognito)
-		fmt.Fprintf(&b, "  cwd:        %s\n", m.cwd)
-		if m.gitBranch != "" {
-			fmt.Fprintf(&b, "  git branch: %s\n", m.gitBranch)
-		}
-		if m.config.SLMManager != nil {
-			slmStat := m.config.SLMManager.Status()
-			switch slmStat {
-			case slm.StatusReady:
-				url := m.config.SLMManager.BaseURL()
-				if url != "" {
-					fmt.Fprintf(&b, "  slm:        ready (running at %s)\n", url)
-				} else {
-					b.WriteString("  slm:        ready (not started)\n")
-				}
-			case slm.StatusMissing:
-				b.WriteString("  slm:        file missing — run: gnoma slm setup\n")
-			default:
-				b.WriteString("  slm:        not set up — run: gnoma slm setup\n")
-			}
-		}
-		b.WriteString("\nConfig files: ~/.config/gnoma/config.toml, .gnoma/config.toml")
-		b.WriteString("\nEdit: /config set <key> <value>")
-		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
+		// No args — open interactive settings panel
+		m.configPanelOpen = true
+		m.configSelected = 0
 		return m, nil
 
 	case "/elf", "/elfs":
@@ -1500,6 +1495,90 @@ func diffPreviewWrite(content string) string {
 		b.WriteString("  + " + line + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// applyConfigSetting applies the Enter action for the currently selected settings item.
+func (m Model) applyConfigSetting() Model {
+	switch m.configSelected {
+	case 0: // Model — cycle through arms
+		if m.config.Router == nil {
+			return m
+		}
+		arms := configPanelArms(m.config.Router.Arms())
+		if len(arms) == 0 {
+			return m
+		}
+		current := m.config.Router.ForcedArm()
+		idx := 0
+		for i, a := range arms {
+			if a.ID == current {
+				idx = (i + 1) % len(arms)
+				break
+			}
+		}
+		next := arms[idx]
+		m.config.Router.ForceArm(next.ID)
+		if m.config.Engine != nil {
+			m.config.Engine.SetModel(next.ModelName)
+		}
+		if ls, ok := m.session.(*session.Local); ok {
+			ls.SetModel(next.ModelName)
+		}
+
+	case 1: // Permission — cycle modes
+		if m.config.Permissions == nil {
+			return m
+		}
+		modes := []permission.Mode{
+			permission.ModeAuto,
+			permission.ModeDefault,
+			permission.ModeAcceptEdits,
+			permission.ModePlan,
+			permission.ModeBypass,
+			permission.ModeDeny,
+		}
+		cur := m.config.Permissions.Mode()
+		next := modes[0]
+		for i, md := range modes {
+			if md == cur {
+				next = modes[(i+1)%len(modes)]
+				break
+			}
+		}
+		m.config.Permissions.SetMode(next)
+
+	case 2: // Incognito — toggle
+		if m.config.Firewall != nil {
+			m.incognito = m.config.Firewall.Incognito().Toggle()
+			if m.config.Router != nil {
+				m.config.Router.SetLocalOnly(m.incognito)
+			}
+		}
+	}
+	return m
+}
+
+// configPanelArms returns a stable-ordered slice of arms suitable for cycling.
+// Order: CLI agents first, then local models, then API arms, excluding stub/SLM.
+func configPanelArms(arms []*router.Arm) []*router.Arm {
+	var cli, local, api []*router.Arm
+	for _, a := range arms {
+		if string(a.ID) == "slm/llamafile" {
+			continue // SLM is not a user-selectable primary arm
+		}
+		if a.IsCLIAgent {
+			cli = append(cli, a)
+		} else if a.IsLocal {
+			local = append(local, a)
+		} else {
+			api = append(api, a)
+		}
+	}
+	result := make([]*router.Arm, 0, len(cli)+len(local)+len(api))
+	result = append(result, cli...)
+	result = append(result, local...)
+	result = append(result, api...)
+	return result
 }
 
 // shellExe returns the path of the user's preferred interactive shell.
