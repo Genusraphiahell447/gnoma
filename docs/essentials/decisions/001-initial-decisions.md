@@ -241,7 +241,7 @@ Split into M4 (foundation: arm registry, pools, task classifier, heuristic selec
 
 # ADR-009: Thompson Sampling for Multi-Armed Bandit
 
-**Status:** Accepted
+**Status:** Superseded by ADR-013
 **Date:** 2026-04-03
 
 ## Context

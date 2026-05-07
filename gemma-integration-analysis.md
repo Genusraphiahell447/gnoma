@@ -1,3 +1,10 @@
+> **Note (2026-05-07):** This document describes the `gemini-cli` (Node.js) implementation.
+> The specifics — LiteRT-LM runtime, daemon/PID management, `litert-lm pull`, React/Ink UI —
+> are Node.js artifacts and do not apply to gnoma. The **conceptually relevant part** is the
+> Complexity Rubric and the `GemmaClassifierStrategy` JSON interface, which informed the Go
+> `SLMClassifier` design in Phase 3 of `docs/superpowers/plans/2026-05-07-gnoma-roadmap.md`.
+> For the Go implementation, see ADR-013 (`docs/essentials/decisions/002-slm-routing.md`).
+
 # Gemini CLI Local Model Routing (/gemma) Architecture
 
 The `/gemma` integration in the `gemini-cli` uses a local LLM to perform "Model Routing". It automatically decides whether to use a cheaper/faster model (Flash) or a more powerful one (Pro) based on the user's request.
