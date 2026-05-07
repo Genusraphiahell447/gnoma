@@ -76,6 +76,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  gnoma [flags]           open interactive TUI\n")
 		fmt.Fprintf(os.Stderr, "  gnoma [flags] <prompt>  run a single prompt (pipe mode)\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
+		fmt.Fprintf(os.Stderr, "  gnoma providers         list all discovered providers and models\n")
 		fmt.Fprintf(os.Stderr, "  gnoma slm setup         download and verify the llamafile model\n")
 		fmt.Fprintf(os.Stderr, "  gnoma slm status        show SLM setup state\n")
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
@@ -142,9 +143,14 @@ func main() {
 		*permMode = cfg.Permission.Mode
 	}
 
-	// SLM subcommands: `gnoma slm setup` / `gnoma slm status`
-	if cliArgs := flag.Args(); len(cliArgs) > 0 && cliArgs[0] == "slm" {
-		os.Exit(runSLMCommand(cliArgs[1:], cfg, logger))
+	// Subcommand dispatch (before provider creation)
+	if cliArgs := flag.Args(); len(cliArgs) > 0 {
+		switch cliArgs[0] {
+		case "providers":
+			os.Exit(runProvidersCommand(cfg, logger))
+		case "slm":
+			os.Exit(runSLMCommand(cliArgs[1:], cfg, logger))
+		}
 	}
 
 	knownProviders := map[string]bool{
@@ -1108,6 +1114,80 @@ func (s *stubProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 }
 func (s *stubProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	return nil, fmt.Errorf("%s", s.reason)
+}
+
+// runProvidersCommand handles `gnoma providers`.
+// Prints all auto-discovered providers, CLI agents, local models, and SLM status.
+func runProvidersCommand(cfg *gnomacfg.Config, logger *slog.Logger) int {
+	ctx := context.Background()
+
+	fmt.Println("Configured provider:")
+	if cfg.Provider.Default != "" {
+		key := cfg.Provider.APIKeys[cfg.Provider.Default]
+		keyHint := "(no key)"
+		if key != "" {
+			if len(key) > 8 {
+				keyHint = key[:4] + "..." + key[len(key)-4:]
+			} else {
+				keyHint = "(set)"
+			}
+		}
+		model := cfg.Provider.Model
+		if model == "" {
+			model = "(default)"
+		}
+		fmt.Printf("  %-12s  model: %-30s  key: %s\n", cfg.Provider.Default, model, keyHint)
+	} else {
+		fmt.Println("  (none — set [provider] in ~/.config/gnoma/config.toml)")
+	}
+
+	fmt.Println("\nCLI agents (auto-discovered):")
+	agents := subprocprov.DiscoverCLIAgents(ctx)
+	if len(agents) == 0 {
+		fmt.Println("  (none found on PATH)")
+	}
+	for _, a := range agents {
+		fmt.Printf("  %-12s  version: %-20s  path: %s\n", a.Name, a.Version, a.Path)
+	}
+
+	fmt.Println("\nLocal models (ollama / llama.cpp):")
+	localModels := router.DiscoverLocalModels(ctx, logger,
+		cfg.Provider.Endpoints["ollama"],
+		cfg.Provider.Endpoints["llamacpp"],
+		nil,
+	)
+	if len(localModels) == 0 {
+		fmt.Println("  (none running)")
+	}
+	for _, m := range localModels {
+		tools := "no tools"
+		if m.SupportsTools {
+			tools = "tools"
+		}
+		fmt.Printf("  %-12s  model: %-30s  %s\n", m.Provider, m.ID, tools)
+	}
+
+	fmt.Println("\nSLM (llamafile):")
+	slmDataDir := cfg.SLM.DataDir
+	if slmDataDir == "" {
+		slmDataDir = slm.DefaultDataDir()
+	}
+	slmMgr := slm.New(slm.Config{DataDir: slmDataDir, ModelURL: cfg.SLM.ModelURL}, logger)
+	status := slmMgr.Status()
+	enabled := "disabled"
+	if cfg.SLM.Enabled {
+		enabled = "enabled"
+	}
+	fmt.Printf("  status: %-10s  (%s)\n", status, enabled)
+	if mf := slmMgr.Manifest(); mf != nil {
+		fmt.Printf("  file:   %s (%s)\n", mf.FilePath, humanBytes(mf.Size))
+	}
+
+	fmt.Println("\nTo set a provider:")
+	fmt.Println("  gnoma --provider anthropic --model claude-opus-4-5  (one-off)")
+	fmt.Println("  gnoma config set provider.default anthropic          (permanent)")
+
+	return 0
 }
 
 // runSLMCommand handles `gnoma slm <subcommand>`.
