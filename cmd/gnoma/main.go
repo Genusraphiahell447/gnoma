@@ -606,9 +606,12 @@ func main() {
 		logger.Debug("prefix token baseline set", "tokens", prefixTokens)
 	}
 
-	// Wire SLM: start llamafile, register arm, inject classifier (opt-in).
+	// Wire SLM: start llamafile in background, register arm + classifier when ready.
+	// Uses a lazyClassifier so the engine starts immediately with heuristic fallback;
+	// the SLM swaps in once llamafile is healthy (typically 5-10s cold start).
 	var slmMgr *slm.Manager
-	var engineClassifier router.TaskClassifier
+	lazy := &lazyClassifier{}
+	var engineClassifier router.TaskClassifier = lazy
 	if cfg.SLM.Enabled {
 		slmDataDir := cfg.SLM.DataDir
 		if slmDataDir == "" {
@@ -616,28 +619,30 @@ func main() {
 		}
 		slmMgr = slm.New(slm.Config{DataDir: slmDataDir, ModelURL: cfg.SLM.ModelURL}, logger)
 		if slmMgr.IsSetUp() {
-			slmBaseURL, startErr := slmMgr.Start(context.Background())
-			if startErr != nil {
-				logger.Warn("failed to start SLM; falling back to heuristic classifier", "error", startErr)
-			} else {
+			go func() {
+				slmBaseURL, startErr := slmMgr.Start(context.Background())
+				if startErr != nil {
+					logger.Warn("failed to start SLM; using heuristic classifier", "error", startErr)
+					return
+				}
 				slmProv, provErr := openaicompat.NewLlamafile(provider.ProviderConfig{
 					BaseURL: slmBaseURL + "/v1",
 				})
 				if provErr != nil {
 					logger.Warn("failed to create SLM provider", "error", provErr)
-				} else {
-					engineClassifier = slm.NewClassifier(slmProv, "default", logger)
-					rtr.RegisterArm(&router.Arm{
-						ID:            "slm/llamafile",
-						Provider:      slmProv,
-						ModelName:     "default",
-						IsLocal:       true,
-						MaxComplexity: 0.3,
-						Capabilities:  provider.Capabilities{ToolUse: false},
-					})
-					logger.Info("SLM ready", "url", slmBaseURL)
+					return
 				}
-			}
+				lazy.set(slm.NewClassifier(slmProv, "default", logger))
+				rtr.RegisterArm(&router.Arm{
+					ID:            "slm/llamafile",
+					Provider:      slmProv,
+					ModelName:     "default",
+					IsLocal:       true,
+					MaxComplexity: 0.3,
+					Capabilities:  provider.Capabilities{ToolUse: false},
+				})
+				logger.Info("SLM ready", "url", slmBaseURL)
+			}()
 		} else {
 			logger.Warn("SLM enabled but not set up; run: gnoma slm setup")
 		}
@@ -1064,6 +1069,29 @@ func buildPluginInfos(plugins []plugin.Plugin, enabledSet map[string]bool) []tui
 		})
 	}
 	return infos
+}
+
+// lazyClassifier wraps a TaskClassifier that is set after startup.
+// Falls back to HeuristicClassifier until the real one is available.
+type lazyClassifier struct {
+	mu    sync.Mutex
+	inner router.TaskClassifier
+}
+
+func (l *lazyClassifier) set(c router.TaskClassifier) {
+	l.mu.Lock()
+	l.inner = c
+	l.mu.Unlock()
+}
+
+func (l *lazyClassifier) Classify(ctx context.Context, prompt string, history []message.Message) (router.Task, error) {
+	l.mu.Lock()
+	c := l.inner
+	l.mu.Unlock()
+	if c != nil {
+		return c.Classify(ctx, prompt, history)
+	}
+	return router.HeuristicClassifier{}.Classify(ctx, prompt, history)
 }
 
 // stubProvider is a no-op provider used when no real provider is configured.
