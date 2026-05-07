@@ -241,3 +241,32 @@ func estimateComplexity(prompt string) float64 {
 	}
 	return score
 }
+
+// ParseTaskType converts a string from an SLM JSON response to a TaskType.
+// Matching is case-insensitive. Unknown strings fall back to TaskGeneration.
+func ParseTaskType(s string) TaskType {
+	switch strings.ToLower(strings.ReplaceAll(s, "_", "")) {
+	case "debug":
+		return TaskDebug
+	case "explain":
+		return TaskExplain
+	case "generation":
+		return TaskGeneration
+	case "refactor":
+		return TaskRefactor
+	case "unittest":
+		return TaskUnitTest
+	case "boilerplate":
+		return TaskBoilerplate
+	case "planning":
+		return TaskPlanning
+	case "orchestration":
+		return TaskOrchestration
+	case "securityreview":
+		return TaskSecurityReview
+	case "review":
+		return TaskReview
+	default:
+		return TaskGeneration
+	}
+}

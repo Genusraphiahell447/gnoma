@@ -657,3 +657,52 @@ func TestRouter_AllDisabled_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestFilterFeasible_MaxComplexity(t *testing.T) {
+	slmArm := &Arm{
+		ID:           "slm/tiny",
+		IsLocal:      true,
+		MaxComplexity: 0.3,
+		Capabilities: provider.Capabilities{ToolUse: false},
+	}
+	apiArm := &Arm{
+		ID:           "api/big",
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 200000},
+	}
+
+	// Low-complexity task: SLM arm passes the ceiling.
+	lowTask := Task{Type: TaskBoilerplate, ComplexityScore: 0.2}
+	got := filterFeasible([]*Arm{slmArm, apiArm}, lowTask)
+	found := false
+	for _, a := range got {
+		if a.ID == "slm/tiny" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("slm arm should pass filterFeasible for low-complexity task")
+	}
+
+	// High-complexity task: SLM arm must be excluded.
+	highTask := Task{Type: TaskPlanning, ComplexityScore: 0.8, RequiresTools: false}
+	got = filterFeasible([]*Arm{slmArm, apiArm}, highTask)
+	for _, a := range got {
+		if a.ID == "slm/tiny" {
+			t.Error("slm arm should be excluded for high-complexity task")
+		}
+	}
+}
+
+func TestFilterFeasible_MaxComplexity_Zero_MeansNoLimit(t *testing.T) {
+	// MaxComplexity == 0 means "no ceiling" — existing arms are unaffected.
+	arm := &Arm{
+		ID:           "api/arm",
+		MaxComplexity: 0, // zero = no ceiling
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 200000},
+	}
+	task := Task{Type: TaskOrchestration, ComplexityScore: 0.99}
+	got := filterFeasible([]*Arm{arm}, task)
+	if len(got) == 0 {
+		t.Error("arm with MaxComplexity=0 should never be excluded by complexity ceiling")
+	}
+}
+

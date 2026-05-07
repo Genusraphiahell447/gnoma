@@ -22,6 +22,10 @@ type Arm struct {
 	Capabilities provider.Capabilities
 	Pools        []*LimitPool
 
+	// MaxComplexity is a hard ceiling on task complexity this arm will accept.
+	// Zero means no ceiling (default for all existing arms).
+	MaxComplexity float64
+
 	// Cost per 1k tokens (EUR, estimated)
 	CostPer1kInput  float64
 	CostPer1kOutput float64

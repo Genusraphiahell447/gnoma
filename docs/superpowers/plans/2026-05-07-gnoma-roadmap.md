@@ -51,67 +51,44 @@ Bash tool flags `passwd foo` and offers takeover.
 
 ## Phase 3: SLM Task Classifier
 
-Add an optional SLM-driven task classifier behind the existing `TaskClassifier` interface. The SLM
-calls Ollama HTTP via the existing `openaicompat` provider — zero new dependencies, no CGO, no
-daemon management.
+Add an optional SLM-driven task classifier and low-complexity executor behind the `TaskClassifier`
+interface. Uses llamafile (single-file download, OpenAI-compatible HTTP) instead of Ollama.
+Zero new Go dependencies; the model binary is downloaded separately on opt-in.
 
-**Context:** `gemma-integration-analysis.md` describes how gemini-cli implements this using
-LiteRT-LM (a Node.js daemon + PID files). Those specifics do not apply here. The Go approach is
-simpler: Ollama HTTP + structured JSON output + hard timeout + heuristic fallback.
+**Implementation note (diverges from original plan):** Original plan used Ollama HTTP with
+`router.slm_model` config key. Pivoted to llamafile after discussion: user downloads a specific
+model file once (`gnoma slm setup`), gnoma manages the subprocess lifetime. Requires no external
+daemon or package manager. Config section is `[slm]` not `[router]`.
 
-### Interface
+### Architecture
 
-```go
-// internal/router/classifier.go
-type TaskClassifier interface {
-    Classify(ctx context.Context, input string, history []message.Message) (Task, error)
-}
-
-type HeuristicClassifier struct{} // default — wraps existing ClassifyTask()
-type SLMClassifier struct {
-    provider provider.Provider // openaicompat pointing at Ollama
-    model    string
-    timeout  time.Duration     // default 2s
-}
-```
-
-`SLMClassifier.Classify` sends a structured prompt with the Complexity Rubric (adapted from
-gemma-integration-analysis.md) and expects a JSON response:
-
-```json
-{"task_type": "Generation", "complexity": 0.4, "requires_tools": true}
-```
-
-On timeout or parse failure, it falls back to `HeuristicClassifier`.
-
-### Complexity Rubric (prompt fragment)
-
-```
-Classify this coding request. Respond with JSON only.
-Complexity 0.0–0.3: boilerplate, trivial edits, simple lookups
-Complexity 0.4–0.6: moderate — new functions, refactors, unit tests
-Complexity 0.7–1.0: architectural, multi-file, security review, planning
-```
+- `internal/slm/` — Manager (download, subprocess lifecycle, health check), Classifier
+- `internal/router/` — `TaskClassifier` interface, `HeuristicClassifier`, `ParseTaskType`
+- `Arm.MaxComplexity` — SLM arm capped at 0.3; excluded from complex tasks by `filterFeasible`
 
 ### Config
 
 ```toml
-[router]
-slm_model = ""   # empty = disabled (HeuristicClassifier used)
-                 # e.g. "gemma3:1b" — must be available in Ollama
+[slm]
+enabled = true
+model_url = "https://huggingface.co/mozilla-ai/TinyLlama-1.1B-Chat-v1.0-llamafile/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q5_K_M.llamafile"
+data_dir = ""  # empty = ~/.local/share/gnoma/slm
 ```
 
 ### Tasks
 
-- [ ] `TaskClassifier` interface in `internal/router/classifier.go`
-- [ ] `HeuristicClassifier` wraps existing `ClassifyTask()` (zero behavior change)
-- [ ] `SLMClassifier`: Ollama HTTP via openaicompat, JSON parse, 2s timeout + fallback
-- [ ] Complexity Rubric prompt (task type + complexity float + requires_tools bool)
-- [ ] Config key `router.slm_model`; wire into router construction in `cmd/gnoma/main.go`
-- [ ] Tests: `HeuristicClassifier` behavior unchanged; `SLMClassifier` fallback on timeout;
-      `SLMClassifier` correct parse on valid JSON response
+- [x] `TaskClassifier` interface in `internal/router/classifier.go`
+- [x] `HeuristicClassifier` wraps existing `ClassifyTask()` (zero behavior change)
+- [x] `internal/slm/` — Manager, Manifest, download, subprocess lifecycle (Wave B)
+- [x] `slm.Classifier`: openaicompat pointing at llamafile, JSON parse, 2s timeout + fallback
+- [x] `ParseTaskType` in `internal/router/task.go`
+- [x] `Arm.MaxComplexity` + `filterFeasible` ceiling
+- [x] `[slm]` config section in `internal/config/`
+- [x] `gnoma slm setup` / `gnoma slm status` CLI subcommands
+- [x] SLM arm registered with `MaxComplexity = 0.3` in `cmd/gnoma/main.go`
+- [x] TUI `/config` shows SLM status
 
-**Dependencies:** existing `internal/provider/openaicompat` — no new deps.
+**Dependencies:** existing `internal/provider/openaicompat` — no new Go deps.
 
 **Exit criteria:** `gnoma` with `slm_model = "gemma3:1b"` routes using SLM classification.
 Without config key, behavior is identical to today.
@@ -218,8 +195,8 @@ arches: amd64/arm64). The binary is a single static executable with zero runtime
 | Item | Reason |
 |------|--------|
 | `.gnoma/tmp/` local temp directory | `persist.Store` already uses `/tmp/gnoma-<sessionID>/`; adding `.gnoma/tmp/` adds complexity (cleanup, gitignore, collision avoidance) for no benefit |
-| LiteRT-LM / CGO SLM runtime | `CGO_ENABLED=0` (goreleaser constraint). Go approach: Ollama HTTP via existing openaicompat |
-| Daemon/PID file management for SLM | Node.js-specific pattern from gemma-integration-analysis.md; not applicable to this Go binary |
+| LiteRT-LM / CGO SLM runtime | `CGO_ENABLED=0` (goreleaser constraint). Go approach: llamafile subprocess via existing openaicompat |
+| Ollama-based SLM classifier | Pivoted to llamafile: single-file download, no external daemon, user-controlled opt-in |
 | PTY via `go-pty` library | Requires CGO. Replaced by `tea.ExecProcess` (already in go.mod, no CGO) |
 
 ---

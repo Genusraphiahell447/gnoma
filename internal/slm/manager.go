@@ -17,6 +17,18 @@ import (
 
 const pidFile = "llamafile.pid"
 
+// DefaultDataDir returns the platform default SLM data directory.
+// Follows XDG Base Directory Specification: $XDG_DATA_HOME/gnoma/slm,
+// falling back to ~/.local/share/gnoma/slm.
+func DefaultDataDir() string {
+	dir := os.Getenv("XDG_DATA_HOME")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(dir, "gnoma", "slm")
+}
+
 // Status describes the setup state of the SLM.
 type Status int
 
@@ -178,6 +190,15 @@ func (m *Manager) BaseURL() string {
 		return ""
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", m.port)
+}
+
+// Manifest returns the on-disk manifest if present, or nil.
+func (m *Manager) Manifest() *Manifest {
+	mf, err := readManifest(m.cfg.DataDir)
+	if err != nil {
+		return nil
+	}
+	return mf
 }
 
 func (m *Manager) pidPath() string {

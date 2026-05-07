@@ -47,3 +47,18 @@ func NewLlamaCpp(cfg provider.ProviderConfig) (provider.Provider, error) {
 	}
 	return oaiprov.New(cfg)
 }
+
+// NewLlamafile creates a provider for a llamafile process.
+// BaseURL must include /v1, e.g. "http://127.0.0.1:8080/v1".
+func NewLlamafile(cfg provider.ProviderConfig) (provider.Provider, error) {
+	if cfg.APIKey == "" {
+		cfg.APIKey = "llamafile" // llamafile doesn't require a real key
+	}
+	if cfg.Model == "" {
+		cfg.Model = "default" // llamafile ignores the model field
+	}
+	if cfg.MaxRetries == nil {
+		cfg.MaxRetries = intPtr(0)
+	}
+	return oaiprov.New(cfg)
+}

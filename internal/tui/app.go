@@ -19,6 +19,7 @@ import (
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/skill"
+	"somegit.dev/Owlibou/gnoma/internal/slm"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
@@ -61,6 +62,7 @@ type Config struct {
 	Permissions          *permission.Checker   // for mode switching
 	Router               *router.Router        // for model listing
 	ElfManager           *elf.Manager          // for CancelAll on escape/quit
+	SLMManager           *slm.Manager          // nil = SLM not configured
 	PermCh               chan bool             // TUI → engine: y/n response
 	PermReqCh            <-chan PermReqMsg    // engine → TUI: tool requesting approval
 	ElfProgress          <-chan elf.Progress   // elf → TUI: structured progress updates
@@ -877,15 +879,31 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		status := m.session.Status()
 		var b strings.Builder
 		b.WriteString("Current configuration:\n")
-		fmt.Fprintf(&b, "  provider: %s\n", status.Provider)
-		fmt.Fprintf(&b, "  model: %s\n", status.Model)
+		fmt.Fprintf(&b, "  provider:   %s\n", status.Provider)
+		fmt.Fprintf(&b, "  model:      %s\n", status.Model)
 		if m.config.Permissions != nil {
 			fmt.Fprintf(&b, "  permission: %s\n", m.config.Permissions.Mode())
 		}
-		fmt.Fprintf(&b, "  incognito: %v\n", m.incognito)
-		fmt.Fprintf(&b, "  cwd: %s\n", m.cwd)
+		fmt.Fprintf(&b, "  incognito:  %v\n", m.incognito)
+		fmt.Fprintf(&b, "  cwd:        %s\n", m.cwd)
 		if m.gitBranch != "" {
 			fmt.Fprintf(&b, "  git branch: %s\n", m.gitBranch)
+		}
+		if m.config.SLMManager != nil {
+			slmStat := m.config.SLMManager.Status()
+			switch slmStat {
+			case slm.StatusReady:
+				url := m.config.SLMManager.BaseURL()
+				if url != "" {
+					fmt.Fprintf(&b, "  slm:        ready (running at %s)\n", url)
+				} else {
+					b.WriteString("  slm:        ready (not started)\n")
+				}
+			case slm.StatusMissing:
+				b.WriteString("  slm:        file missing — run: gnoma slm setup\n")
+			default:
+				b.WriteString("  slm:        not set up — run: gnoma slm setup\n")
+			}
 		}
 		b.WriteString("\nConfig files: ~/.config/gnoma/config.toml, .gnoma/config.toml")
 		b.WriteString("\nEdit: /config set <key> <value>")

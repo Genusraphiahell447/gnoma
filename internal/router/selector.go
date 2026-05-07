@@ -179,6 +179,11 @@ func filterFeasible(arms []*Arm, task Task) []*Arm {
 	var belowQuality []*Arm // passed tool+pool but scored below minimum quality
 
 	for _, arm := range arms {
+		// Complexity ceiling: zero means no ceiling (preserves behavior for all existing arms).
+		if arm.MaxComplexity > 0 && task.ComplexityScore > arm.MaxComplexity {
+			continue
+		}
+
 		// Must support tools if task requires them
 		if task.RequiresTools && !arm.SupportsTools() {
 			continue

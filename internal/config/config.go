@@ -10,9 +10,26 @@ type Config struct {
 	RateLimits RateLimitSection  `toml:"rate_limits"`
 	Security   SecuritySection   `toml:"security"`
 	Session    SessionSection    `toml:"session"`
+	SLM        SLMSection        `toml:"slm"`
 	Hooks      []HookConfig      `toml:"hooks"`
 	MCPServers []MCPServerConfig `toml:"mcp_servers"`
 	Plugins    PluginsSection    `toml:"plugins"`
+}
+
+// SLMSection configures the optional small language model for task classification
+// and low-complexity task execution.
+//
+// Example config:
+//
+//	[slm]
+//	enabled = true
+//	model_url = "https://huggingface.co/mozilla-ai/TinyLlama-1.1B-Chat-v1.0-llamafile/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q5_K_M.llamafile"
+//
+// Run `gnoma slm setup` to download and verify the model before enabling.
+type SLMSection struct {
+	Enabled  bool   `toml:"enabled"`
+	ModelURL string `toml:"model_url"`
+	DataDir  string `toml:"data_dir"` // empty = XDG default (~/.local/share/gnoma/slm)
 }
 
 // MCPServerConfig defines an MCP server to start and connect to.

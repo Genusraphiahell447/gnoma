@@ -18,6 +18,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/hook"
 	"somegit.dev/Owlibou/gnoma/internal/skill"
+	"somegit.dev/Owlibou/gnoma/internal/slm"
 	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
@@ -129,6 +130,11 @@ func main() {
 	}
 	if !isFlagSet("permission") && cfg.Permission.Mode != "" {
 		*permMode = cfg.Permission.Mode
+	}
+
+	// SLM subcommands: `gnoma slm setup` / `gnoma slm status`
+	if cliArgs := flag.Args(); len(cliArgs) > 0 && cliArgs[0] == "slm" {
+		os.Exit(runSLMCommand(cliArgs[1:], cfg, logger))
 	}
 
 	// Resolve API key: CLI flag → config → env vars
@@ -551,10 +557,48 @@ func main() {
 		logger.Debug("prefix token baseline set", "tokens", prefixTokens)
 	}
 
+	// Wire SLM: start llamafile, register arm, inject classifier (opt-in).
+	var slmMgr *slm.Manager
+	var engineClassifier router.TaskClassifier
+	if cfg.SLM.Enabled {
+		slmDataDir := cfg.SLM.DataDir
+		if slmDataDir == "" {
+			slmDataDir = slm.DefaultDataDir()
+		}
+		slmMgr = slm.New(slm.Config{DataDir: slmDataDir, ModelURL: cfg.SLM.ModelURL}, logger)
+		if slmMgr.IsSetUp() {
+			slmBaseURL, startErr := slmMgr.Start(context.Background())
+			if startErr != nil {
+				logger.Warn("failed to start SLM; falling back to heuristic classifier", "error", startErr)
+			} else {
+				slmProv, provErr := openaicompat.NewLlamafile(provider.ProviderConfig{
+					BaseURL: slmBaseURL + "/v1",
+				})
+				if provErr != nil {
+					logger.Warn("failed to create SLM provider", "error", provErr)
+				} else {
+					engineClassifier = slm.NewClassifier(slmProv, "default", logger)
+					rtr.RegisterArm(&router.Arm{
+						ID:            "slm/llamafile",
+						Provider:      slmProv,
+						ModelName:     "default",
+						IsLocal:       true,
+						MaxComplexity: 0.3,
+						Capabilities:  provider.Capabilities{ToolUse: false},
+					})
+					logger.Info("SLM ready", "url", slmBaseURL)
+				}
+			}
+		} else {
+			logger.Warn("SLM enabled but not set up; run: gnoma slm setup")
+		}
+	}
+
 	// Create engine
 	eng, err := engine.New(engine.Config{
 		Provider:    prov,
 		Router:      rtr,
+		Classifier:  engineClassifier,
 		Tools:       reg,
 		Firewall:    fw,
 		Permissions: permChecker,
@@ -729,13 +773,14 @@ func main() {
 			Permissions:           permChecker,
 			Router:                rtr,
 			ElfManager:            elfMgr,
+			SLMManager:            slmMgr,
 			PermCh:                permCh,
 			PermReqCh:             permReqCh,
 			ElfProgress:           elfProgressCh,
 			SessionStore:          sessStore,
 			StartWithResumePicker: openResumePicker,
 			Skills:                skillReg,
-		PluginInfos:           buildPluginInfos(discoveredPlugins, enabledSet),
+			PluginInfos:           buildPluginInfos(discoveredPlugins, enabledSet),
 			Version:               buildVersion,
 			ModelUpdateCh:         modelUpdateCh,
 		})
@@ -970,6 +1015,89 @@ func buildPluginInfos(plugins []plugin.Plugin, enabledSet map[string]bool) []tui
 		})
 	}
 	return infos
+}
+
+// runSLMCommand handles `gnoma slm <subcommand>`.
+// Returns an exit code.
+func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: gnoma slm <command>")
+		fmt.Fprintln(os.Stderr, "commands:")
+		fmt.Fprintln(os.Stderr, "  setup   download and verify the llamafile model")
+		fmt.Fprintln(os.Stderr, "  status  show current setup state")
+		return 1
+	}
+
+	dataDir := cfg.SLM.DataDir
+	if dataDir == "" {
+		dataDir = slm.DefaultDataDir()
+	}
+	mgr := slm.New(slm.Config{DataDir: dataDir, ModelURL: cfg.SLM.ModelURL}, logger)
+
+	switch args[0] {
+	case "setup":
+		if cfg.SLM.ModelURL == "" {
+			fmt.Fprintln(os.Stderr, "error: [slm] model_url must be set in config before running setup")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Example (~/.config/gnoma/config.toml):")
+			fmt.Fprintln(os.Stderr, "  [slm]")
+			fmt.Fprintln(os.Stderr, `  model_url = "https://huggingface.co/mozilla-ai/TinyLlama-1.1B-Chat-v1.0-llamafile/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q5_K_M.llamafile"`)
+			return 1
+		}
+		fmt.Printf("downloading llamafile from %s\n", cfg.SLM.ModelURL)
+		err := mgr.Setup(context.Background(), func(downloaded, total int64) {
+			if total > 0 {
+				pct := float64(downloaded) / float64(total) * 100
+				fmt.Printf("\r  %.1f%%  (%s / %s)   ", pct, humanBytes(downloaded), humanBytes(total))
+			} else {
+				fmt.Printf("\r  %s downloaded   ", humanBytes(downloaded))
+			}
+		})
+		fmt.Println()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("SLM ready at: %s\n", dataDir)
+		fmt.Println("Enable in config:")
+		fmt.Println("  [slm]")
+		fmt.Println("  enabled = true")
+		return 0
+
+	case "status":
+		status := mgr.Status()
+		fmt.Printf("slm status: %s\n", status)
+		if mf := mgr.Manifest(); mf != nil {
+			fmt.Printf("  file:    %s\n", mf.FilePath)
+			fmt.Printf("  size:    %s\n", humanBytes(mf.Size))
+			fmt.Printf("  sha256:  %s\n", mf.SHA256[:16]+"...")
+			fmt.Printf("  setup:   %s\n", mf.SetupAt.Format("2006-01-02 15:04 UTC"))
+		}
+		if status == slm.StatusNotSetUp {
+			fmt.Println("  run: gnoma slm setup")
+		} else if status == slm.StatusMissing {
+			fmt.Println("  file is missing; run: gnoma slm setup")
+		}
+		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown slm command: %s\n", args[0])
+		return 1
+	}
+}
+
+// humanBytes formats a byte count as a human-readable string.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for n2 := n / unit; n2 >= unit; n2 /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // resolveEnabledPlugins determines which plugins are enabled based on config.
