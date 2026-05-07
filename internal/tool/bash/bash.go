@@ -88,6 +88,15 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, 
 		command = t.aliases.ExpandCommand(command)
 	}
 
+	// Interactive detection: bail before security checks so the user gets
+	// a helpful message rather than a timeout or security error.
+	if reason := isInteractiveCmd(command); reason != "" {
+		return tool.Result{
+			Output:   fmt.Sprintf("%s\n(%s)", interactiveHint, reason),
+			Metadata: map[string]any{"interactive": true},
+		}, nil
+	}
+
 	// Security validation runs on the expanded command
 	if violation := ValidateCommand(command); violation != nil {
 		return tool.Result{

@@ -26,6 +26,7 @@ var builtinCommands = []string{
 	"/quit",
 	"/replay",
 	"/resume",
+	"/shell",
 	"/skills",
 	"/usage",
 }

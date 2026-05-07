@@ -47,6 +47,7 @@ type elfProgressMsg struct{ progress elf.Progress }
 type modelUpdatedMsg struct{} // sent when background discovery reconciles the model name
 type clearQuitHintMsg struct{}
 type resumeListLoadedMsg struct{ sessions []session.Metadata }
+type shellExitMsg struct{ err error }
 
 type chatMessage struct {
 	role    string
@@ -425,6 +426,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.scrollOffset < 0 {
 				m.scrollOffset = 0
 			}
+		}
+		return m, nil
+
+	case shellExitMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{role: "error",
+				content: "shell exited with error: " + msg.err.Error()})
+		} else {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "shell session ended"})
 		}
 		return m, nil
 
@@ -890,9 +900,16 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/shell":
-		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "interactive shell not yet implemented\nFor now, use ! prefix in your terminal: ! sudo command"})
-		return m, nil
+		shell := shellExe()
+		var cmd *exec.Cmd
+		if args != "" {
+			cmd = exec.Command(shell, "-c", args)
+		} else {
+			cmd = exec.Command(shell)
+		}
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return shellExitMsg{err: err}
+		})
 
 	case "/permission", "/perm":
 		if m.config.Permissions == nil {
@@ -1056,7 +1073,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /keys               show keyboard shortcuts\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /provider           show current provider\n  /replay             scroll to top to re-read conversation\n  /resume [id]        list or restore saved sessions\n  /skills             list loaded skills\n  /usage              show token usage and cost\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
+			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /keys               show keyboard shortcuts\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /provider           show current provider\n  /replay             scroll to top to re-read conversation\n  /resume [id]        list or restore saved sessions\n  /shell [cmd]        open interactive shell (or run cmd in shell)\n  /skills             list loaded skills\n  /usage              show token usage and cost\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
 		return m, nil
 
 	case "/keys":
@@ -1465,6 +1482,21 @@ func diffPreviewWrite(content string) string {
 		b.WriteString("  + " + line + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// shellExe returns the path of the user's preferred interactive shell.
+// Priority: $SHELL (Unix) / %COMSPEC% (Windows), then platform default.
+func shellExe() string {
+	if sh := os.Getenv("SHELL"); sh != "" {
+		return sh
+	}
+	if sh := os.Getenv("COMSPEC"); sh != "" {
+		return sh
+	}
+	if os.PathSeparator == '\\' {
+		return "powershell.exe"
+	}
+	return "/bin/sh"
 }
 
 func detectGitBranch() string {

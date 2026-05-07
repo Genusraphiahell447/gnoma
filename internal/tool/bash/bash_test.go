@@ -121,6 +121,37 @@ func TestBashTool_WorkingDir(t *testing.T) {
 	}
 }
 
+func TestBashTool_InteractiveDetection(t *testing.T) {
+	b := New()
+
+	tests := []struct {
+		name    string
+		cmd     string
+		wantHit bool
+	}{
+		{"sudo", "sudo apt install vim", true},
+		{"vim", "vim file.txt", true},
+		{"git push", "git push origin main", true},
+		{"python3 REPL", "python3", true},
+		{"python3 script not interactive", "python3 script.py", false},
+		{"ls not interactive", "ls -la", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.cmd})
+			result, err := b.Execute(context.Background(), args)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			hit := result.Metadata["interactive"] == true
+			if hit != tt.wantHit {
+				t.Errorf("interactive=%v, want %v (output=%q)", hit, tt.wantHit, result.Output)
+			}
+		})
+	}
+}
+
 func TestBashTool_ContextCancellation(t *testing.T) {
 	b := New()
 	ctx, cancel := context.WithCancel(context.Background())
