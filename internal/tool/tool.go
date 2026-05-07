@@ -27,3 +27,11 @@ type Tool interface {
 type DeferrableTool interface {
 	ShouldDefer() bool
 }
+
+// PathSensitiveTool is an optional interface for tools that access the filesystem.
+// Engines enforcing skill path restrictions call ExtractPaths to validate each
+// invocation before execution. An empty string in the returned slice means the
+// tool will default to the current working directory.
+type PathSensitiveTool interface {
+	ExtractPaths(args json.RawMessage) []string
+}

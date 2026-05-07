@@ -51,6 +51,14 @@ func (t *GrepTool) Parameters() json.RawMessage { return grepParams }
 func (t *GrepTool) IsReadOnly() bool            { return true }
 func (t *GrepTool) IsDestructive() bool         { return false }
 
+func (t *GrepTool) ExtractPaths(args json.RawMessage) []string {
+	var a grepArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil
+	}
+	return []string{a.Path} // empty string = caller resolves to cwd
+}
+
 type grepArgs struct {
 	Pattern    string `json:"pattern"`
 	Path       string `json:"path,omitempty"`

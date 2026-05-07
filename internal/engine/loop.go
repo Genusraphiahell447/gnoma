@@ -505,6 +505,11 @@ func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t
 		}
 	}
 
+	// Path restriction: deny bash and validate fs tool paths against AllowedPaths.
+	if denied, blocked := checkPathRestriction(call, t, args, e.turnOpts.AllowedPaths); blocked {
+		return denied
+	}
+
 	e.logger.Debug("executing tool", "name", call.Name, "id", call.ID)
 
 	result, err := t.Execute(ctx, args)

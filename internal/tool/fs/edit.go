@@ -45,6 +45,14 @@ func (t *EditTool) Parameters() json.RawMessage { return editParams }
 func (t *EditTool) IsReadOnly() bool            { return false }
 func (t *EditTool) IsDestructive() bool         { return false }
 
+func (t *EditTool) ExtractPaths(args json.RawMessage) []string {
+	var a editArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil
+	}
+	return []string{a.Path}
+}
+
 type editArgs struct {
 	Path       string `json:"path"`
 	OldString  string `json:"old_string"`

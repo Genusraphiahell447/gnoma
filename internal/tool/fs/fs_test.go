@@ -624,6 +624,64 @@ func TestFormatSize(t *testing.T) {
 	}
 }
 
+// --- ExtractPaths ---
+
+func TestExtractPaths_Read(t *testing.T) {
+	r := NewReadTool()
+	paths := r.ExtractPaths(mustJSON(t, readArgs{Path: "/foo/bar.txt"}))
+	if len(paths) != 1 || paths[0] != "/foo/bar.txt" {
+		t.Errorf("ExtractPaths = %v, want [/foo/bar.txt]", paths)
+	}
+}
+
+func TestExtractPaths_Write(t *testing.T) {
+	w := NewWriteTool()
+	paths := w.ExtractPaths(mustJSON(t, writeArgs{Path: "/foo/out.txt", Content: "x"}))
+	if len(paths) != 1 || paths[0] != "/foo/out.txt" {
+		t.Errorf("ExtractPaths = %v, want [/foo/out.txt]", paths)
+	}
+}
+
+func TestExtractPaths_Edit(t *testing.T) {
+	e := NewEditTool()
+	paths := e.ExtractPaths(mustJSON(t, editArgs{Path: "/foo/file.go", OldString: "a", NewString: "b"}))
+	if len(paths) != 1 || paths[0] != "/foo/file.go" {
+		t.Errorf("ExtractPaths = %v, want [/foo/file.go]", paths)
+	}
+}
+
+func TestExtractPaths_Glob_ExplicitPath(t *testing.T) {
+	g := NewGlobTool()
+	paths := g.ExtractPaths(mustJSON(t, globArgs{Pattern: "*.go", Path: "/project/src"}))
+	if len(paths) != 1 || paths[0] != "/project/src" {
+		t.Errorf("ExtractPaths = %v, want [/project/src]", paths)
+	}
+}
+
+func TestExtractPaths_Glob_EmptyPathIsCwd(t *testing.T) {
+	g := NewGlobTool()
+	paths := g.ExtractPaths(mustJSON(t, globArgs{Pattern: "*.go"}))
+	if len(paths) != 1 || paths[0] != "" {
+		t.Errorf("ExtractPaths = %v, want [\"\"] (empty = cwd)", paths)
+	}
+}
+
+func TestExtractPaths_Grep(t *testing.T) {
+	g := NewGrepTool()
+	paths := g.ExtractPaths(mustJSON(t, grepArgs{Pattern: "func", Path: "/project"}))
+	if len(paths) != 1 || paths[0] != "/project" {
+		t.Errorf("ExtractPaths = %v, want [/project]", paths)
+	}
+}
+
+func TestExtractPaths_LS(t *testing.T) {
+	l := NewLSTool()
+	paths := l.ExtractPaths(mustJSON(t, lsArgs{Path: "/project/src"}))
+	if len(paths) != 1 || paths[0] != "/project/src" {
+		t.Errorf("ExtractPaths = %v, want [/project/src]", paths)
+	}
+}
+
 // --- Helpers ---
 
 func writeTestFile(t *testing.T, content string) string {

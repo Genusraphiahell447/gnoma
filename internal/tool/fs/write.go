@@ -52,6 +52,14 @@ func (t *WriteTool) Parameters() json.RawMessage { return writeParams }
 func (t *WriteTool) IsReadOnly() bool            { return false }
 func (t *WriteTool) IsDestructive() bool         { return false }
 
+func (t *WriteTool) ExtractPaths(args json.RawMessage) []string {
+	var a writeArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil
+	}
+	return []string{a.Path}
+}
+
 type writeArgs struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`

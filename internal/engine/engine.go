@@ -54,6 +54,7 @@ type Turn struct {
 type TurnOptions struct {
 	ToolChoice   provider.ToolChoiceMode // "" = use provider default
 	AllowedTools []string                // if non-nil, only these tools are sent (matched by name)
+	AllowedPaths []string                // if non-nil, tool filesystem access is restricted to these paths
 }
 
 // Engine orchestrates the conversation.

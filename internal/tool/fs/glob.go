@@ -40,6 +40,14 @@ func (t *GlobTool) Parameters() json.RawMessage { return globParams }
 func (t *GlobTool) IsReadOnly() bool            { return true }
 func (t *GlobTool) IsDestructive() bool         { return false }
 
+func (t *GlobTool) ExtractPaths(args json.RawMessage) []string {
+	var a globArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil
+	}
+	return []string{a.Path} // empty string = caller resolves to cwd
+}
+
 type globArgs struct {
 	Pattern string `json:"pattern"`
 	Path    string `json:"path,omitempty"`

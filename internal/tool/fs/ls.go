@@ -34,6 +34,14 @@ func (t *LSTool) Parameters() json.RawMessage { return lsParams }
 func (t *LSTool) IsReadOnly() bool            { return true }
 func (t *LSTool) IsDestructive() bool         { return false }
 
+func (t *LSTool) ExtractPaths(args json.RawMessage) []string {
+	var a lsArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil
+	}
+	return []string{a.Path} // empty string = caller resolves to cwd
+}
+
 type lsArgs struct {
 	Path string `json:"path,omitempty"`
 }

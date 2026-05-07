@@ -18,8 +18,8 @@ type Frontmatter struct {
 	Name         string   `yaml:"name"`
 	Description  string   `yaml:"description"`
 	WhenToUse    string   `yaml:"whenToUse"`
-	AllowedTools []string `yaml:"allowedTools"` // TODO(M8.3): enforce tool restrictions
-	Paths        []string `yaml:"paths"`        // TODO(M8.3): enforce path restrictions
+	AllowedTools []string `yaml:"allowedTools"`
+	Paths        []string `yaml:"paths"`
 }
 
 // Skill is a parsed skill definition ready for invocation.

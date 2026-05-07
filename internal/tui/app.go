@@ -1164,7 +1164,11 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 				m.streamBuf.Reset()
 				m.thinkingBuf.Reset()
 				m.streamFilterClose = ""
-				if err := m.session.Send(rendered); err != nil {
+				skillOpts := engine.TurnOptions{
+					AllowedTools: sk.Frontmatter.AllowedTools,
+					AllowedPaths: sk.Frontmatter.Paths,
+				}
+				if err := m.session.SendWithOptions(rendered, skillOpts); err != nil {
 					m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
 					m.streaming = false
 					return m, nil

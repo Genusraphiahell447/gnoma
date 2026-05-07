@@ -58,6 +58,14 @@ func (t *ReadTool) Parameters() json.RawMessage { return readParams }
 func (t *ReadTool) IsReadOnly() bool            { return true }
 func (t *ReadTool) IsDestructive() bool         { return false }
 
+func (t *ReadTool) ExtractPaths(args json.RawMessage) []string {
+	var a readArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil
+	}
+	return []string{a.Path}
+}
+
 type readArgs struct {
 	Path   string `json:"path"`
 	Offset int    `json:"offset,omitempty"`

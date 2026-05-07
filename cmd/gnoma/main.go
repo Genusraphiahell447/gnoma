@@ -649,6 +649,7 @@ func main() {
 
 		// Resolve skill invocations in pipe mode (/skillname args).
 		submitInput := input
+		var submitOpts engine.TurnOptions
 		if strings.HasPrefix(input, "/") {
 			parts := strings.Fields(input)
 			name := strings.TrimPrefix(parts[0], "/")
@@ -666,10 +667,14 @@ func main() {
 					os.Exit(1)
 				}
 				submitInput = rendered
+				submitOpts = engine.TurnOptions{
+					AllowedTools: sk.Frontmatter.AllowedTools,
+					AllowedPaths: sk.Frontmatter.Paths,
+				}
 			}
 		}
 
-		_, err = eng.Submit(ctx, submitInput, cb)
+		_, err = eng.SubmitWithOptions(ctx, submitInput, submitOpts, cb)
 		fmt.Println()
 
 		if err != nil {
