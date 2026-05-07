@@ -59,7 +59,7 @@ var (
 func main() {
 	var resumeFlag string
 	var (
-		providerName = flag.String("provider", "mistral", "LLM provider")
+		providerName = flag.String("provider", "", "LLM provider (mistral, anthropic, openai, google, ollama, llamacpp)")
 		model        = flag.String("model", "", "model name (empty = provider default)")
 		system       = flag.String("system", "", "system prompt override (empty = built-in default)")
 		apiKey       = flag.String("api-key", "", "API key (or set MISTRAL_API_KEY env)")
@@ -147,54 +147,80 @@ func main() {
 		os.Exit(runSLMCommand(cliArgs[1:], cfg, logger))
 	}
 
-	// Resolve API key: CLI flag → config → env vars
 	knownProviders := map[string]bool{
 		"mistral": true, "anthropic": true, "openai": true,
 		"google": true, "ollama": true, "llamacpp": true,
 	}
 	localProviders := map[string]bool{"ollama": true, "llamacpp": true}
 
-	if !knownProviders[*providerName] {
-		fmt.Fprintf(os.Stderr, "error: unknown provider %q\n  available: mistral, anthropic, openai, google, ollama, llamacpp\n  usage:     gnoma --provider <name>\n", *providerName)
-		os.Exit(1)
-	}
+	// Create the primary provider.
+	// In TUI mode errors are non-fatal: a stubProvider lets the TUI start and surfaces
+	// the problem on the first request. CLI agents (claude, gemini) wired in below as
+	// router arms will work regardless of the primary provider.
+	var prov provider.Provider
+	primaryProviderOK := false
 
-	key := *apiKey
-	if key == "" {
-		if cfgKey, ok := cfg.Provider.APIKeys[*providerName]; ok && cfgKey != "" {
-			key = cfgKey
-		}
-	}
-	if key == "" {
-		key = resolveAPIKey(*providerName)
-	}
-	if key == "" && !localProviders[*providerName] {
-		envVar := envKeyFor(*providerName)
+	if *providerName == "" {
+		// No provider configured at all.
 		if !isTUI {
-			// Pipe / single-prompt mode: fail fast with instructions.
-			fmt.Fprintf(os.Stderr, "error: no API key for provider %q\n\n", *providerName)
-			fmt.Fprintf(os.Stderr, "  Option 1: export %s=<your-key>\n", envVar)
-			fmt.Fprintf(os.Stderr, "  Option 2: gnoma --api-key <your-key>\n")
-			fmt.Fprintf(os.Stderr, "  Option 3: add to ~/.config/gnoma/config.toml:\n")
-			fmt.Fprintf(os.Stderr, "            [provider]\n")
-			fmt.Fprintf(os.Stderr, "            default = \"%s\"\n", *providerName)
-			fmt.Fprintf(os.Stderr, "            [provider.api_keys]\n")
-			fmt.Fprintf(os.Stderr, "            %s = \"<your-key>\"\n\n", *providerName)
-			fmt.Fprintf(os.Stderr, "For local models (no API key needed): gnoma --provider ollama\n")
+			fmt.Fprintln(os.Stderr, "error: no provider configured")
+			fmt.Fprintln(os.Stderr, "\nSet a provider in ~/.config/gnoma/config.toml:")
+			fmt.Fprintln(os.Stderr, "  [provider]")
+			fmt.Fprintln(os.Stderr, `  default = "anthropic"`)
+			fmt.Fprintln(os.Stderr, `  [provider.api_keys]`)
+			fmt.Fprintln(os.Stderr, `  anthropic = "sk-ant-..."`)
+			fmt.Fprintln(os.Stderr, "\nOr use a local model:  gnoma --provider ollama")
+			fmt.Fprintln(os.Stderr, "Or use the claude CLI: gnoma --provider subprocess (auto-detected)")
 			os.Exit(1)
 		}
-		// TUI mode: allow startup; the first request will surface the auth error inline.
-		logger.Warn("no API key configured", "provider", *providerName, "env", envVar)
-	}
+		prov = newStubProvider("no provider configured — set [provider] in ~/.config/gnoma/config.toml")
+		logger.Warn("no provider configured; CLI agents will be used if available")
+	} else {
+		if !knownProviders[*providerName] {
+			fmt.Fprintf(os.Stderr, "error: unknown provider %q\n  available: mistral, anthropic, openai, google, ollama, llamacpp\n  usage:     gnoma --provider <name>\n", *providerName)
+			os.Exit(1)
+		}
 
-	// Resolve base URL from config endpoints
-	baseURL := cfg.Provider.Endpoints[*providerName]
-
-	// Create provider
-	prov, err := createProvider(*providerName, key, *model, baseURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		key := *apiKey
+		if key == "" {
+			if cfgKey, ok := cfg.Provider.APIKeys[*providerName]; ok && cfgKey != "" {
+				key = cfgKey
+			}
+		}
+		if key == "" {
+			key = resolveAPIKey(*providerName)
+		}
+		if key == "" && !localProviders[*providerName] {
+			envVar := envKeyFor(*providerName)
+			if !isTUI {
+				fmt.Fprintf(os.Stderr, "error: no API key for provider %q\n\n", *providerName)
+				fmt.Fprintf(os.Stderr, "  Option 1: export %s=<your-key>\n", envVar)
+				fmt.Fprintf(os.Stderr, "  Option 2: gnoma --api-key <your-key>\n")
+				fmt.Fprintf(os.Stderr, "  Option 3: add to ~/.config/gnoma/config.toml:\n")
+				fmt.Fprintf(os.Stderr, "            [provider]\n")
+				fmt.Fprintf(os.Stderr, "            default = \"%s\"\n", *providerName)
+				fmt.Fprintf(os.Stderr, "            [provider.api_keys]\n")
+				fmt.Fprintf(os.Stderr, "            %s = \"<your-key>\"\n\n", *providerName)
+				fmt.Fprintf(os.Stderr, "For local models (no API key needed): gnoma --provider ollama\n")
+				os.Exit(1)
+			}
+			prov = newStubProvider(fmt.Sprintf("no API key for %s — export %s or set it in config", *providerName, envVar))
+			logger.Warn("no API key configured", "provider", *providerName, "env", envVar)
+		} else {
+			baseURL := cfg.Provider.Endpoints[*providerName]
+			p, err := createProvider(*providerName, key, *model, baseURL)
+			if err != nil {
+				if !isTUI {
+					fmt.Fprintf(os.Stderr, "error: %v\n", err)
+					os.Exit(1)
+				}
+				prov = newStubProvider(err.Error())
+				logger.Warn("provider creation failed", "provider", *providerName, "error", err)
+			} else {
+				prov = p
+				primaryProviderOK = true
+			}
+		}
 	}
 
 	// Create tool registry
@@ -270,32 +296,35 @@ func main() {
 		os.MkdirAll(dir, 0o755)
 		os.WriteFile(filepath.Join(dir, "quality.json"), data, 0o644)
 	}()
-	armModel := *model
-	if armModel == "" {
-		armModel = prov.DefaultModel()
-	}
-	// When the provider returns a placeholder ("default"), query that specific
-	// provider's server for the real model name before registering the arm.
-	if armModel == "default" && localProviders[*providerName] {
-		if resolved := discoverActiveModel(*providerName, cfg, logger); resolved != "" {
-			logger.Debug("resolved placeholder model name", "from", armModel, "to", resolved)
-			armModel = resolved
+	var armID router.ArmID
+	if primaryProviderOK {
+		armModel := *model
+		if armModel == "" {
+			armModel = prov.DefaultModel()
 		}
-	}
-	armID := router.NewArmID(*providerName, armModel)
-	armProvider := limitedProvider(prov, *providerName, armModel, cfg)
-	arm := &router.Arm{
-		ID:        armID,
-		Provider:  armProvider,
-		ModelName: armModel,
-		IsLocal:   localProviders[*providerName],
-		Capabilities: provider.Capabilities{ToolUse: true}, // trust CLI provider
-	}
-	arm.Pools = resolveRateLimitPools(armID, *providerName, armModel, cfg)
-	rtr.RegisterArm(arm)
-	rtr.ForceArm(armID)
-	if len(arm.Pools) > 0 {
-		logger.Debug("rate limit pools attached", "arm", armID, "pools", len(arm.Pools))
+		// When the provider returns a placeholder ("default"), query that specific
+		// provider's server for the real model name before registering the arm.
+		if armModel == "default" && localProviders[*providerName] {
+			if resolved := discoverActiveModel(*providerName, cfg, logger); resolved != "" {
+				logger.Debug("resolved placeholder model name", "from", armModel, "to", resolved)
+				armModel = resolved
+			}
+		}
+		armID = router.NewArmID(*providerName, armModel)
+		armProvider := limitedProvider(prov, *providerName, armModel, cfg)
+		arm := &router.Arm{
+			ID:        armID,
+			Provider:  armProvider,
+			ModelName: armModel,
+			IsLocal:   localProviders[*providerName],
+			Capabilities: provider.Capabilities{ToolUse: true},
+		}
+		arm.Pools = resolveRateLimitPools(armID, *providerName, armModel, cfg)
+		rtr.RegisterArm(arm)
+		rtr.ForceArm(armID)
+		if len(arm.Pools) > 0 {
+			logger.Debug("rate limit pools attached", "arm", armID, "pools", len(arm.Pools))
+		}
 	}
 
 	// Discover local models (ollama + llama.cpp) and register as additional arms
@@ -1037,6 +1066,22 @@ func buildPluginInfos(plugins []plugin.Plugin, enabledSet map[string]bool) []tui
 	return infos
 }
 
+// stubProvider is a no-op provider used when no real provider is configured.
+// It lets gnoma start in TUI mode so CLI agent arms (claude, gemini, etc.) can
+// still be used via the router. Stream returns a user-visible error.
+type stubProvider struct{ reason string }
+
+func newStubProvider(reason string) provider.Provider { return &stubProvider{reason: reason} }
+
+func (s *stubProvider) Name() string { return "none" }
+func (s *stubProvider) DefaultModel() string { return "none" }
+func (s *stubProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
+	return nil, fmt.Errorf("%s", s.reason)
+}
+func (s *stubProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
+	return nil, fmt.Errorf("%s", s.reason)
+}
+
 // runSLMCommand handles `gnoma slm <subcommand>`.
 // Returns an exit code.
 func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int {
@@ -1057,14 +1102,16 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 	switch args[0] {
 	case "setup":
 		if cfg.SLM.ModelURL == "" {
-			fmt.Fprintln(os.Stderr, "error: [slm] model_url must be set in config before running setup")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Add to ~/.config/gnoma/config.toml:")
-			fmt.Fprintln(os.Stderr, "  [slm]")
-			fmt.Fprintln(os.Stderr, `  model_url = "<url to a .llamafile>"`)
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Find llamafiles at: https://github.com/Mozilla-Ocho/llamafile/releases")
-			return 1
+			fmt.Printf("no model_url configured; writing default to %s\n", gnomacfg.GlobalConfigPath())
+			if err := gnomacfg.SetGlobalConfig("slm.model_url", slm.DefaultModelURL); err != nil {
+				fmt.Fprintf(os.Stderr, "error: could not write config: %v\n", err)
+				fmt.Fprintln(os.Stderr, "Set model_url manually:")
+				fmt.Fprintln(os.Stderr, "  [slm]")
+				fmt.Fprintf(os.Stderr, "  model_url = %q\n", slm.DefaultModelURL)
+				return 1
+			}
+			cfg.SLM.ModelURL = slm.DefaultModelURL
+			mgr = slm.New(slm.Config{DataDir: dataDir, ModelURL: cfg.SLM.ModelURL}, logger)
 		}
 		fmt.Printf("downloading %s\n", cfg.SLM.ModelURL)
 		var start = time.Now()

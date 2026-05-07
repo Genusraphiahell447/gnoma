@@ -9,8 +9,8 @@ import (
 
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
-	if cfg.Provider.Default != "mistral" {
-		t.Errorf("Provider.Default = %q, want mistral", cfg.Provider.Default)
+	if cfg.Provider.Default != "" {
+		t.Errorf("Provider.Default = %q, want empty (no default provider)", cfg.Provider.Default)
 	}
 	if cfg.Provider.MaxTokens != 8192 {
 		t.Errorf("Provider.MaxTokens = %d", cfg.Provider.MaxTokens)

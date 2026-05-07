@@ -66,6 +66,11 @@ func GlobalConfigDir() string {
 }
 
 func globalConfigPath() string {
+	return GlobalConfigPath()
+}
+
+// GlobalConfigPath returns the path to the global config file.
+func GlobalConfigPath() string {
 	return filepath.Join(GlobalConfigDir(), "config.toml")
 }
 

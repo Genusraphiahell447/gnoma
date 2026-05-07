@@ -5,7 +5,7 @@ import "time"
 func Defaults() Config {
 	return Config{
 		Provider: ProviderSection{
-			Default:   "mistral",
+			Default:   "",
 			Model:     "",
 			MaxTokens: 8192,
 			APIKeys:   make(map[string]string),

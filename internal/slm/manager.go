@@ -17,6 +17,11 @@ import (
 
 const pidFile = "llamafile.pid"
 
+// DefaultModelURL is the default llamafile to download when none is configured.
+// TinyLlama 1.1B Chat Q5_K_M (~690 MB) — small enough to download quickly,
+// sufficient for JSON classification tasks.
+const DefaultModelURL = "https://huggingface.co/mozilla-ai/TinyLlama-1.1B-Chat-v1.0-llamafile/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q5_K_M.llamafile"
+
 // DefaultDataDir returns the platform default SLM data directory.
 // Follows XDG Base Directory Specification: $XDG_DATA_HOME/gnoma/slm,
 // falling back to ~/.local/share/gnoma/slm.
