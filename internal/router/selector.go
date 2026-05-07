@@ -36,16 +36,43 @@ func (d RoutingDecision) Rollback() {
 	}
 }
 
-// selectBest picks the highest-scoring feasible arm, blending heuristic and
-// observed EMA quality when enough data is available.
+// armTier returns the routing tier for an arm.
+// Lower tier = higher preference: 0=CLI agent, 1=local model, 2=API provider.
+func armTier(arm *Arm) int {
+	if arm.IsCLIAgent {
+		return 0
+	}
+	if arm.IsLocal {
+		return 1
+	}
+	return 2
+}
+
+// selectBest picks the best arm, preferring lower-tier arms first.
+// Within a tier, the highest-scoring arm (by quality/cost) wins.
 func selectBest(qt *QualityTracker, arms []*Arm, task Task) *Arm {
 	if len(arms) == 0 {
 		return nil
 	}
 
+	for tier := 0; tier <= 2; tier++ {
+		var inTier []*Arm
+		for _, arm := range arms {
+			if armTier(arm) == tier {
+				inTier = append(inTier, arm)
+			}
+		}
+		if len(inTier) > 0 {
+			return bestScored(qt, inTier, task)
+		}
+	}
+	return nil
+}
+
+// bestScored returns the highest-scoring arm within a set.
+func bestScored(qt *QualityTracker, arms []*Arm, task Task) *Arm {
 	var best *Arm
 	bestScore := math.Inf(-1)
-
 	for _, arm := range arms {
 		score := scoreArm(qt, arm, task)
 		if score > bestScore {
@@ -53,7 +80,6 @@ func selectBest(qt *QualityTracker, arms []*Arm, task Task) *Arm {
 			best = arm
 		}
 	}
-
 	return best
 }
 

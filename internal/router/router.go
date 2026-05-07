@@ -47,7 +47,7 @@ func (r *Router) RegisterArm(arm *Arm) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.arms[arm.ID] = arm
-	r.logger.Debug("arm registered", "id", arm.ID, "local", arm.IsLocal, "tools", arm.SupportsTools())
+	r.logger.Debug("arm registered", "id", arm.ID, "local", arm.IsLocal, "cli", arm.IsCLIAgent, "tools", arm.SupportsTools(), "disabled", arm.Disabled)
 }
 
 // ForceArm overrides routing to always select a specific arm.
@@ -72,9 +72,12 @@ func (r *Router) Select(task Task) RoutingDecision {
 		return RoutingDecision{Strategy: StrategySingleArm, Arm: arm}
 	}
 
-	// Collect all arms (filtered to local-only if incognito)
+	// Collect all arms (excluding disabled; filtered to local-only if incognito)
 	allArms := make([]*Arm, 0, len(r.arms))
 	for _, arm := range r.arms {
+		if arm.Disabled {
+			continue
+		}
 		if r.localOnly && !arm.IsLocal {
 			continue
 		}

@@ -301,7 +301,7 @@ func main() {
 				ID:           cliArmID,
 				Provider:     subprocprov.New(agent),
 				ModelName:    agent.Name,
-				IsLocal:      false,
+				IsCLIAgent:   true,
 				Capabilities: agent.Capabilities,
 			})
 			logger.Debug("registered CLI agent", "name", agent.Name, "version", agent.Version)

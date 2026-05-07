@@ -540,3 +540,120 @@ func TestFilterFeasible_FallsBackWhenAllBelowQuality(t *testing.T) {
 	}
 }
 
+// --- Tier-based routing (P0c) ---
+
+func TestArmTier(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  *Arm
+		want int
+	}{
+		{"CLI agent", &Arm{IsCLIAgent: true}, 0},
+		{"local model", &Arm{IsLocal: true}, 1},
+		{"API model", &Arm{}, 2},
+		{"IsCLIAgent overrides IsLocal", &Arm{IsCLIAgent: true, IsLocal: true}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := armTier(tt.arm); got != tt.want {
+				t.Errorf("armTier = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectBest_TierPreference(t *testing.T) {
+	cliArm := &Arm{
+		ID:           "subprocess/claude",
+		IsCLIAgent:   true,
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 200000},
+	}
+	localArm := &Arm{
+		ID:           "ollama/llama3",
+		IsLocal:      true,
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 32000},
+	}
+	apiArm := &Arm{
+		ID:             "mistral/mistral-large",
+		Capabilities:   provider.Capabilities{ToolUse: true, ContextWindow: 128000},
+		CostPer1kInput: 0.002, CostPer1kOutput: 0.006,
+	}
+	task := Task{Type: TaskGeneration, Priority: PriorityNormal, EstimatedTokens: 1000}
+
+	t.Run("CLI beats local and API", func(t *testing.T) {
+		best := selectBest(nil, []*Arm{apiArm, localArm, cliArm}, task)
+		if best.ID != "subprocess/claude" {
+			t.Errorf("want subprocess/claude (tier 0), got %s", best.ID)
+		}
+	})
+
+	t.Run("local beats API when no CLI", func(t *testing.T) {
+		best := selectBest(nil, []*Arm{apiArm, localArm}, task)
+		if best.ID != "ollama/llama3" {
+			t.Errorf("want ollama/llama3 (tier 1), got %s", best.ID)
+		}
+	})
+
+	t.Run("API selected when only option", func(t *testing.T) {
+		best := selectBest(nil, []*Arm{apiArm}, task)
+		if best == nil || best.ID != "mistral/mistral-large" {
+			t.Errorf("want mistral/mistral-large (tier 2), got %v", best)
+		}
+	})
+}
+
+// --- Disabled arms ---
+
+func TestRouter_DisabledArm_ExcludedFromRouting(t *testing.T) {
+	r := New(Config{})
+	r.RegisterArm(&Arm{
+		ID:           "a/enabled",
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+	r.RegisterArm(&Arm{
+		ID:           "b/disabled",
+		Disabled:     true,
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+
+	decision := r.Select(Task{Type: TaskGeneration, RequiresTools: true})
+	if decision.Error != nil {
+		t.Fatalf("Select: %v", decision.Error)
+	}
+	if decision.Arm.ID != "a/enabled" {
+		t.Errorf("disabled arm should not be selected, got %s", decision.Arm.ID)
+	}
+}
+
+func TestRouter_DisabledArm_ForcedBypasses(t *testing.T) {
+	r := New(Config{})
+	r.RegisterArm(&Arm{
+		ID:           "a/disabled",
+		Disabled:     true,
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+	r.ForceArm("a/disabled")
+
+	decision := r.Select(Task{Type: TaskGeneration})
+	if decision.Error != nil {
+		t.Fatalf("forced disabled arm should be selectable, got error: %v", decision.Error)
+	}
+	if decision.Arm.ID != "a/disabled" {
+		t.Errorf("want a/disabled, got %s", decision.Arm.ID)
+	}
+}
+
+func TestRouter_AllDisabled_ReturnsError(t *testing.T) {
+	r := New(Config{})
+	r.RegisterArm(&Arm{
+		ID:       "a/disabled",
+		Disabled: true,
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+
+	decision := r.Select(Task{Type: TaskGeneration})
+	if decision.Error == nil {
+		t.Error("should error when all arms disabled")
+	}
+}
+

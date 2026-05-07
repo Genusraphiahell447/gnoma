@@ -17,6 +17,8 @@ type Arm struct {
 	Provider     provider.Provider
 	ModelName    string
 	IsLocal      bool
+	IsCLIAgent   bool // subprocess-based CLI agent (claude, gemini, vibe); tier 0 in routing
+	Disabled     bool // excluded from auto-routing; still reachable via ForceArm
 	Capabilities provider.Capabilities
 	Pools        []*LimitPool
 
