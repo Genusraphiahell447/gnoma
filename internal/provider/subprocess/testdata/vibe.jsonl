@@ -1,0 +1,3 @@
+{"role": "system", "content": "You are Mistral Vibe, a CLI coding agent built by Mistral AI.", "injected": false, "reasoning_content": null, "reasoning_state": null, "tool_calls": null, "name": null, "tool_call_id": null, "message_id": null}
+{"role": "user", "content": "say the word hi and nothing else", "injected": false, "reasoning_content": null, "tool_calls": null, "name": null, "tool_call_id": null, "message_id": "a358a1ec"}
+{"role": "assistant", "content": "hi", "injected": false, "reasoning_content": "The user wants me to say the word \"hi\" and nothing else.", "reasoning_state": null, "tool_calls": null, "name": null, "tool_call_id": null, "message_id": "c8ecdd49"}

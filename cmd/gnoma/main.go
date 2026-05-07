@@ -32,6 +32,7 @@ import (
 	googleprov "somegit.dev/Owlibou/gnoma/internal/provider/google"
 	oaiprov "somegit.dev/Owlibou/gnoma/internal/provider/openai"
 	"somegit.dev/Owlibou/gnoma/internal/provider/openaicompat"
+	subprocprov "somegit.dev/Owlibou/gnoma/internal/provider/subprocess"
 	"somegit.dev/Owlibou/gnoma/internal/session"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
@@ -286,6 +287,28 @@ func main() {
 	})
 	if len(localModels) > 0 {
 		logger.Debug("local models discovered", "count", len(localModels))
+	}
+
+	// Discover CLI agents (claude, gemini, vibe) and register as arms.
+	// TODO(P0c): CLI arms have cost=0 and ToolUse=true, so the router currently
+	// always prefers them over API arms. Tier-based routing (subprocess > local > API)
+	// needs to be explicit in the selector, not implicit through cost.
+	cliAgents := subprocprov.DiscoverCLIAgents(context.Background())
+	for _, agent := range cliAgents {
+		cliArmID := router.NewArmID("subprocess", agent.Name)
+		if _, exists := rtr.LookupArm(cliArmID); !exists {
+			rtr.RegisterArm(&router.Arm{
+				ID:           cliArmID,
+				Provider:     subprocprov.New(agent),
+				ModelName:    agent.Name,
+				IsLocal:      false,
+				Capabilities: agent.Capabilities,
+			})
+			logger.Debug("registered CLI agent", "name", agent.Name, "version", agent.Version)
+		}
+	}
+	if len(cliAgents) > 0 {
+		logger.Debug("CLI agents discovered", "count", len(cliAgents))
 	}
 
 	// Start background discovery polling (30s interval).

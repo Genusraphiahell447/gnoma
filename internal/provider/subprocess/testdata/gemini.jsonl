@@ -1,0 +1,4 @@
+{"type":"init","timestamp":"2026-05-07T12:18:49.605Z","session_id":"c2d08136","model":"auto-gemini-3"}
+{"type":"message","timestamp":"2026-05-07T12:18:49.606Z","role":"user","content":"say the word hi and nothing else"}
+{"type":"message","timestamp":"2026-05-07T12:18:52.063Z","role":"assistant","content":"hi","delta":true}
+{"type":"result","timestamp":"2026-05-07T12:18:52.111Z","status":"success","stats":{"total_tokens":10843,"input_tokens":10747,"output_tokens":1,"cached":7862,"input":2885,"duration_ms":2506,"tool_calls":0,"models":{"gemini-3-flash-preview":{"total_tokens":10843,"input_tokens":10747,"output_tokens":1,"cached":7862,"input":2885}}}}
