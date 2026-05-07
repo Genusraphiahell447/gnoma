@@ -167,6 +167,51 @@ func TestWriteTool_OverwriteExisting(t *testing.T) {
 	}
 }
 
+func TestWriteTool_MaxFileSize_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	w := NewWriteTool(WithMaxFileSize(5))
+
+	result, err := w.Execute(context.Background(), mustJSON(t, writeArgs{Path: path, Content: "hello world"}))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result.Output, "too large") {
+		t.Errorf("Output = %q, want rejection message containing 'too large'", result.Output)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Error("file should not be created when content exceeds max size")
+	}
+}
+
+func TestWriteTool_MaxFileSize_Accepted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	w := NewWriteTool(WithMaxFileSize(100))
+
+	_, err := w.Execute(context.Background(), mustJSON(t, writeArgs{Path: path, Content: "hello"}))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		t.Error("file should be created when content is within limit")
+	}
+}
+
+func TestWriteTool_MaxFileSize_ZeroMeansNoLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	w := NewWriteTool(WithMaxFileSize(0))
+
+	_, err := w.Execute(context.Background(), mustJSON(t, writeArgs{Path: path, Content: "hello world"}))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		t.Error("file should be created when max size is 0 (no limit)")
+	}
+}
+
 // --- Edit ---
 
 func TestEditTool_Interface(t *testing.T) {

@@ -155,6 +155,41 @@ func TestBuildRequest_AllowedToolsFilter(t *testing.T) {
 	}
 }
 
+func TestBuildRequest_Temperature(t *testing.T) {
+	temp := 0.7
+	e, err := New(Config{
+		Provider:    &mockProvider{name: "test"},
+		Tools:       tool.NewRegistry(),
+		Temperature: &temp,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req := e.buildRequest(context.Background())
+	if req.Temperature == nil {
+		t.Fatal("expected Temperature in request, got nil")
+	}
+	if *req.Temperature != temp {
+		t.Errorf("Temperature = %v, want %v", *req.Temperature, temp)
+	}
+}
+
+func TestBuildRequest_TemperatureNilWhenNotSet(t *testing.T) {
+	e, err := New(Config{
+		Provider: &mockProvider{name: "test"},
+		Tools:    tool.NewRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req := e.buildRequest(context.Background())
+	if req.Temperature != nil {
+		t.Errorf("expected nil Temperature, got %v", *req.Temperature)
+	}
+}
+
 func TestBuildRequest_MultiArmRouting_IncludesTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{

@@ -10,6 +10,7 @@ import (
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
@@ -575,5 +576,53 @@ func TestSubmit_CumulativeUsage(t *testing.T) {
 	}
 	if e.Usage().OutputTokens != 130 {
 		t.Errorf("cumulative OutputTokens = %d, want 130", e.Usage().OutputTokens)
+	}
+}
+
+func TestSubmit_ReportsOutcomeToRouter(t *testing.T) {
+	rtr := router.New(router.Config{})
+	armID := router.NewArmID("test", "mock-model")
+
+	makeStream := func() stream.Stream {
+		return newEventStream(message.StopEndTurn, "mock-model",
+			stream.Event{Type: stream.EventTextDelta, Text: "hi"},
+			stream.Event{Type: stream.EventUsage, Usage: &message.Usage{InputTokens: 10, OutputTokens: 5}},
+		)
+	}
+	mp := &mockProvider{
+		name:    "test",
+		streams: []stream.Stream{makeStream(), makeStream(), makeStream()},
+	}
+	rtr.RegisterArm(&router.Arm{
+		ID:           armID,
+		Provider:     mp,
+		ModelName:    "mock-model",
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+	rtr.ForceArm(armID)
+
+	e, err := New(Config{
+		Provider: mp,
+		Router:   rtr,
+		Tools:    tool.NewRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, err := e.Submit(ctx, "hello", nil); err != nil {
+			t.Fatalf("Submit %d: %v", i, err)
+		}
+	}
+
+	taskType := router.ClassifyTask("hello").Type
+	score, hasData := rtr.QualityTracker().Quality(armID, taskType)
+	if !hasData {
+		t.Fatal("expected quality data after 3 successful turns — ReportOutcome may not be wired")
+	}
+	if score < 0.9 {
+		t.Errorf("quality score = %f, want ≥0.9 for all successful turns", score)
 	}
 }

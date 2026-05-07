@@ -27,9 +27,24 @@ var writeParams = json.RawMessage(`{
 	"required": ["path", "content"]
 }`)
 
-type WriteTool struct{}
+type WriteOption func(*WriteTool)
 
-func NewWriteTool() *WriteTool { return &WriteTool{} }
+// WithMaxFileSize rejects writes where the content exceeds n bytes. 0 means no limit.
+func WithMaxFileSize(n int64) WriteOption {
+	return func(t *WriteTool) { t.maxFileSize = n }
+}
+
+type WriteTool struct {
+	maxFileSize int64
+}
+
+func NewWriteTool(opts ...WriteOption) *WriteTool {
+	t := &WriteTool{}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
+}
 
 func (t *WriteTool) Name() string               { return writeToolName }
 func (t *WriteTool) Description() string         { return "Write content to a file, creating parent directories as needed" }
@@ -49,6 +64,10 @@ func (t *WriteTool) Execute(_ context.Context, args json.RawMessage) (tool.Resul
 	}
 	if a.Path == "" {
 		return tool.Result{}, fmt.Errorf("fs.write: path required")
+	}
+
+	if t.maxFileSize > 0 && int64(len(a.Content)) > t.maxFileSize {
+		return tool.Result{Output: fmt.Sprintf("Error: content too large (%d bytes, limit %d bytes)", len(a.Content), t.maxFileSize)}, nil
 	}
 
 	// Create parent directories

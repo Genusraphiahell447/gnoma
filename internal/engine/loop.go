@@ -54,12 +54,30 @@ func (e *Engine) SubmitMessages(ctx context.Context, msgs []message.Message, cb 
 
 func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 	turn := &Turn{}
+	loopStart := time.Now()
+	var lastArmID router.ArmID
+	var lastTaskType router.TaskType
+
+	reportOutcome := func(err error) {
+		if e.cfg.Router == nil || lastArmID == "" {
+			return
+		}
+		e.cfg.Router.ReportOutcome(router.Outcome{
+			ArmID:    lastArmID,
+			TaskType: lastTaskType,
+			Success:  err == nil,
+			Tokens:   int(turn.Usage.InputTokens + turn.Usage.OutputTokens),
+			Duration: time.Since(loopStart),
+		})
+	}
 
 	for {
 		turn.Rounds++
 		if e.cfg.MaxTurns > 0 && turn.Rounds > e.cfg.MaxTurns {
 			e.cfg.Hooks.Fire(hook.Stop, hook.MarshalStopPayload("max_turns")) //nolint:errcheck
-			return turn, fmt.Errorf("safety limit: %d rounds exceeded", e.cfg.MaxTurns)
+			err := fmt.Errorf("safety limit: %d rounds exceeded", e.cfg.MaxTurns)
+			reportOutcome(err)
+			return turn, err
 		}
 
 		// Build provider request (gates tools on model capabilities)
@@ -94,6 +112,8 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 			s, decision, err = e.cfg.Router.Stream(ctx, task, req)
 			if decision.Arm != nil {
+				lastArmID = decision.Arm.ID
+				lastTaskType = task.Type
 				e.logger.Debug("streaming request",
 					"provider", decision.Arm.Provider.Name(),
 					"model", decision.Arm.ModelName,
@@ -102,7 +122,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 					"tools", len(req.Tools),
 					"round", turn.Rounds,
 				)
-				if turn.Rounds == 1 {
+				if turn.Rounds == 1 && cb != nil {
 					cb(stream.Event{
 						Type:         stream.EventRouting,
 						RoutingModel: string(decision.Arm.ID),
@@ -149,7 +169,9 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				s, err = e.handleRequestTooLarge(ctx, err, req)
 				if err != nil {
 					decision.Rollback()
-					return nil, fmt.Errorf("provider stream: %w", err)
+					streamErr := fmt.Errorf("provider stream: %w", err)
+					reportOutcome(streamErr)
+					return nil, streamErr
 				}
 			}
 		}
@@ -192,7 +214,9 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			)
 			s.Close()
 			decision.Rollback()
-			return nil, e.annotateStreamError(err, len(req.Tools))
+			streamErr := e.annotateStreamError(err, len(req.Tools))
+			reportOutcome(streamErr)
+			return nil, streamErr
 		}
 		s.Close()
 
@@ -243,6 +267,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		switch resp.StopReason {
 		case message.StopEndTurn, message.StopSequence:
 			e.cfg.Hooks.Fire(hook.Stop, hook.MarshalStopPayload("end_turn")) //nolint:errcheck
+			reportOutcome(nil)
 			return turn, nil
 
 		case message.StopMaxTokens:
@@ -258,7 +283,9 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		case message.StopToolUse:
 			results, err := e.executeTools(ctx, resp.Message.ToolCalls(), cb)
 			if err != nil {
-				return nil, fmt.Errorf("tool execution: %w", err)
+				toolErr := fmt.Errorf("tool execution: %w", err)
+				reportOutcome(toolErr)
+				return nil, toolErr
 			}
 			toolMsg := message.NewToolResults(results...)
 			turn.Messages = append(turn.Messages, toolMsg)
@@ -271,6 +298,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		default:
 			// Unknown stop reason or empty — treat as end of turn
 			e.cfg.Hooks.Fire(hook.Stop, hook.MarshalStopPayload("unknown")) //nolint:errcheck
+			reportOutcome(nil)
 			return turn, nil
 		}
 	}
@@ -298,6 +326,7 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 		SystemPrompt: systemPrompt,
 		Messages:     messages,
 		ToolChoice:   e.turnOpts.ToolChoice,
+		Temperature:  e.cfg.Temperature,
 	}
 
 	// Only include tools if the model supports them.
