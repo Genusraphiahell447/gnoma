@@ -16,6 +16,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/glamour/v2"
 	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/skill"
@@ -99,6 +100,7 @@ type Model struct {
 	completionSrc  []cmdEntry  // sorted slash commands for completion
 	suggestions    []cmdEntry  // live dropdown matches for current input
 	suggIdx        int         // selected index in dropdown
+	inputMode      string      // "", "command" (/), "execute" (!)
 	mdRenderer     *glamour.TermRenderer
 	mdRendererWidth int // cached width to avoid recreating on same-width resizes
 	expandOutput   bool   // ctrl+o toggles expanded tool output
@@ -159,6 +161,11 @@ func New(sess session.Session, cfg Config) Model {
 	km := ti.KeyMap
 	km.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"))
 	ti.KeyMap = km
+
+	// Remove the highlighted cursor-line background so the input blends with the UI.
+	tiStyles := ti.Styles()
+	tiStyles.Focused.CursorLine = lipgloss.NewStyle()
+	ti.SetStyles(tiStyles)
 
 	ti.Focus()
 
@@ -238,6 +245,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Escape = global stop, never quits
 		if msg.String() == "escape" {
+			if m.inputMode != "" {
+				m.inputMode = ""
+				m.suggestions = nil
+				m.suggestion = ""
+				m.suggIdx = 0
+				m.input.SetValue("")
+				m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+					if info.LineNumber == 0 {
+						return "❯ "
+					}
+					return "  "
+				})
+				return m, nil
+			}
 			if m.resumePending {
 				m.resumePending = false
 				m.resumeSessions = nil
@@ -280,8 +301,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Quit
 			}
-			// First press → clear input, show hint, start expiry timer
+			// First press → clear input, reset mode, show hint, start expiry timer
 			m.input.SetValue("")
+			if m.inputMode != "" {
+				m.inputMode = ""
+				m.suggestions = nil
+				m.suggestion = ""
+				m.suggIdx = 0
+				m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+					if info.LineNumber == 0 {
+						return "❯ "
+					}
+					return "  "
+				})
+			}
 			m.lastCtrlC = now
 			m.quitHint = true
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
@@ -362,6 +395,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // swallow all other keys
 		}
 
+		// Input mode switching: "/" activates command mode, "!" activates execute mode.
+		// Only triggers when input is empty and no mode is active.
+		switch msg.String() {
+		case "/":
+			if m.input.Value() == "" && m.inputMode == "" {
+				m.inputMode = "command"
+				m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+					if info.LineNumber == 0 {
+						return "/ "
+					}
+					return "  "
+				})
+				m.suggestions = m.completionSrc
+				m.suggIdx = 0
+				return m, nil
+			}
+		case "!":
+			if m.input.Value() == "" && m.inputMode == "" {
+				m.inputMode = "execute"
+				m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+					if info.LineNumber == 0 {
+						return "! "
+					}
+					return "  "
+				})
+				m.suggestions = nil
+				m.suggIdx = 0
+				return m, nil
+			}
+		case "backspace":
+			if m.input.Value() == "" && m.inputMode != "" {
+				m.inputMode = ""
+				m.suggestions = nil
+				m.suggestion = ""
+				m.suggIdx = 0
+				m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+					if info.LineNumber == 0 {
+						return "❯ "
+					}
+					return "  "
+				})
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "ctrl+x":
 			// Toggle incognito
@@ -429,8 +507,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "tab":
 			if len(m.suggestions) > 0 {
-				// Accept highlighted suggestion and add trailing space for args
-				m.input.SetValue(m.suggestions[m.suggIdx].name + " ")
+				name := m.suggestions[m.suggIdx].name
+				if m.inputMode == "command" && strings.HasPrefix(name, "/") {
+					// In command mode the prompt shows "/"; strip it from the value
+					name = name[1:]
+				}
+				m.input.SetValue(name + " ")
 				m.input.CursorEnd()
 				m.suggestions = nil
 				m.suggestion = ""
@@ -466,8 +548,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.streaming {
 				return m, nil
 			}
+			// Command mode + open dropdown: Enter selects the highlighted suggestion
+			if m.inputMode == "command" && len(m.suggestions) > 0 {
+				selected := m.suggestions[m.suggIdx].name // e.g., "/help"
+				m.input.SetValue("")
+				m.suggestions = nil
+				return m.submitInput(selected[1:]) // strip "/" — submitInput will re-add it
+			}
 			input := strings.TrimSpace(m.input.Value())
 			if input == "" {
+				// Empty Enter in any mode resets the mode
+				if m.inputMode != "" {
+					m.inputMode = ""
+					m.suggestions = nil
+					m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+						if info.LineNumber == 0 {
+							return "❯ "
+						}
+						return "  "
+					})
+				}
 				return m, nil
 			}
 			m.input.SetValue("")
@@ -579,7 +679,7 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 			// Send with empty AllowedTools to suppress all tool schemas.
 			opts := engine.TurnOptions{AllowedTools: []string{}}
 			if err := m.session.SendWithOptions(textPrompt, opts); err != nil {
-				m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+				m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 				m.streaming = false
 				m.initPending = false
 			}
@@ -614,7 +714,7 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 				nudge = "Call fs_ls on the project root now. Then fs_read go.mod and Makefile. Then fs_glob **/*.go to find source files. Finally fs_write AGENTS.md. Do not explain — call the tools."
 			}
 			if err := m.session.Send(nudge); err != nil {
-				m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+				m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 				m.streaming = false
 				m.initPending = false
 			}
@@ -642,7 +742,7 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 				// below will write whatever the model outputs to disk.
 				writeNudge := "Output the complete AGENTS.md document now as markdown text. Include: project overview, module path, build commands (make build/test/lint/cover), all dependencies, and coding conventions from the elf research. Do not call any tools — output the markdown document directly, starting with a # heading."
 				if err := m.session.Send(writeNudge); err != nil {
-					m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+					m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 					m.streaming = false
 					m.initPending = false
 				}
@@ -699,7 +799,7 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 			})
 		}
 		if msg.err != nil {
-			m.messages = append(m.messages, chatMessage{role: "error", content: msg.err.Error()})
+			m.messages = append(m.messages, chatMessage{role: "error", content: formatError(msg.err)})
 		}
 		if m.initPending {
 			m.initPending = false
@@ -721,11 +821,22 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
 
-	// Update slash-command ghost completion and dropdown suggestions.
+	// Update completions based on input mode.
 	val := m.input.Value()
-	m.suggestion = matchCompletion(val, m.completionSrc)
-	m.suggestions = matchSuggestions(val, m.completionSrc)
-	if len(m.suggestions) == 0 || !strings.HasPrefix(val, "/") {
+	switch m.inputMode {
+	case "command":
+		// Fuzzy-filter commands by the raw query (no "/" prefix in val)
+		m.suggestions = fuzzyMatchCommands(val, m.completionSrc)
+		m.suggestion = ""
+	case "execute":
+		m.suggestions = nil
+		m.suggestion = ""
+	default:
+		// Normal mode: prefix-based ghost text and dropdown
+		m.suggestion = matchCompletion(val, m.completionSrc)
+		m.suggestions = matchSuggestions(val, m.completionSrc)
+	}
+	if len(m.suggestions) == 0 {
 		m.suggIdx = 0
 	} else if m.suggIdx >= len(m.suggestions) {
 		m.suggIdx = len(m.suggestions) - 1
@@ -735,6 +846,44 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 }
 
 func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
+	// Prepend mode prefix and reset mode before dispatching.
+	if m.inputMode == "command" {
+		if strings.TrimSpace(input) == "" {
+			m.inputMode = ""
+			m.suggestions = nil
+			m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+				if info.LineNumber == 0 {
+					return "❯ "
+				}
+				return "  "
+			})
+			return m, nil
+		}
+		input = "/" + strings.TrimSpace(input)
+	} else if m.inputMode == "execute" {
+		if strings.TrimSpace(input) == "" {
+			m.inputMode = ""
+			m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+				if info.LineNumber == 0 {
+					return "❯ "
+				}
+				return "  "
+			})
+			return m, nil
+		}
+		input = "!" + strings.TrimSpace(input)
+	}
+	m.inputMode = ""
+	m.suggestions = nil
+	m.suggestion = ""
+	m.suggIdx = 0
+	m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
+			return "❯ "
+		}
+		return "  "
+	})
+
 	if strings.HasPrefix(input, "/") {
 		return m.handleCommand(input)
 	}
@@ -750,7 +899,7 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 	m.streamFilterClose = ""
 
 	if err := m.session.Send(input); err != nil {
-		m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+		m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 		m.streaming = false
 		return m, nil
 	}
@@ -842,7 +991,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 				before := w.Tracker().Used()
 				compacted, err := w.ForceCompact()
 				if err != nil {
-					m.messages = append(m.messages, chatMessage{role: "error", content: "compaction failed: " + err.Error()})
+					m.messages = append(m.messages, chatMessage{role: "error", content: "compaction failed: " + formatError(err)})
 				} else if compacted {
 					after := w.Tracker().Used()
 					msg := fmt.Sprintf("context compacted — %dk → %dk tokens (saved %dk)",
@@ -955,7 +1104,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if err := gnomacfg.SetProjectConfig(parts[0], parts[1]); err != nil {
-				m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+				m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 			} else {
 				m.messages = append(m.messages, chatMessage{role: "system",
 					content: fmt.Sprintf("config set: %s = %s (saved to .gnoma/config.toml)", parts[0], parts[1])})
@@ -1096,7 +1245,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 		opts := engine.TurnOptions{}
 		if err := m.session.SendWithOptions(prompt, opts); err != nil {
-			m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+			m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 			m.streaming = false
 			m.initPending = false
 			return m, nil
@@ -1261,7 +1410,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 					AllowedPaths: sk.Frontmatter.Paths,
 				}
 				if err := m.session.SendWithOptions(rendered, skillOpts); err != nil {
-					m.messages = append(m.messages, chatMessage{role: "error", content: err.Error()})
+					m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 					m.streaming = false
 					return m, nil
 				}
@@ -1665,4 +1814,16 @@ func detectGitBranch() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// formatError truncates excessively long error messages to prevent breaking the TUI rendering.
+func formatError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if len(msg) > 1000 {
+		return msg[:1000] + "\n... [error truncated due to size]"
+	}
+	return msg
 }

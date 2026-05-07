@@ -141,8 +141,25 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			s, err = e.cfg.Provider.Stream(ctx, req)
 		}
 		if err != nil {
+			var failedArms []router.ArmID
+			if e.cfg.Router != nil && decision.Arm != nil {
+				failedArms = append(failedArms, decision.Arm.ID)
+			}
+
+			// If we have a router and no forced arm, we fall back to other models immediately.
+			skipDelay := e.cfg.Router != nil && e.cfg.Router.ForcedArm() == ""
+
+			// Apply temporary backoff to the failing arm if it was a 429
+			if e.cfg.Router != nil && decision.Arm != nil {
+				var provErr *provider.ProviderError
+				if errors.As(err, &provErr) && (provErr.StatusCode == 429 || provErr.StatusCode == 529) {
+					e.logger.Info("applying backoff to exhausted model", "arm", decision.Arm.ID)
+					e.cfg.Router.Backoff(decision.Arm.ID, 5*time.Minute)
+				}
+			}
+
 			// Retry on transient errors (429, 5xx) with exponential backoff
-			s, err = e.retryOnTransient(ctx, err, func() (stream.Stream, error) {
+			s, err = e.retryOnTransient(ctx, err, skipDelay, func() (stream.Stream, error) {
 				if e.cfg.Router != nil {
 					prompt := ""
 					for i := len(e.history) - 1; i >= 0; i-- {
@@ -157,9 +174,22 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 					} else {
 						task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
 					}
+					
+					task.ExcludedArms = failedArms
 					var retryDecision router.RoutingDecision
 					s, retryDecision, err = e.cfg.Router.Stream(ctx, task, req)
-					decision = retryDecision // adopt new reservation on retry
+					if err == nil {
+						decision = retryDecision // adopt new reservation on retry
+					} else if retryDecision.Arm != nil {
+						failedArms = append(failedArms, retryDecision.Arm.ID)
+
+						// Also apply backoff to arms that fail during the fallback retry loop
+						var provErr *provider.ProviderError
+						if errors.As(err, &provErr) && (provErr.StatusCode == 429 || provErr.StatusCode == 529) {
+							e.logger.Info("applying backoff to exhausted model (during fallback)", "arm", retryDecision.Arm.ID)
+							e.cfg.Router.Backoff(retryDecision.Arm.ID, 5*time.Minute)
+						}
+					}
 					return s, err
 				}
 				return e.cfg.Provider.Stream(ctx, req)
@@ -610,7 +640,7 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 
 // retryOnTransient retries the stream call on 429/5xx with exponential backoff.
 // Returns the original error if not retryable or all retries exhausted.
-func (e *Engine) retryOnTransient(ctx context.Context, firstErr error, fn func() (stream.Stream, error)) (stream.Stream, error) {
+func (e *Engine) retryOnTransient(ctx context.Context, firstErr error, skipDelay bool, fn func() (stream.Stream, error)) (stream.Stream, error) {
 	var provErr *provider.ProviderError
 	if !errors.As(firstErr, &provErr) || !provErr.Retryable {
 		e.logger.Debug("error not retryable",
@@ -634,16 +664,27 @@ func (e *Engine) retryOnTransient(ctx context.Context, firstErr error, fn func()
 	}
 
 	for attempt := range maxRetries {
+		delay := delays[attempt]
+		if skipDelay {
+			delay = 0
+		}
+
 		e.logger.Debug("retrying after transient error",
 			"attempt", attempt+1,
-			"delay", delays[attempt],
+			"delay", delay,
 			"status", provErr.StatusCode,
 		)
 
-		select {
-		case <-time.After(delays[attempt]):
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		if delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		} else {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 		}
 
 		s, err := fn()

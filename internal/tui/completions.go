@@ -94,6 +94,37 @@ func matchCompletion(input string, commands []cmdEntry) string {
 	return ""
 }
 
+// fuzzyMatch returns true if every rune in pattern appears in text in order.
+func fuzzyMatch(pattern, text string) bool {
+	text = strings.ToLower(text)
+	pattern = strings.ToLower(pattern)
+	pi := 0
+	for _, ch := range text {
+		if pi < len(pattern) && rune(pattern[pi]) == ch {
+			pi++
+		}
+	}
+	return pi == len(pattern)
+}
+
+// fuzzyMatchCommands filters commands whose name (without leading "/") fuzzy-matches query.
+func fuzzyMatchCommands(query string, commands []cmdEntry) []cmdEntry {
+	if query == "" {
+		return commands
+	}
+	var matches []cmdEntry
+	for _, c := range commands {
+		name := c.name
+		if strings.HasPrefix(name, "/") {
+			name = name[1:]
+		}
+		if fuzzyMatch(query, name) {
+			matches = append(matches, c)
+		}
+	}
+	return matches
+}
+
 // matchArgCompletion handles second-level completion for commands with args.
 func matchArgCompletion(input string) string {
 	parts := strings.SplitN(input, " ", 2)

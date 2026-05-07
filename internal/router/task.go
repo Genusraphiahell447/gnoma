@@ -68,6 +68,7 @@ type Task struct {
 	RequiresTools   bool
 	ComplexityScore float64             // 0-1
 	RequiredEffort  provider.EffortLevel // EffortAuto = no constraint on thinking
+	ExcludedArms    []ArmID             // Arms to avoid (e.g. due to recent 429 errors)
 }
 
 // ValueScore computes a routing value based on priority and type.

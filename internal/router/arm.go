@@ -22,6 +22,10 @@ type Arm struct {
 	Capabilities provider.Capabilities
 	Pools        []*LimitPool
 
+	// BackoffUntil is the time until which this arm is temporarily disabled (e.g. 429).
+	BackoffUntil time.Time
+	mu           sync.RWMutex
+
 	// MaxComplexity is a hard ceiling on task complexity this arm will accept.
 	// Zero means no ceiling (default for all existing arms).
 	MaxComplexity float64
@@ -102,4 +106,18 @@ func (p *ArmPerf) Update(ttft time.Duration, outputTokens int, streamDuration ti
 		p.ToksPerSec = perfAlpha*tps + (1-perfAlpha)*p.ToksPerSec
 	}
 	p.Samples++
+}
+
+// SetBackoff sets a temporary disablement until the given time.
+func (a *Arm) SetBackoff(until time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.BackoffUntil = until
+}
+
+// InBackoff returns true if the arm is currently in a backoff period.
+func (a *Arm) InBackoff() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return !a.BackoffUntil.IsZero() && time.Now().Before(a.BackoffUntil)
 }

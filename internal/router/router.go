@@ -72,15 +72,27 @@ func (r *Router) Select(task Task) RoutingDecision {
 		return RoutingDecision{Strategy: StrategySingleArm, Arm: arm}
 	}
 
-	// Collect all arms (excluding disabled; filtered to local-only if incognito)
+	// Collect all arms (excluding disabled, excluded, in-backoff, and local-only mismatches)
 	allArms := make([]*Arm, 0, len(r.arms))
 	for _, arm := range r.arms {
-		if arm.Disabled {
+		if arm.Disabled || arm.InBackoff() {
 			continue
 		}
 		if r.localOnly && !arm.IsLocal {
 			continue
 		}
+		
+		isExcluded := false
+		for _, ex := range task.ExcludedArms {
+			if arm.ID == ex {
+				isExcluded = true
+				break
+			}
+		}
+		if isExcluded {
+			continue
+		}
+
 		allArms = append(allArms, arm)
 	}
 
@@ -266,4 +278,14 @@ func (r *Router) Stream(ctx context.Context, task Task, req provider.Request) (s
 		return nil, decision, err
 	}
 	return s, decision, nil
+}
+
+// Backoff temporarily disables an arm (e.g. after a 429 error).
+func (r *Router) Backoff(id ArmID, duration time.Duration) {
+	r.mu.RLock()
+	arm, ok := r.arms[id]
+	r.mu.RUnlock()
+	if ok {
+		arm.SetBackoff(time.Now().Add(duration))
+	}
 }

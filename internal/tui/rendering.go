@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -506,32 +505,7 @@ func (m Model) renderSeparators() (string, string) {
 		labelStyle.Render(label) +
 		lineStyle.Render(strings.Repeat("─", rightW))
 
-	// Bottom line: show input mode indicator when typing / or !
-	inputVal := m.input.Value()
-	var inputModeLabel string
-	var inputModeColor color.Color
-	switch {
-	case strings.HasPrefix(inputVal, "/"):
-		inputModeLabel = " cmd "
-		inputModeColor = cPurple
-	case strings.HasPrefix(inputVal, "!"):
-		inputModeLabel = " exec "
-		inputModeColor = cYellow
-	}
-
-	var bottomLine string
-	if inputModeLabel != "" {
-		imStyle := lipgloss.NewStyle().Foreground(inputModeColor).Bold(true)
-		imW := lipgloss.Width(imStyle.Render(inputModeLabel))
-		fillW := m.width - imW
-		if fillW < 0 {
-			fillW = 0
-		}
-		bottomLine = lipgloss.NewStyle().Foreground(cSurface).Render(strings.Repeat("─", fillW)) +
-			imStyle.Render(inputModeLabel)
-	} else {
-		bottomLine = lineStyle.Render(strings.Repeat("─", m.width))
-	}
+	bottomLine := lineStyle.Render(strings.Repeat("─", m.width))
 
 	return topLine, bottomLine
 }
