@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +25,17 @@ func (m Model) View() tea.View {
 	input := m.renderInput()
 	topLine, bottomLine := m.renderSeparators()
 
-	// Fixed: status bar + separator + input + separator = bottom area
+	// Suggestion dropdown — rendered between topLine and input.
+	suggestions := ""
+	if len(m.suggestions) > 0 {
+		suggestions = m.renderSuggestions()
+	}
+	suggestH := lipgloss.Height(suggestions)
+
+	// Fixed: status bar + separator + input + separator + suggestions = bottom area
 	statusH := lipgloss.Height(status)
 	inputH := lipgloss.Height(input)
-	chatH := m.height - statusH - inputH - 2
+	chatH := m.height - statusH - inputH - 2 - suggestH
 
 	chat := m.renderChat(chatH)
 
@@ -37,13 +45,13 @@ func (m Model) View() tea.View {
 		topLine = indicator + topLine[len(indicator):]
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left,
-		chat,
-		topLine,
-		input,
-		bottomLine,
-		status,
-	))
+	parts := []string{chat, topLine}
+	if suggestions != "" {
+		parts = append(parts, suggestions)
+	}
+	parts = append(parts, input, bottomLine, status)
+
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	if m.copyMode {
 		v.MouseMode = tea.MouseModeNone
 	} else {
@@ -106,11 +114,6 @@ func (m Model) renderChat(height int) string {
 	// Settings panel (/config)
 	if m.configPanelOpen {
 		lines = append(lines, m.renderConfigPanel(m.width)...)
-	}
-
-	// Slash-command suggestion dropdown
-	if len(m.suggestions) > 0 {
-		lines = append(lines, m.renderSuggestions()...)
 	}
 
 	// Transient: session resume picker
@@ -503,16 +506,40 @@ func (m Model) renderSeparators() (string, string) {
 		labelStyle.Render(label) +
 		lineStyle.Render(strings.Repeat("─", rightW))
 
-	// Bottom line: plain colored line
-	bottomLine := lineStyle.Render(strings.Repeat("─", m.width))
+	// Bottom line: show input mode indicator when typing / or !
+	inputVal := m.input.Value()
+	var inputModeLabel string
+	var inputModeColor color.Color
+	switch {
+	case strings.HasPrefix(inputVal, "/"):
+		inputModeLabel = " cmd "
+		inputModeColor = cPurple
+	case strings.HasPrefix(inputVal, "!"):
+		inputModeLabel = " exec "
+		inputModeColor = cYellow
+	}
+
+	var bottomLine string
+	if inputModeLabel != "" {
+		imStyle := lipgloss.NewStyle().Foreground(inputModeColor).Bold(true)
+		imW := lipgloss.Width(imStyle.Render(inputModeLabel))
+		fillW := m.width - imW
+		if fillW < 0 {
+			fillW = 0
+		}
+		bottomLine = lipgloss.NewStyle().Foreground(cSurface).Render(strings.Repeat("─", fillW)) +
+			imStyle.Render(inputModeLabel)
+	} else {
+		bottomLine = lineStyle.Render(strings.Repeat("─", m.width))
+	}
 
 	return topLine, bottomLine
 }
 
 func (m Model) renderInput() string {
 	view := m.input.View()
-	if m.suggestion != "" {
-		// Show the untyped remainder as dim ghost text.
+	// Ghost text only when there's no dropdown (dropdown handles completion when visible)
+	if m.suggestion != "" && len(m.suggestions) == 0 {
 		rest := strings.TrimPrefix(m.suggestion, m.input.Value())
 		if rest != "" {
 			ghost := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(rest + " (tab)")
@@ -624,7 +651,7 @@ func formatTurnUsage(u message.Usage) string {
 }
 
 // renderSuggestions renders the slash-command autocomplete dropdown.
-func (m Model) renderSuggestions() []string {
+func (m Model) renderSuggestions() string {
 	const maxVisible = 6
 
 	sCmd := lipgloss.NewStyle().Foreground(cPurple).Bold(true)
@@ -699,7 +726,7 @@ func (m Model) renderSuggestions() []string {
 		Width(innerW + 2).
 		Render(strings.Join(bodyLines, "\n"))
 
-	return []string{box}
+	return box
 }
 
 // renderConfigPanel renders the interactive /config settings overlay.

@@ -738,6 +738,9 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 	if strings.HasPrefix(input, "/") {
 		return m.handleCommand(input)
 	}
+	if strings.HasPrefix(input, "!") {
+		return m.handleBangCommand(strings.TrimPrefix(input, "!"))
+	}
 
 	m.messages = append(m.messages, chatMessage{role: "user", content: input})
 	m.streaming = true
@@ -752,6 +755,28 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, m.listenForEvents()
+}
+
+// handleBangCommand runs a raw shell command and shows the output inline.
+func (m Model) handleBangCommand(cmd string) (tea.Model, tea.Cmd) {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return m, nil
+	}
+	m.messages = append(m.messages, chatMessage{role: "user", content: "! " + cmd})
+	out, err := exec.Command(shellExe(), "-c", cmd).CombinedOutput()
+	output := strings.TrimRight(string(out), "\n")
+	if err != nil {
+		m.messages = append(m.messages, chatMessage{role: "error",
+			content: fmt.Sprintf("exit: %v\n%s", err, output)})
+	} else {
+		if output == "" {
+			output = "(no output)"
+		}
+		m.messages = append(m.messages, chatMessage{role: "toolresult", content: output})
+	}
+	m.scrollOffset = 0
+	return m, nil
 }
 
 func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
