@@ -2,15 +2,45 @@
 
 ---
 
-## Gemma Integration (Local Model Routing)
+## Native SLM Runtime (The Preflight Engine)
+
+Integrating a native **Tiny LLM (SLM)** into Gnoma for preflight is a brilliant move. In 2026, using an SLM as a "Dispatcher" or "Gatekeeper" is the industry standard for low-latency, privacy-first agentic tools.
+
+By moving beyond simple model selection and into **Decomposed Execution**, you turn Gnoma from a wrapper into an intelligent orchestrator.
 
 See [`gemma-integration-analysis.md`](gemma-integration-analysis.md) for full architecture analysis, routing prompts, and implementation checklist.
 
-- [ ] Infrastructure & asset management (platform detection, safe installer, model manager)
-- [ ] Process & server management (background daemon, state tracking, auto-start)
-- [ ] Routing logic (complexity rubric, context flattener, strategy implementation)
-- [ ] UX (management commands, slash command, status UI)
-- [ ] Configuration & safety (scoped settings, failure resilience)
+### 1. Native SLM Runtime (The Preflight Engine)
+- [ ] **In-Process SLM Integration**: Instead of calling a heavy local server (like Ollama) for every routing decision, integrate a lightweight CGO or pure-Go runner for **Gemma 3 270M** or **Phi-4 Mini**.
+- [ ] **Zero-Cold-Start "Hot" Model**: Keep the SLM resident in memory (~300MB RAM). It should be ready to classify intent in **<50ms**, ensuring the user doesn't feel the "preflight" delay.
+- [ ] **Static Weight Embedding**: Embed the quantization of your routing model directly into the Gnoma binary (or a hidden `.gnoma/models/` cache) to ensure "just works" functionality offline.
+
+### 2. Deep Intent Routing (Beyond Model Selection)
+- [ ] **Skill Decomposer**: Instead of just choosing a model, use the SLM to break a complex user request into a **directed acyclic graph (DAG)** of Gnoma skills (e.g., `[fs.read] -> [elf.parse] -> [sec-audit]`).
+- [ ] **Context Flattener**: Use the SLM to prune the user's history and current file context *before* sending it to a large, expensive model (Gemini/Claude). This saves tokens and increases reasoning accuracy.
+- [ ] **Interactive vs. Autonomous Toggle**: Have the SLM predict if a command is "High Blast Radius" (e.g., `rm`, `patch`). If so, automatically trigger the **Human-in-the-Loop PTY switch** before the agent even tries to execute.
+
+### 3. Security & "The Iron Law" Integration
+- [ ] **USP Pre-Audit**: Use the SLM to run a "Stage 0" security audit on the Agent's proposed plan. If the plan violates any **Wave Protocol** rules, the SLM rejects the plan locally without ever calling the remote LLM.
+- [ ] **Hallucination Gate**: Use the SLM to verify that file paths mentioned by the remote LLM actually exist via `fs.LSTool` before presenting them to the user.
+
+### Recommended "Tiny" Stack for Gnoma
+
+To keep Gnoma a single-binary Go tool while adding these features, consider this specific technical path:
+
+| Component | Recommendation | Why? |
+| :--- | :--- | :--- |
+| **Model** | **Gemma 3 270M (Instruct)** | Optimized specifically for tool-use and routing in 2026. |
+| **Runtime** | **`github.com/ollama/ollama/llm` (as library)** | Allows you to leverage Ollama's high-speed inference inside your Go app. |
+| **Quantization** | **Q4_K_M GGUF** | Perfect balance of "smarts" and memory footprint for a background CLI. |
+
+### The "Integrated" Flow
+
+1. **User input** arrives in Gnoma.
+2. **Native SLM** (Gemma 270M) parses intent: *"Is this a security audit? A simple file read? Or a complex refactor?"*
+3. **Local Route:** If it's a simple `elf.parse`, the SLM executes the Go tool directly—**Zero LLM cost.**
+4. **Frontier Route:** If complex, the SLM scrubs the context and selects **Gemini 1.5 Pro** or **Claude 3.5**.
+5. **PTY Execution:** The result is piped through your **go-pty** wrapper with real-time USP monitoring.
 
 ---
 
@@ -72,9 +102,9 @@ This section outlines the steps to add **ELF (Executable and Linkable Format)** 
 ---
 
 ## 📌 Goals
-- Add ELF-specific tools to Gnoma’s toolset.
+- Add ELF-specific tools to Gnoma's toolset.
 - Enable users to analyze, disassemble, and manipulate ELF binaries.
-- Integrate with Gnoma’s existing permission and security systems.
+- Integrate with Gnoma's existing permission and security systems.
 
 ---
 
@@ -172,12 +202,12 @@ func (t *ParseTool) Run(args map[string]interface{}) (string, error) {
 ### 5. **Testing**
 - [ ] Test ELF tools on sample binaries (e.g., `/bin/ls`, `/bin/bash`).
 - [ ] Test edge cases (e.g., stripped binaries, packed binaries).
-- [ ] Ensure integration with Gnoma’s permission and security systems.
+- [ ] Ensure integration with Gnoma's permission and security systems.
 
 ### 6. **Security Considerations**
 - [ ] Sandbox ELF tools to prevent malicious binaries from compromising the system.
 - [ ] Validate file paths and arguments to avoid directory traversal or arbitrary file writes.
-- [ ] Use Gnoma’s firewall to scan ELF tool outputs for suspicious patterns.
+- [ ] Use Gnoma's firewall to scan ELF tool outputs for suspicious patterns.
 
 ---
 
@@ -211,3 +241,53 @@ echo '{"file": "/bin/ls"}' | gnoma --tool elf.parse
 - Add support for **PE (Portable Executable)** and **Mach-O** formats.
 - Integrate with **Ghidra** or **IDA Pro** for advanced analysis.
 - Add **automated exploit detection** for binaries.
+
+---
+
+## The Core Engine (Multi-Platform PTY)
+
+### 1. PTY Implementation
+- [ ] Implement [github.com/aymanbagabas/go-pty](https://github.com/aymanbagabas/go-pty): This is your primary "wrapper." It detects the OS at compile-time and uses ConPTY on Windows or standard /dev/ptmx on Unix.
+- [ ] Windows ConPTY Check: Add a startup check to ensure the user is on a modern version of Windows (Build 18362+), as older versions don't support the ConPTY API that go-pty relies on.
+
+### 2. Shell Detection Logic
+- [ ] Unix: Check $SHELL, fallback to /bin/sh.
+- [ ] Windows: Check %COMSPEC%, fallback to powershell.exe or cmd.exe.
+
+---
+
+## Interaction & Interception
+
+### 1. Stream Management
+- [ ] The "Pass-Through" Multiplexer: Create a controller to pipe PTY output to your UI.
+
+### 2. Interactive Detection
+- [ ] Interactive Trigger Detection: Scan the stream for patterns like Password:, [y/n]?, or (git merge) to know when the agent is "stuck."
+- [ ] Human-in-the-Loop Switch: Build a mechanism to temporarily bridge os.Stdin directly to the PTY so the user can type a password or confirm a prompt.
+
+---
+
+## The UI & UX Layer
+
+- [ ] Integrate charmbracelet/bubbletea: This manages the CLI state (Agent Thinking vs. Agent Executing).
+- [ ] ANSI/Color Support: Use charmbracelet/lipgloss to render the agent's colored terminal output correctly.
+- [ ] Markdown Rendering: Use charmbracelet/glamour to format the AI's explanations and code blocks in the terminal.
+
+---
+
+## Agent Intelligence & Environment
+
+- [ ] Terminal Awareness: Pass the PTY window dimensions (Rows/Cols) to the LLM so it doesn't generate output that breaks the layout.
+- [ ] Provider Agnostic Interface: Wrap your LLM logic (Gemini, OpenAI, Claude) in a Go interface to allow hot-swapping providers.
+
+---
+
+## Distribution & Build Pipeline
+
+### Cross-Compilation Setup
+- [ ] GOOS=windows GOARCH=amd64 (Uses the ConPTY logic).
+- [ ] GOOS=linux GOARCH=amd64 (Uses Unix PTY logic).
+- [ ] GOOS=darwin GOARCH=arm64 (Apple Silicon support).
+
+### Build Configuration
+- [ ] Static Linking: Ensure all CGO requirements (if any) are handled so you can ship a single, zero-dependency .exe or binary.
