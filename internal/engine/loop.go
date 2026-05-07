@@ -97,7 +97,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 					break
 				}
 			}
-			task := router.ClassifyTask(prompt)
+			task := e.classify(ctx, prompt)
 			if e.cfg.Context != nil {
 				task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
 			} else {
@@ -151,7 +151,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 							break
 						}
 					}
-					task := router.ClassifyTask(prompt)
+					task := e.classify(ctx, prompt)
 					if e.cfg.Context != nil {
 						task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
 					} else {
@@ -376,7 +376,7 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 				break
 			}
 		}
-		if router.ClassifyTask(prompt).Type == router.TaskOrchestration {
+		if e.classify(ctx, prompt).Type == router.TaskOrchestration {
 			req.SystemPrompt = coordinatorPrompt() + "\n\n" + req.SystemPrompt
 		}
 	}
@@ -596,7 +596,7 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 				break
 			}
 		}
-		task := router.ClassifyTask(prompt)
+		task := e.classify(ctx, prompt)
 		if e.cfg.Context != nil {
 			task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
 		} else {

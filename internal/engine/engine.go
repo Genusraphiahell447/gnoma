@@ -6,30 +6,31 @@ import (
 	"log/slog"
 
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
+	"somegit.dev/Owlibou/gnoma/internal/hook"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
-	"somegit.dev/Owlibou/gnoma/internal/hook"
 	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 )
 
 // Config holds engine configuration.
 type Config struct {
-	Provider    provider.Provider   // direct provider (used if Router is nil)
-	Router      *router.Router      // nil = use Provider directly
+	Provider    provider.Provider        // direct provider (used if Router is nil)
+	Router      *router.Router           // nil = use Provider directly
+	Classifier  router.TaskClassifier    // nil = HeuristicClassifier
 	Tools       *tool.Registry
-	Firewall    *security.Firewall  // nil = no scanning
-	Permissions *permission.Checker // nil = allow all
-	Context     *gnomactx.Window    // nil = no compaction
-	System      string              // system prompt
-	Model       string              // override model (empty = provider default)
-	Temperature *float64            // nil = provider default
-	MaxTurns    int                 // safety limit on tool loops (0 = unlimited)
-	Store       *persist.Store      // nil = no result persistence
-	Hooks       *hook.Dispatcher    // nil = no hooks
+	Firewall    *security.Firewall       // nil = no scanning
+	Permissions *permission.Checker      // nil = allow all
+	Context     *gnomactx.Window         // nil = no compaction
+	System      string                   // system prompt
+	Model       string                   // override model (empty = provider default)
+	Temperature *float64                 // nil = provider default
+	MaxTurns    int                      // safety limit on tool loops (0 = unlimited)
+	Store       *persist.Store           // nil = no result persistence
+	Hooks       *hook.Dispatcher         // nil = no hooks
 	Logger      *slog.Logger
 }
 
@@ -226,6 +227,21 @@ func (e *Engine) SetUsage(u message.Usage) {
 // SetActivatedTools restores the set of activated deferred tools (for session restore).
 func (e *Engine) SetActivatedTools(tools map[string]bool) {
 	e.activatedTools = tools
+}
+
+// classify returns a Task for the given prompt using the configured classifier.
+// Falls back to HeuristicClassifier if none is configured or if classification fails.
+func (e *Engine) classify(ctx context.Context, prompt string) router.Task {
+	cls := e.cfg.Classifier
+	if cls == nil {
+		cls = router.HeuristicClassifier{}
+	}
+	task, err := cls.Classify(ctx, prompt, e.history)
+	if err != nil {
+		e.logger.Debug("classifier error, falling back to heuristic", "error", err)
+		return router.ClassifyTask(prompt)
+	}
+	return task
 }
 
 // Reset clears conversation history and usage.

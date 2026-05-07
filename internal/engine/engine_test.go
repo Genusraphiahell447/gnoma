@@ -579,6 +579,94 @@ func TestSubmit_CumulativeUsage(t *testing.T) {
 	}
 }
 
+// spyClassifier records calls and delegates to HeuristicClassifier.
+type spyClassifier struct {
+	calls  int
+	result *router.Task // when non-nil, return this instead of heuristic result
+}
+
+func (s *spyClassifier) Classify(ctx context.Context, prompt string, history []message.Message) (router.Task, error) {
+	s.calls++
+	if s.result != nil {
+		return *s.result, nil
+	}
+	return router.HeuristicClassifier{}.Classify(ctx, prompt, history)
+}
+
+func TestSubmit_UsesInjectedClassifier(t *testing.T) {
+	rtr := router.New(router.Config{})
+	armID := router.NewArmID("test", "mock-model")
+	mp := &mockProvider{
+		name: "test",
+		streams: []stream.Stream{
+			newEventStream(message.StopEndTurn, "mock-model",
+				stream.Event{Type: stream.EventTextDelta, Text: "ok"},
+			),
+		},
+	}
+	rtr.RegisterArm(&router.Arm{
+		ID:           armID,
+		Provider:     mp,
+		ModelName:    "mock-model",
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+	rtr.ForceArm(armID)
+
+	spy := &spyClassifier{}
+	e, err := New(Config{
+		Provider:   mp,
+		Router:     rtr,
+		Tools:      tool.NewRegistry(),
+		Classifier: spy,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := e.Submit(context.Background(), "implement a parser", nil); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if spy.calls == 0 {
+		t.Error("expected Classify to be called at least once, got 0 calls")
+	}
+}
+
+func TestSubmit_NilClassifierFallsBackToHeuristic(t *testing.T) {
+	rtr := router.New(router.Config{})
+	armID := router.NewArmID("test", "mock-model")
+	mp := &mockProvider{
+		name: "test",
+		streams: []stream.Stream{
+			newEventStream(message.StopEndTurn, "mock-model",
+				stream.Event{Type: stream.EventTextDelta, Text: "ok"},
+			),
+		},
+	}
+	rtr.RegisterArm(&router.Arm{
+		ID:           armID,
+		Provider:     mp,
+		ModelName:    "mock-model",
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+	rtr.ForceArm(armID)
+
+	// No Classifier set — should not panic, should use heuristic
+	e, err := New(Config{
+		Provider: mp,
+		Router:   rtr,
+		Tools:    tool.NewRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = e.Submit(context.Background(), "debug the server crash", nil)
+	if err != nil {
+		t.Fatalf("Submit with nil Classifier: %v", err)
+	}
+}
+
 func TestSubmit_ReportsOutcomeToRouter(t *testing.T) {
 	rtr := router.New(router.Config{})
 	armID := router.NewArmID("test", "mock-model")
