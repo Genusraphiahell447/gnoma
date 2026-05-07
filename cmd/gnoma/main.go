@@ -1113,6 +1113,11 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 			cfg.SLM.ModelURL = slm.DefaultModelURL
 			mgr = slm.New(slm.Config{DataDir: dataDir, ModelURL: cfg.SLM.ModelURL}, logger)
 		}
+		if mgr.Status() == slm.StatusReady {
+			mf := mgr.Manifest()
+			fmt.Printf("already set up: %s (%s)\n", mf.FilePath, humanBytes(mf.Size))
+			return 0
+		}
 		fmt.Printf("downloading %s\n", cfg.SLM.ModelURL)
 		var start = time.Now()
 		err := mgr.Setup(context.Background(), func(downloaded, total int64) {

@@ -102,6 +102,10 @@ func (m *Manager) Setup(ctx context.Context, progress func(downloaded, total int
 		return fmt.Errorf("slm: ModelURL is required")
 	}
 
+	if m.Status() == StatusReady {
+		return nil
+	}
+
 	if err := os.MkdirAll(m.cfg.DataDir, 0700); err != nil {
 		return fmt.Errorf("slm: create data dir: %w", err)
 	}
