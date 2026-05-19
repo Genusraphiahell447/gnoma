@@ -132,7 +132,7 @@ func (f *Firewall) scanAndRedact(content, source string) string {
 				"pattern", m.Pattern,
 				"source", source,
 			)
-			return "[BLOCKED: content contained " + m.Pattern + "]"
+			return "[BLOCKED: content contained a secret]"
 		default:
 			f.logger.Debug("secret redacted",
 				"pattern", m.Pattern,

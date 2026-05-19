@@ -4,9 +4,25 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"time"
 )
+
+// failOpenAction returns Allow when FailOpen is set, Deny otherwise, and logs
+// a WARN naming the hook and the underlying reason so that abuse or chronic
+// hook failure is visible in operator logs (audit H3).
+func (c *CommandExecutor) failOpenAction(reason string, cause error) Action {
+	if c.def.FailOpen {
+		slog.Warn("hook fail-open: allowing tool call despite hook failure",
+			"hook", c.def.Name,
+			"reason", reason,
+			"error", cause,
+		)
+		return Allow
+	}
+	return Deny
+}
 
 // CommandExecutor runs a shell command and interprets its stdin/stdout.
 type CommandExecutor struct {
@@ -40,32 +56,21 @@ func (c *CommandExecutor) Execute(ctx context.Context, payload []byte) (HookResu
 	exitCode := 0
 	if runErr != nil {
 		if ctx.Err() != nil {
-			// Context deadline exceeded — apply fail_open policy.
-			action := Deny
-			if c.def.FailOpen {
-				action = Allow
-			}
-			return HookResult{Action: action, Duration: duration}, fmt.Errorf("hook %q: timed out after %v", c.def.Name, timeout)
+			timeoutErr := fmt.Errorf("hook %q: timed out after %v", c.def.Name, timeout)
+			return HookResult{Action: c.failOpenAction("timeout", timeoutErr), Duration: duration}, timeoutErr
 		}
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			// Unexpected error launching the process.
-			action := Deny
-			if c.def.FailOpen {
-				action = Allow
-			}
-			return HookResult{Action: action, Duration: duration}, fmt.Errorf("hook %q: %w", c.def.Name, runErr)
+			launchErr := fmt.Errorf("hook %q: %w", c.def.Name, runErr)
+			return HookResult{Action: c.failOpenAction("launch_error", launchErr), Duration: duration}, launchErr
 		}
 	}
 
 	action, transformed, err := ParseHookOutput(stdout.Bytes(), exitCode)
 	if err != nil {
-		failAction := Deny
-		if c.def.FailOpen {
-			failAction = Allow
-		}
-		return HookResult{Action: failAction, Duration: duration}, fmt.Errorf("hook %q: %w", c.def.Name, err)
+		parseErr := fmt.Errorf("hook %q: %w", c.def.Name, err)
+		return HookResult{Action: c.failOpenAction("parse_error", parseErr), Duration: duration}, parseErr
 	}
 
 	return HookResult{Action: action, Output: transformed, Duration: duration}, nil

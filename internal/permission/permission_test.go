@@ -354,3 +354,47 @@ func TestChecker_ConcurrentSetModeAndCheck(t *testing.T) {
 	}
 	<-done
 }
+
+// Pins the documented Rule.Pattern semantics so any future refactor that
+// changes substring/case/whitespace behaviour will fail loudly. Audit H1.
+//
+// Uses ModeBypass so the only deny vector is the rule itself (no mode-policy
+// or no-prompt fallback can mask the result). Pattern uses a synthetic token
+// to avoid overlap with safetyDenyPatterns.
+func TestRule_PatternSemantics_SubstringExactCaseSensitive(t *testing.T) {
+	const pattern = "deploy --prod"
+	rules := []Rule{{Tool: "bash", Pattern: pattern, Action: ActionDeny}}
+	c := NewChecker(ModeBypass, rules, nil)
+	ctx := context.Background()
+	info := ToolInfo{Name: "bash"}
+
+	matches := []string{
+		`{"command":"deploy --prod"}`,
+		`{"command":"sudo deploy --prod"}`,
+		`{"prefix":"x","command":"deploy --prod -y"}`,
+	}
+	for _, args := range matches {
+		t.Run("matches: "+args, func(t *testing.T) {
+			err := c.Check(ctx, info, json.RawMessage(args))
+			if !errors.Is(err, ErrDenied) {
+				t.Errorf("expected deny for %s, got %v", args, err)
+			}
+		})
+	}
+
+	// Documented gotchas — these intentionally do NOT match. The Pattern is a
+	// case-sensitive, exact substring; any whitespace or case drift skips it.
+	misses := []string{
+		`{"command":"deploy  --prod"}`, // double space inside the literal
+		`{"command":"DEPLOY --PROD"}`,  // case differs
+		`{"command":"deploy\t--prod"}`, // tab instead of space
+	}
+	for _, args := range misses {
+		t.Run("does NOT match: "+args, func(t *testing.T) {
+			err := c.Check(ctx, info, json.RawMessage(args))
+			if errors.Is(err, ErrDenied) {
+				t.Errorf("unexpectedly denied %s — Pattern semantics may have changed", args)
+			}
+		})
+	}
+}

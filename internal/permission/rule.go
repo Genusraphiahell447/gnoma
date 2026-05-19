@@ -16,9 +16,29 @@ const (
 )
 
 // Rule defines a single permission rule.
+//
+// Pattern matching semantics — important caveats:
+//
+//   - Tool is matched as a filepath.Match glob ("bash", "fs.*", "*").
+//   - Pattern, if set, is a case-sensitive substring match against the
+//     JSON-serialized tool arguments. It is NOT a glob, regex, or
+//     structured-field match.
+//
+// Concretely, given `Pattern = "rm -rf"`, these match:
+//   - `{"command":"rm -rf /tmp"}`
+//   - `{"prefix":"echo rm -rf","other":"x"}`  (substring appears anywhere)
+//
+// And these DO NOT match:
+//   - `{"command":"rm  -rf /"}`        (double space — substring is exact)
+//   - `{"command":"RM -RF /"}`         (case differs)
+//   - `{"command":"rm\t-rf /"}`        (tab vs space)
+//
+// Rule authors: write patterns that are unambiguous when serialized as JSON
+// (no leading/trailing whitespace, no surrounding quotes) and remember that
+// deny rules are bypass-immune — they fire before any mode check.
 type Rule struct {
 	Tool    string `toml:"tool"`    // glob pattern: "bash", "fs.*", "*"
-	Pattern string `toml:"pattern"` // optional: argument pattern
+	Pattern string `toml:"pattern"` // optional: case-sensitive substring on JSON args (see godoc)
 	Action  Action `toml:"action"`
 }
 
@@ -69,9 +89,10 @@ func extractCommands(node syntax.Command, printer *syntax.Printer, out *[]string
 			return
 		}
 	}
-	// Everything else (simple command, pipe, subshell) — print as one unit
+	// Everything else (simple command, pipe, subshell) — print as one unit.
+	// Printer errors on a strings.Builder are unreachable (Builder.Write never errors).
 	var b strings.Builder
-	printer.Print(&b, node)
+	_ = printer.Print(&b, node)
 	if s := strings.TrimSpace(b.String()); s != "" {
 		*out = append(*out, s)
 	}
