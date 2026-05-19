@@ -26,6 +26,20 @@ func Load() (*Config, error) {
 	return cfg, err
 }
 
+// LoadBase reads only the defaults + global ~/.config/gnoma/config.toml,
+// without consulting profiles, the project config, or env. This is the
+// safe-mode loader for diagnostic commands (`gnoma profile list/show`)
+// that must work even when a user's profile configuration is broken.
+// A missing base config is not an error — defaults are returned.
+func LoadBase() (*Config, error) {
+	cfg := Defaults()
+	globalPath := globalConfigPath()
+	if err := loadTOML(&cfg, globalPath); err != nil && !os.IsNotExist(err) {
+		return &cfg, err
+	}
+	return &cfg, nil
+}
+
 func loadTOML(cfg *Config, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -79,6 +79,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  gnoma [flags] <prompt>  run a single prompt (pipe mode)\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
 		fmt.Fprintf(os.Stderr, "  gnoma providers         list all discovered providers and models\n")
+		fmt.Fprintf(os.Stderr, "  gnoma profile list      list configured profiles\n")
+		fmt.Fprintf(os.Stderr, "  gnoma profile show NAME show the effective config a profile produces\n")
 		fmt.Fprintf(os.Stderr, "  gnoma slm setup         download and verify the llamafile model\n")
 		fmt.Fprintf(os.Stderr, "  gnoma slm status        show SLM setup state\n")
 		fmt.Fprintf(os.Stderr, "  gnoma router stats      show router quality + classifier telemetry\n")
@@ -124,16 +126,27 @@ func main() {
 	// Profile mode engages only when ~/.config/gnoma/profiles/ exists.
 	cfg, profile, err := gnomacfg.LoadWithProfile(*profileFlag)
 	if err != nil {
-		// Profile resolution failures are fatal: we can't guess which
-		// profile the user meant, and silently falling back to defaults
-		// is the worst possible UX.
-		if errors.Is(err, gnomacfg.ErrProfileResolution) {
+		// `gnoma profile list/show` is the recovery affordance for
+		// profile-resolution errors — it must run even when the user's
+		// profile setup is broken. Other commands fail fast.
+		args := flag.Args()
+		introspectingProfiles := len(args) > 0 && args[0] == "profile"
+		if errors.Is(err, gnomacfg.ErrProfileResolution) && !introspectingProfiles {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(2)
 		}
-		fmt.Fprintf(os.Stderr, "warning: config load: %v\n", err)
-		defaults := gnomacfg.Defaults()
-		cfg = &defaults
+		if errors.Is(err, gnomacfg.ErrProfileResolution) {
+			// Fall through with a base-only load so `profile list/show`
+			// can still surface default_profile and diagnose what's
+			// broken. LoadBase ignores missing-file errors.
+			base, _ := gnomacfg.LoadBase()
+			cfg = base
+			profile = gnomacfg.Profile{}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: config load: %v\n", err)
+			defaults := gnomacfg.Defaults()
+			cfg = &defaults
+		}
 	}
 	logger.Debug("config loaded",
 		"provider", cfg.Provider.Default,
@@ -165,6 +178,8 @@ func main() {
 			os.Exit(runSLMCommand(cliArgs[1:], cfg, logger))
 		case "router":
 			os.Exit(runRouterCommand(cliArgs[1:], profile))
+		case "profile":
+			os.Exit(runProfileCommand(cliArgs[1:], cfg, profile))
 		}
 	}
 

@@ -233,9 +233,14 @@ C-1 (foundational config + CLI) shipped 2026-05-19:
 - [x] Docs page with three full example profiles
   (`docs/profiles.md`).
 
-C-2 (CLI surface, separate landing):
+C-2 (CLI surface) shipped 2026-05-19:
 
-- [ ] `gnoma profile list` / `gnoma profile show <name>` subcommands.
+- [x] `gnoma profile list` / `gnoma profile show <name>` subcommands.
+  Both work even when profile resolution is otherwise broken — they're
+  the recovery affordance for diagnosing misconfigurations. List marks
+  the default-but-missing case explicitly (`ghost (default, missing)`).
+  Show never prints API key *values*, only the set of configured
+  provider names.
 
 C-3 (TUI integration, separate landing):
 

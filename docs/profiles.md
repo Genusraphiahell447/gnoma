@@ -131,6 +131,62 @@ gnoma                                # base default_profile (here: work)
 Profile selection is per-invocation. Restart re-reads `default_profile`;
 no "last used" persistence — explicit switches stay explicit.
 
+## Inspecting profiles
+
+`gnoma profile list` lists configured profiles and marks the default
+plus the currently active one:
+
+```
+$ gnoma profile list
+Profiles in /home/x/.config/gnoma/profiles:
+
+  experiment
+  private    (active)
+  work       (default)
+
+Base config: /home/x/.config/gnoma/config.toml
+```
+
+If `default_profile` points at a file that doesn't exist, the listing
+flags it explicitly so the command doubles as a diagnostic:
+
+```
+  ghost  (default, missing)
+```
+
+`gnoma profile show <name>` prints the merged effective config a
+profile produces — sections, configured providers (key *names* only;
+values are never printed), CLI agent overrides, arms, hooks, MCP
+servers, and the per-profile quality + session paths:
+
+```
+$ gnoma profile show work
+Profile: work
+Base config: /home/x/.config/gnoma/config.toml
+Profile file: /home/x/.config/gnoma/profiles/work.toml
+
+[provider]
+  default     = anthropic
+  model       = claude-sonnet-4
+  api_keys    = anthropic, openai
+
+[cli_agents]
+  claude = claude-work
+  gemini = (canonical)
+
+[permission]
+  mode = default
+
+…
+
+Quality data: /home/x/.config/gnoma/quality-work.json
+Session dir:  /repo/.gnoma/sessions/work
+```
+
+Both `profile list` and `profile show` work even when profile
+resolution is otherwise broken — they're the recovery affordance for
+diagnosing misconfigurations.
+
 ## Merge semantics
 
 - **Scalars** (`provider.default`, `provider.model`, `tools.bash_timeout`,
