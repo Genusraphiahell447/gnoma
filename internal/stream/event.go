@@ -76,8 +76,9 @@ type Event struct {
 	Usage *message.Usage
 
 	// Routing — arm selected by router
-	RoutingModel string // e.g. "anthropic/claude-sonnet-4-20250514"
-	RoutingTask  string // classified task type
+	RoutingModel      string // e.g. "anthropic/claude-sonnet-4-20250514"
+	RoutingTask       string // classified task type
+	RoutingClassifier string // classifier source: heuristic / slm / slm_fallback
 
 	// Error
 	Err error

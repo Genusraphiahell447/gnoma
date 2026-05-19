@@ -48,10 +48,12 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 			m.runningTools = append(m.runningTools, evt.ToolCallName)
 		}
 	case stream.EventRouting:
-		m.messages = append(m.messages, chatMessage{
-			role:    "cost",
-			content: fmt.Sprintf("routed → %s (task: %s)", evt.RoutingModel, evt.RoutingTask),
-		})
+		content := fmt.Sprintf("routed → %s (task: %s", evt.RoutingModel, evt.RoutingTask)
+		if evt.RoutingClassifier != "" {
+			content += ", by: " + evt.RoutingClassifier
+		}
+		content += ")"
+		m.messages = append(m.messages, chatMessage{role: "cost", content: content})
 	case stream.EventToolResult:
 		if m.elfToolActive {
 			// Suppress raw elf output — tree shows progress, LLM summarizes

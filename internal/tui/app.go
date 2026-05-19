@@ -71,6 +71,17 @@ type Config struct {
 	PluginInfos          []PluginInfo          // discovered plugins for /plugins command
 	Version              string                // build version string (from ldflags)
 	ModelUpdateCh        <-chan struct{}        // signals when the model name changes (discovery reconciliation)
+	SLM                  SLMInfo               // SLM backend status for the status bar
+}
+
+// SLMInfo captures the resolved SLM backend state at startup so the TUI can
+// surface it in the status bar. Zero value (Enabled=false) renders nothing.
+type SLMInfo struct {
+	Enabled bool
+	Active  bool   // true when StartBackend returned a usable Boot
+	Backend string // resolved backend name: "ollama", "llamafile", etc.
+	Model   string // model identifier
+	Tools   bool   // whether the model advertises tool support
 }
 
 // PluginInfo is a summary of an installed plugin for TUI display.

@@ -671,7 +671,9 @@ func main() {
 	lazy := &lazyClassifier{logger: logger}
 	var engineClassifier router.TaskClassifier = lazy
 	var slmCleanup func() error
+	var slmInfo tui.SLMInfo
 	if cfg.SLM.Enabled {
+		slmInfo.Enabled = true
 		bcfg := slm.BackendConfig{
 			Backend:        slm.Backend(cfg.SLM.Backend),
 			Model:          cfg.SLM.Model,
@@ -704,6 +706,10 @@ func main() {
 				Capabilities:  provider.Capabilities{ToolUse: boot.ToolSupport},
 			})
 			slmCleanup = boot.Close
+			slmInfo.Active = true
+			slmInfo.Backend = string(boot.Backend)
+			slmInfo.Model = boot.Model
+			slmInfo.Tools = boot.ToolSupport
 			toolNote := "no tools"
 			if boot.ToolSupport {
 				toolNote = "tools"
@@ -914,6 +920,7 @@ func main() {
 			PluginInfos:           buildPluginInfos(discoveredPlugins, enabledSet),
 			Version:               buildVersion,
 			ModelUpdateCh:         modelUpdateCh,
+			SLM:                   slmInfo,
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {

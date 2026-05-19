@@ -534,7 +534,7 @@ func (m Model) renderStatus() string {
 	if !status.ToolsAvailable {
 		provModel += " " + sStatusDim.Render("text-only")
 	}
-	left := sStatusHighlight.Render(provModel)
+	left := sStatusHighlight.Render(provModel) + renderSLMBadge(m.config.SLM)
 
 	// Center: cwd + git branch
 	dir := filepath.Base(m.cwd)
@@ -613,6 +613,22 @@ func renderContextBar(s session.Status) string {
 		labelStyle = sStatusDim
 	}
 	return "[" + bar + "]" + labelStyle.Render(label)
+}
+
+// renderSLMBadge produces a short " · slm: <model> [tools]" badge for the
+// status bar's left side. Returns "" when SLM is disabled or unconfigured.
+func renderSLMBadge(info SLMInfo) string {
+	if !info.Enabled {
+		return ""
+	}
+	if !info.Active {
+		return sStatusDim.Render(" · slm: ✗")
+	}
+	label := " · slm: " + info.Model
+	if info.Tools {
+		label += " ⚙"
+	}
+	return sStatusDim.Render(label)
 }
 
 // formatTurnUsage produces a compact token summary for a single turn.

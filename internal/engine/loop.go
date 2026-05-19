@@ -134,9 +134,10 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				)
 				if turn.Rounds == 1 && cb != nil {
 					cb(stream.Event{
-						Type:         stream.EventRouting,
-						RoutingModel: string(decision.Arm.ID),
-						RoutingTask:  task.Type.String(),
+						Type:              stream.EventRouting,
+						RoutingModel:      string(decision.Arm.ID),
+						RoutingTask:       task.Type.String(),
+						RoutingClassifier: task.ClassifierSource.String(),
 					})
 				}
 			}
