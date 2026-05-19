@@ -28,11 +28,17 @@ func (e *Engine) Submit(ctx context.Context, input string, cb Callback) (*Turn, 
 
 // SubmitWithOptions is like Submit but applies per-turn overrides (e.g. ToolChoice).
 func (e *Engine) SubmitWithOptions(ctx context.Context, input string, opts TurnOptions, cb Callback) (*Turn, error) {
+	e.mu.Lock()
 	e.turnOpts = opts
-	defer func() { e.turnOpts = TurnOptions{} }()
-
 	userMsg := message.NewUserText(input)
 	e.history = append(e.history, userMsg)
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.turnOpts = TurnOptions{}
+		e.mu.Unlock()
+	}()
+
 	if e.cfg.Context != nil {
 		e.cfg.Context.AppendMessage(userMsg)
 	}
@@ -42,7 +48,9 @@ func (e *Engine) SubmitWithOptions(ctx context.Context, input string, opts TurnO
 
 // SubmitMessages is like Submit but accepts pre-built messages.
 func (e *Engine) SubmitMessages(ctx context.Context, msgs []message.Message, cb Callback) (*Turn, error) {
+	e.mu.Lock()
 	e.history = append(e.history, msgs...)
+	e.mu.Unlock()
 	if e.cfg.Context != nil {
 		for _, m := range msgs {
 			e.cfg.Context.AppendMessage(m)
@@ -89,14 +97,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		var decision router.RoutingDecision
 
 		if e.cfg.Router != nil {
-			// Classify task from the latest user message
-			prompt := ""
-			for i := len(e.history) - 1; i >= 0; i-- {
-				if e.history[i].Role == message.RoleUser {
-					prompt = e.history[i].TextContent()
-					break
-				}
-			}
+			prompt := e.latestUserPrompt()
 			task := e.classify(ctx, prompt)
 			if e.cfg.Context != nil {
 				task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
@@ -131,14 +132,15 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				}
 			}
 		} else {
+			prov := e.activeProvider()
 			e.logger.Debug("streaming request",
-				"provider", e.cfg.Provider.Name(),
+				"provider", prov.Name(),
 				"model", req.Model,
 				"messages", len(req.Messages),
 				"tools", len(req.Tools),
 				"round", turn.Rounds,
 			)
-			s, err = e.cfg.Provider.Stream(ctx, req)
+			s, err = prov.Stream(ctx, req)
 		}
 		if err != nil {
 			var failedArms []router.ArmID
@@ -161,13 +163,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			// Retry on transient errors (429, 5xx) with exponential backoff
 			s, err = e.retryOnTransient(ctx, err, skipDelay, func() (stream.Stream, error) {
 				if e.cfg.Router != nil {
-					prompt := ""
-					for i := len(e.history) - 1; i >= 0; i-- {
-						if e.history[i].Role == message.RoleUser {
-							prompt = e.history[i].TextContent()
-							break
-						}
-					}
+					prompt := e.latestUserPrompt()
 					task := e.classify(ctx, prompt)
 					if e.cfg.Context != nil {
 						task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
@@ -192,7 +188,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 					}
 					return s, err
 				}
-				return e.cfg.Provider.Stream(ctx, req)
+				return e.activeProvider().Stream(ctx, req)
 			})
 			if err != nil {
 				// Try reactive compaction on 413 (request too large)
@@ -266,8 +262,8 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 		turn.Usage.Add(resp.Usage)
 		turn.Messages = append(turn.Messages, resp.Message)
-		e.history = append(e.history, resp.Message)
-		e.usage.Add(resp.Usage)
+		e.appendHistory(resp.Message)
+		e.addUsage(resp.Usage)
 
 		// Track in context window and check for compaction
 		if e.cfg.Context != nil {
@@ -282,8 +278,9 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			if compacted, err := e.cfg.Context.CompactIfNeeded(); err != nil {
 				e.logger.Error("context compaction failed", "error", err)
 			} else if compacted {
-				e.history = e.cfg.Context.Messages()
-				e.logger.Info("context compacted", "messages", len(e.history))
+				compactedMsgs := e.cfg.Context.Messages()
+				e.replaceHistory(compactedMsgs)
+				e.logger.Info("context compacted", "messages", len(compactedMsgs))
 			}
 		}
 
@@ -304,7 +301,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			// Model hit its output token budget mid-response. Inject a continue prompt
 			// and re-query so the response is completed rather than silently truncated.
 			contMsg := message.NewUserText("Continue from where you left off.")
-			e.history = append(e.history, contMsg)
+			e.appendHistory(contMsg)
 			if e.cfg.Context != nil {
 				e.cfg.Context.AppendMessage(contMsg)
 			}
@@ -319,7 +316,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			}
 			toolMsg := message.NewToolResults(results...)
 			turn.Messages = append(turn.Messages, toolMsg)
-			e.history = append(e.history, toolMsg)
+			e.appendHistory(toolMsg)
 			if e.cfg.Context != nil {
 				e.cfg.Context.AppendMessage(toolMsg)
 			}
@@ -336,7 +333,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 	// Use AllMessages (prefix + history) if context window manages prefix docs
-	messages := e.history
+	messages := e.historySnapshot()
 	if e.cfg.Context != nil {
 		messages = e.cfg.Context.AllMessages()
 	}
@@ -351,11 +348,12 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 		systemPrompt = e.cfg.Firewall.ScanSystemPrompt(systemPrompt)
 	}
 
+	turnOpts := e.snapshotTurnOpts()
 	req := provider.Request{
-		Model:        e.cfg.Model,
+		Model:        e.activeModel(),
 		SystemPrompt: systemPrompt,
 		Messages:     messages,
-		ToolChoice:   e.turnOpts.ToolChoice,
+		ToolChoice:   turnOpts.ToolChoice,
 		Temperature:  e.cfg.Temperature,
 	}
 
@@ -371,10 +369,10 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 		includeTools = caps == nil || caps.ToolUse
 	}
 	if includeTools {
-		allowed := e.turnOpts.AllowedTools
+		allowed := turnOpts.AllowedTools
 		for _, t := range e.cfg.Tools.All() {
 			// Skip deferred tools until the model requests them
-			if dt, ok := t.(tool.DeferrableTool); ok && dt.ShouldDefer() && !e.activatedTools[t.Name()] {
+			if dt, ok := t.(tool.DeferrableTool); ok && dt.ShouldDefer() && !e.isToolActivated(t.Name()) {
 				continue
 			}
 			// Filter to allowed tools when a restrict list is set
@@ -399,13 +397,7 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 
 	// Inject coordinator guidance for orchestration tasks
 	if e.cfg.Router != nil {
-		prompt := ""
-		for i := len(e.history) - 1; i >= 0; i-- {
-			if e.history[i].Role == message.RoleUser {
-				prompt = e.history[i].TextContent()
-				break
-			}
-		}
+		prompt := e.latestUserPrompt()
 		if e.classify(ctx, prompt).Type == router.TaskOrchestration {
 			req.SystemPrompt = coordinatorPrompt() + "\n\n" + req.SystemPrompt
 		}
@@ -453,7 +445,7 @@ func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb 
 		if ok {
 			// Activate deferred tools on first use
 			if dt, isDeferrable := t.(tool.DeferrableTool); isDeferrable && dt.ShouldDefer() {
-				e.activatedTools[call.Name] = true
+				e.markToolActivated(call.Name)
 			}
 		}
 		if !ok {
@@ -536,7 +528,7 @@ func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t
 	}
 
 	// Path restriction: deny bash and validate fs tool paths against AllowedPaths.
-	if denied, blocked := checkPathRestriction(call, t, args, e.turnOpts.AllowedPaths); blocked {
+	if denied, blocked := checkPathRestriction(call, t, args, e.snapshotTurnOpts().AllowedPaths); blocked {
 		return denied
 	}
 
@@ -615,17 +607,11 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 		return nil, origErr
 	}
 
-	e.history = e.cfg.Context.Messages()
+	e.replaceHistory(e.cfg.Context.Messages())
 	req = e.buildRequest(ctx)
 
 	if e.cfg.Router != nil {
-		prompt := ""
-		for i := len(e.history) - 1; i >= 0; i-- {
-			if e.history[i].Role == message.RoleUser {
-				prompt = e.history[i].TextContent()
-				break
-			}
-		}
+		prompt := e.latestUserPrompt()
 		task := e.classify(ctx, prompt)
 		if e.cfg.Context != nil {
 			task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
@@ -635,7 +621,7 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 		s, _, err := e.cfg.Router.Stream(ctx, task, req)
 		return s, err
 	}
-	return e.cfg.Provider.Stream(ctx, req)
+	return e.activeProvider().Stream(ctx, req)
 }
 
 // retryOnTransient retries the stream call on 429/5xx with exponential backoff.
