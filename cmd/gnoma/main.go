@@ -803,7 +803,10 @@ func main() {
 
 	// Create engine
 	eng, err := engine.New(engine.Config{
-		Provider:    prov,
+		// Wrap even though the engine's own buildRequest scans inline —
+		// belt-and-suspenders so a future engine path that bypasses
+		// buildRequest still routes through the firewall.
+		Provider:    security.WrapProvider(prov, fwRef),
 		Router:      rtr,
 		Classifier:  engineClassifier,
 		Tools:       reg,
