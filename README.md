@@ -175,6 +175,11 @@ gnoma plugin install ./my-plugin    # install from directory
 gnoma plugin list                   # list installed plugins
 ```
 
+Plugins are pinned by SHA-256 of their `plugin.json` on first load
+(Trust-On-First-Use). A manifest that changes between runs is refused with a
+clear error and a re-enrollment hint. See [docs/plugins-trust.md](docs/plugins-trust.md)
+and [ADR-003](docs/essentials/decisions/003-plugin-trust.md).
+
 ---
 
 ## Session Persistence

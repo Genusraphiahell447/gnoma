@@ -33,3 +33,9 @@ essentials:
 | 10 | Milestones | complete | [milestones.md](milestones.md) | 2026-04-03 |
 | 11 | Decision Log | complete | [decisions/001-initial-decisions.md](decisions/001-initial-decisions.md) | 2026-04-03 |
 | 12 | Risk / Unknowns | complete | [risks.md](risks.md) | 2026-04-03 |
+
+## Architecture Decision Records
+
+- [ADR-001 — Initial Decisions](decisions/001-initial-decisions.md)
+- [ADR-002 — SLM Routing](decisions/002-slm-routing.md)
+- [ADR-003 — Plugin Trust via TOFU Manifest Pinning](decisions/003-plugin-trust.md)

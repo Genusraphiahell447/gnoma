@@ -148,7 +148,7 @@ func TestLoader_Load_AllEnabled(t *testing.T) {
 	plugins, _ := loader.Discover(globalDir, filepath.Join(dir, "project"))
 
 	enabledSet := map[string]bool{"test-plugin": true}
-	result, err := loader.Load(plugins, enabledSet)
+	result, err := loader.Load(plugins, enabledSet, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestLoader_Load_DisabledPlugin(t *testing.T) {
 	plugins, _ := loader.Discover(globalDir, filepath.Join(dir, "project"))
 
 	// Plugin not in enabled set.
-	result, err := loader.Load(plugins, map[string]bool{})
+	result, err := loader.Load(plugins, map[string]bool{}, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestLoader_Load_HooksConverted(t *testing.T) {
 	loader := NewLoader(testLogger())
 	plugins, _ := loader.Discover(globalDir, filepath.Join(dir, "project"))
 
-	result, err := loader.Load(plugins, map[string]bool{"hook-plugin": true})
+	result, err := loader.Load(plugins, map[string]bool{"hook-plugin": true}, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestLoader_Load_MCPServersConverted(t *testing.T) {
 	loader := NewLoader(testLogger())
 	plugins, _ := loader.Discover(globalDir, filepath.Join(dir, "project"))
 
-	result, err := loader.Load(plugins, map[string]bool{"mcp-plugin": true})
+	result, err := loader.Load(plugins, map[string]bool{"mcp-plugin": true}, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -258,5 +258,81 @@ func TestLoader_Load_MCPServersConverted(t *testing.T) {
 	wantCmd := filepath.Join(pluginDir, "bin/mcp-git")
 	if s.Command != wantCmd {
 		t.Errorf("Command = %q, want %q", s.Command, wantCmd)
+	}
+}
+
+func TestLoader_Load_TOFU_RecordsPinOnFirstLoad(t *testing.T) {
+	dir := t.TempDir()
+	globalDir := filepath.Join(dir, "global")
+	writePlugin(t, globalDir, "newbie", "1.0.0", nil)
+
+	loader := NewLoader(testLogger())
+	plugins, _ := loader.Discover(globalDir, filepath.Join(dir, "project"))
+
+	pins, _ := NewFilePinStore(filepath.Join(dir, "pins.toml"))
+	result, err := loader.Load(plugins, map[string]bool{"newbie": true}, pins)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(result.Skills)+len(result.Hooks)+len(result.MCPServers) != 0 {
+		// No capabilities declared, but plugin should still have been processed.
+	}
+	if _, ok := pins.Get("newbie"); !ok {
+		t.Error("TOFU did not record a pin for the new plugin")
+	}
+}
+
+func TestLoader_Load_MatchingPin_LoadsSilently(t *testing.T) {
+	dir := t.TempDir()
+	globalDir := filepath.Join(dir, "global")
+
+	caps := &Capabilities{Hooks: []HookSpec{{Name: "h", Event: "pre_tool_use", Type: "command", Exec: "h.sh"}}}
+	writePlugin(t, globalDir, "trusted", "1.0.0", caps)
+
+	loader := NewLoader(testLogger())
+	plugins, _ := loader.Discover(globalDir, filepath.Join(dir, "project"))
+
+	// First load enrols.
+	pins, _ := NewFilePinStore(filepath.Join(dir, "pins.toml"))
+	if _, err := loader.Load(plugins, map[string]bool{"trusted": true}, pins); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second load with the same manifest must produce the same capability set.
+	result, err := loader.Load(plugins, map[string]bool{"trusted": true}, pins)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(result.Hooks) != 1 {
+		t.Fatalf("expected hook to be loaded on matching pin, got %d", len(result.Hooks))
+	}
+}
+
+func TestLoader_Load_PinMismatch_RefusesPlugin(t *testing.T) {
+	dir := t.TempDir()
+	globalDir := filepath.Join(dir, "global")
+
+	caps := &Capabilities{Hooks: []HookSpec{{Name: "h", Event: "pre_tool_use", Type: "command", Exec: "h.sh"}}}
+	writePlugin(t, globalDir, "drifted", "1.0.0", caps)
+
+	loader := NewLoader(testLogger())
+	plugins, _ := loader.Discover(globalDir, filepath.Join(dir, "project"))
+
+	// Seed a pin store with the WRONG hash to simulate manifest drift.
+	pins, _ := NewFilePinStore(filepath.Join(dir, "pins.toml"))
+	if err := pins.Set("drifted", "deadbeef"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := loader.Load(plugins, map[string]bool{"drifted": true}, pins)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(result.Hooks) != 0 {
+		t.Errorf("plugin with mismatched pin must not contribute hooks, got %d", len(result.Hooks))
+	}
+	// The bad pin must be left in place so the user can review and decide.
+	if h, _ := pins.Get("drifted"); h != "deadbeef" {
+		t.Errorf("loader silently overwrote a mismatched pin: got %q", h)
 	}
 }

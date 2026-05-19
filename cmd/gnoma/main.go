@@ -534,7 +534,13 @@ func main() {
 		logger.Warn("plugin discovery error", "error", err)
 	}
 	enabledSet := resolveEnabledPlugins(cfg.Plugins, discoveredPlugins)
-	pluginResult, err := pluginLoader.Load(discoveredPlugins, enabledSet)
+	pinStorePath := filepath.Join(gnomacfg.GlobalConfigDir(), "plugins.pins.toml")
+	pinStore, pinErr := plugin.NewFilePinStore(pinStorePath)
+	if pinErr != nil {
+		logger.Warn("plugin pin store unavailable; plugins will load without trust pinning", "error", pinErr)
+		pinStore = nil
+	}
+	pluginResult, err := pluginLoader.Load(discoveredPlugins, enabledSet, pinStore)
 	if err != nil {
 		logger.Warn("plugin load error", "error", err)
 	}
