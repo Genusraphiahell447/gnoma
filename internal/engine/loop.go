@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -65,6 +66,11 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 	loopStart := time.Now()
 	var lastArmID router.ArmID
 	var lastTaskType router.TaskType
+
+	// Early-stop detectors — per-turn scope, single-goroutine use.
+	repetitionDet := NewRepetitionDetector()
+	patchFails := NewPatchFailureTracker()
+	priorRoundHadToolCalls := false
 
 	reportOutcome := func(err error) {
 		if e.cfg.Router == nil || lastArmID == "" {
@@ -210,6 +216,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 		streamStart := time.Now()
 		var firstTokenAt time.Time
+		repetitionTripped := false
 
 		for s.Next() {
 			evt := s.Current()
@@ -218,6 +225,20 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			// Record time of first text token for TTFT metric
 			if firstTokenAt.IsZero() && evt.Type == stream.EventTextDelta && evt.Text != "" {
 				firstTokenAt = time.Now()
+			}
+
+			// Feed text deltas to the repetition detector. On trigger, stop
+			// consuming further events — the partial response is committed
+			// to history below and a corrective message is injected.
+			if evt.Type == stream.EventTextDelta && evt.Text != "" {
+				if repetitionDet.Feed(evt.Text) {
+					repetitionTripped = true
+					e.logger.Info("early-stop: repetition loop detected", "round", turn.Rounds)
+					if cb != nil {
+						cb(evt)
+					}
+					break
+				}
 			}
 
 			// Capture stop reason and model from events
@@ -294,6 +315,21 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			"round", turn.Rounds,
 		)
 
+		// Repetition loop — inject correction and re-query.
+		if repetitionTripped {
+			e.injectCorrective(RepetitionInjection())
+			continue
+		}
+
+		// Greeting regression — only meaningful after a round that used tools.
+		if priorRoundHadToolCalls && !resp.Message.HasToolCalls() {
+			if DetectGreeting(resp.Message.TextContent()) {
+				e.logger.Info("early-stop: greeting regression detected", "round", turn.Rounds)
+				e.injectCorrective(GreetingInjection())
+				continue
+			}
+		}
+
 		// Decide next action
 		switch resp.StopReason {
 		case message.StopEndTurn, message.StopSequence:
@@ -312,7 +348,8 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			// Continue loop — next round will resume generation
 
 		case message.StopToolUse:
-			results, err := e.executeTools(ctx, resp.Message.ToolCalls(), cb)
+			calls := resp.Message.ToolCalls()
+			results, err := e.executeTools(ctx, calls, cb)
 			if err != nil {
 				toolErr := fmt.Errorf("tool execution: %w", err)
 				reportOutcome(toolErr)
@@ -324,6 +361,15 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			if e.cfg.Context != nil {
 				e.cfg.Context.AppendMessage(toolMsg)
 			}
+
+			// Track patch failures per file; trigger an escalation if a
+			// single path crosses the threshold.
+			if spiralPath := e.recordPatchOutcomes(calls, results, patchFails); spiralPath != "" {
+				e.logger.Info("early-stop: patch spiral detected", "path", spiralPath, "round", turn.Rounds)
+				e.injectCorrective(PatchSpiralInjection(spiralPath))
+			}
+
+			priorRoundHadToolCalls = true
 			// Continue loop — re-query provider with tool results
 
 		default:
@@ -333,6 +379,64 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			return turn, nil
 		}
 	}
+}
+
+// injectCorrective appends a user-role corrective message to history and the
+// context window. Used by the early-stop detectors to steer the model on the
+// next round.
+func (e *Engine) injectCorrective(text string) {
+	msg := message.NewUserText(text)
+	e.appendHistory(msg)
+	if e.cfg.Context != nil {
+		e.cfg.Context.AppendMessage(msg)
+	}
+}
+
+// recordPatchOutcomes walks fs.edit/fs.write tool calls and feeds their
+// success/failure into the tracker. Returns the first path that crossed the
+// patch-spiral threshold on this round, or "" if none did.
+func (e *Engine) recordPatchOutcomes(calls []message.ToolCall, results []message.ToolResult, tr *PatchFailureTracker) string {
+	if len(calls) == 0 || len(results) == 0 {
+		return ""
+	}
+	resByID := make(map[string]*message.ToolResult, len(results))
+	for i := range results {
+		resByID[results[i].ToolCallID] = &results[i]
+	}
+	var spiralPath string
+	for _, call := range calls {
+		if call.Name != "fs.edit" && call.Name != "fs.write" {
+			continue
+		}
+		res, ok := resByID[call.ID]
+		if !ok {
+			continue
+		}
+		path := extractPatchPath(call.Arguments)
+		if path == "" {
+			continue
+		}
+		if res.IsError {
+			if tr.RecordFailure(path) && spiralPath == "" {
+				spiralPath = path
+			}
+		} else {
+			tr.RecordSuccess(path)
+		}
+	}
+	return spiralPath
+}
+
+// extractPatchPath pulls "path" out of fs.edit / fs.write arguments. Returns
+// "" when the args are unreadable — the tracker treats that as "skip".
+func extractPatchPath(args json.RawMessage) string {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return ""
+	}
+	return a.Path
 }
 
 func (e *Engine) buildRequest(ctx context.Context) provider.Request {
