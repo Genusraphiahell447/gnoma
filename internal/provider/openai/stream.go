@@ -41,6 +41,33 @@ func newOpenAIStream(raw *ssestream.Stream[oai.ChatCompletionChunk]) *openaiStre
 	}
 }
 
+// flushNextToolCall returns the next pending tool-call Done event, applying
+// repairArgs to recover from small lexical mistakes that local-model servers
+// (Ollama, llama.cpp, llamafile) routinely emit: markdown fences, trailing
+// commas, prose-wrapped objects. The bool return is false once the queue is
+// empty.
+func (s *openaiStream) flushNextToolCall() (stream.Event, bool) {
+	for idx, tc := range s.toolCalls {
+		args, repaired := repairArgs(tc.args)
+		if repaired {
+			slog.Debug("openai: repaired malformed tool-call arguments",
+				"tool", tc.name,
+				"raw_len", len(tc.args),
+				"repaired_len", len(args),
+			)
+		}
+		ev := stream.Event{
+			Type:         stream.EventToolCallDone,
+			ToolCallID:   tc.id,
+			ToolCallName: unsanitizeToolName(tc.name),
+			Args:         args,
+		}
+		delete(s.toolCalls, idx)
+		return ev, true
+	}
+	return stream.Event{}, false
+}
+
 func (s *openaiStream) Next() bool {
 	for s.raw.Next() {
 		chunk := s.raw.Current()
@@ -146,15 +173,9 @@ func (s *openaiStream) Next() bool {
 		}
 	}
 
-	// Stream ended — flush tool call Done events, then emit stop
-	for idx, tc := range s.toolCalls {
-		s.cur = stream.Event{
-			Type:         stream.EventToolCallDone,
-			ToolCallID:   tc.id,
-			ToolCallName: unsanitizeToolName(tc.name),
-			Args:         json.RawMessage(tc.args),
-		}
-		delete(s.toolCalls, idx)
+	// Stream ended — flush tool call Done events, then emit stop.
+	if ev, ok := s.flushNextToolCall(); ok {
+		s.cur = ev
 		return true
 	}
 
