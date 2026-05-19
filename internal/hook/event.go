@@ -6,7 +6,17 @@ import "fmt"
 type EventType int
 
 const (
-	PreToolUse   EventType = iota + 1
+	PreToolUse EventType = iota + 1
+	// PostToolUse fires after a tool executes, before the firewall scans
+	// the tool result. Hooks receive the raw output by design — shell
+	// hooks (audit log, forensic hash, local alerting) need it.
+	//
+	// LLM-bound hook types (CommandTypePrompt, CommandTypeAgent) do NOT
+	// leak raw output to a remote model: every LLM round-trip on those
+	// paths goes through security.SafeProvider (Wave 1), which scans
+	// outgoing messages before delegating. Adding a new hook type that
+	// talks to an LLM outside the router would break this guarantee —
+	// see docs/essentials/decisions/004-posttooluse-hook-ordering.md.
 	PostToolUse
 	SessionStart
 	SessionEnd

@@ -697,6 +697,15 @@ func (e *Engine) executeSingleTool(ctx context.Context, call message.ToolCall, t
 	}
 
 	// PostToolUse hook: can transform result (Deny treated as Skip).
+	//
+	// The payload contains pre-scan output by design. Shell hooks need
+	// raw access (audit, forensic, local alert); LLM-bound hook types
+	// (prompt, agent) inherit redaction at the SafeProvider boundary on
+	// the outbound LLM call, so raw payload here does not equal raw
+	// payload to a remote model. See ADR-004
+	// (docs/essentials/decisions/004-posttooluse-hook-ordering.md) for
+	// the full rationale and the conditions under which this needs to
+	// be revisited.
 	output := result.Output
 	if e.cfg.Hooks != nil {
 		payload := hook.MarshalPostToolPayload(call.Name, args, output, result.Metadata)
