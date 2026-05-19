@@ -3,9 +3,11 @@
 Active plans, newest first:
 
 - **[`docs/superpowers/plans/2026-05-19-post-slm-unlock.md`](docs/superpowers/plans/2026-05-19-post-slm-unlock.md)**
-  — outstanding work after the SLM unlock session: two-stage tool routing,
-  CLI agent binary override, user profiles, per-arm capability tags,
-  compound tools.
+  — outstanding work after the SLM unlock session. Phases A (two-stage
+  tool routing), B (CLI agent binary override), C (user profiles), and
+  D (per-arm capability tags) are **complete**. Phase E (compound
+  tools) is held until ≥50 SLM observations inform which primitives are
+  worth adding.
 - **[`docs/superpowers/plans/2026-05-07-gnoma-roadmap.md`](docs/superpowers/plans/2026-05-07-gnoma-roadmap.md)**
   — broader roadmap (PTY shell, USP integration, ELF, distribution).
   Phase 4 ("Router Revisit") is superseded by the post-SLM plan above.
