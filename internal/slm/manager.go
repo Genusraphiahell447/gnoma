@@ -68,6 +68,15 @@ type Manager struct {
 	process *os.Process
 	port    int
 	logger  *slog.Logger
+
+	startupBegin    time.Time
+	startupDuration time.Duration // 0 until Start() returns healthy
+}
+
+// StartupDuration returns the elapsed time from Start() invocation to the
+// first successful health check. Returns 0 when llamafile is not (yet) ready.
+func (m *Manager) StartupDuration() time.Duration {
+	return m.startupDuration
 }
 
 // New creates a Manager. DataDir must be non-empty.
@@ -136,6 +145,7 @@ func (m *Manager) Setup(ctx context.Context, progress func(downloaded, total int
 // Start launches the llamafile subprocess and returns its base URL.
 // Reaps a stale PID file from a previous run if present.
 func (m *Manager) Start(ctx context.Context) (string, error) {
+	m.startupBegin = time.Now()
 	mf, err := readManifest(m.cfg.DataDir)
 	if err != nil {
 		return "", fmt.Errorf("slm: not set up: %w", err)
@@ -178,6 +188,8 @@ func (m *Manager) Start(ctx context.Context) (string, error) {
 		return "", err
 	}
 
+	m.startupDuration = time.Since(m.startupBegin)
+	m.logger.Info("llamafile healthy", "url", baseURL, "startup", m.startupDuration)
 	return baseURL, nil
 }
 

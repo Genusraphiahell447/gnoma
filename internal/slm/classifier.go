@@ -65,7 +65,9 @@ func (c *Classifier) Classify(ctx context.Context, prompt string, history []mess
 	resp, err := c.callSLM(tctx, prompt)
 	if err != nil {
 		c.logger.Debug("slm classify fallback", "error", err)
-		return router.HeuristicClassifier{}.Classify(ctx, prompt, history)
+		t, ferr := router.HeuristicClassifier{}.Classify(ctx, prompt, history)
+		t.ClassifierSource = router.ClassifierSLMFallback
+		return t, ferr
 	}
 
 	// Start from the heuristic baseline so Priority/EstimatedTokens/RequiredEffort are set.
@@ -73,6 +75,7 @@ func (c *Classifier) Classify(ctx context.Context, prompt string, history []mess
 	task.Type = router.ParseTaskType(resp.TaskType)
 	task.ComplexityScore = resp.Complexity
 	task.RequiresTools = resp.RequiresTools
+	task.ClassifierSource = router.ClassifierSLM
 	return task, nil
 }
 

@@ -79,6 +79,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  gnoma providers         list all discovered providers and models\n")
 		fmt.Fprintf(os.Stderr, "  gnoma slm setup         download and verify the llamafile model\n")
 		fmt.Fprintf(os.Stderr, "  gnoma slm status        show SLM setup state\n")
+		fmt.Fprintf(os.Stderr, "  gnoma router stats      show router quality + classifier telemetry\n")
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		flag.PrintDefaults()
 	}
@@ -150,6 +151,8 @@ func main() {
 			os.Exit(runProvidersCommand(cfg, logger))
 		case "slm":
 			os.Exit(runSLMCommand(cliArgs[1:], cfg, logger))
+		case "router":
+			os.Exit(runRouterCommand(cliArgs[1:]))
 		}
 	}
 
@@ -665,7 +668,7 @@ func main() {
 	// Uses a lazyClassifier so the engine starts immediately with heuristic fallback;
 	// the SLM swaps in once llamafile is healthy (typically 5-10s cold start).
 	var slmMgr *slm.Manager
-	lazy := &lazyClassifier{}
+	lazy := &lazyClassifier{logger: logger}
 	var engineClassifier router.TaskClassifier = lazy
 	if cfg.SLM.Enabled {
 		slmDataDir := cfg.SLM.DataDir
@@ -696,7 +699,7 @@ func main() {
 					MaxComplexity: 0.3,
 					Capabilities:  provider.Capabilities{ToolUse: false},
 				})
-				logger.Info("SLM ready", "url", slmBaseURL)
+				logger.Info("SLM ready", "url", slmBaseURL, "startup", slmMgr.StartupDuration())
 			}()
 		} else {
 			logger.Warn("SLM enabled but not set up; run: gnoma slm setup")
@@ -1151,9 +1154,13 @@ func buildPluginInfos(plugins []plugin.Plugin, enabledSet map[string]bool) []tui
 
 // lazyClassifier wraps a TaskClassifier that is set after startup.
 // Falls back to HeuristicClassifier until the real one is available.
+// Logs the first deferred-fallback at INFO so operators can tell when the
+// SLM was not yet ready vs. unconfigured.
 type lazyClassifier struct {
-	mu    sync.Mutex
-	inner router.TaskClassifier
+	mu              sync.Mutex
+	inner           router.TaskClassifier
+	deferredLogged  bool
+	logger          *slog.Logger
 }
 
 func (l *lazyClassifier) set(c router.TaskClassifier) {
@@ -1165,9 +1172,17 @@ func (l *lazyClassifier) set(c router.TaskClassifier) {
 func (l *lazyClassifier) Classify(ctx context.Context, prompt string, history []message.Message) (router.Task, error) {
 	l.mu.Lock()
 	c := l.inner
+	logger := l.logger
+	logFirst := !l.deferredLogged && c == nil
+	if logFirst {
+		l.deferredLogged = true
+	}
 	l.mu.Unlock()
 	if c != nil {
 		return c.Classify(ctx, prompt, history)
+	}
+	if logFirst && logger != nil {
+		logger.Info("classifier: SLM not yet ready, using heuristic fallback")
 	}
 	return router.HeuristicClassifier{}.Classify(ctx, prompt, history)
 }

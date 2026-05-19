@@ -49,6 +49,34 @@ func TestHeuristicClassifier_ParityWithClassifyTask(t *testing.T) {
 	}
 }
 
+func TestHeuristicClassifier_SetsClassifierSource(t *testing.T) {
+	got, err := HeuristicClassifier{}.Classify(context.Background(), "implement foo", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ClassifierSource != ClassifierHeuristic {
+		t.Errorf("ClassifierSource = %v, want ClassifierHeuristic", got.ClassifierSource)
+	}
+}
+
+func TestClassifierSource_String(t *testing.T) {
+	cases := []struct {
+		src  ClassifierSource
+		want string
+	}{
+		{ClassifierUnknown, "unknown"},
+		{ClassifierHeuristic, "heuristic"},
+		{ClassifierSLM, "slm"},
+		{ClassifierSLMFallback, "slm_fallback"},
+		{ClassifierSource(999), "unknown"},
+	}
+	for _, tc := range cases {
+		if got := tc.src.String(); got != tc.want {
+			t.Errorf("ClassifierSource(%d).String() = %q, want %q", tc.src, got, tc.want)
+		}
+	}
+}
+
 // TestHeuristicClassifier_IgnoresHistory verifies that history has no effect
 // on the heuristic classifier (it operates only on the prompt).
 func TestHeuristicClassifier_IgnoresHistory(t *testing.T) {

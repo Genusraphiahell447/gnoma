@@ -13,17 +13,43 @@ type EMAScore struct {
 	Count int
 }
 
-// QualityTracker records per-arm, per-task-type EMA quality scores from elf outcomes.
+// QualityTracker records per-arm, per-task-type EMA quality scores from elf
+// outcomes and per-classifier-source counts used by Phase 4 routing decisions.
 type QualityTracker struct {
-	mu     sync.RWMutex
-	scores map[ArmID]map[TaskType]*EMAScore
+	mu              sync.RWMutex
+	scores          map[ArmID]map[TaskType]*EMAScore
+	classifierCount map[ClassifierSource]int
 }
 
 // NewQualityTracker returns an empty QualityTracker.
 func NewQualityTracker() *QualityTracker {
 	return &QualityTracker{
-		scores: make(map[ArmID]map[TaskType]*EMAScore),
+		scores:          make(map[ArmID]map[TaskType]*EMAScore),
+		classifierCount: make(map[ClassifierSource]int),
 	}
+}
+
+// RecordClassifier increments the count for a classifier source. Used to
+// answer "how often did the SLM actually classify vs fall back?" — Phase 4
+// trust signal.
+func (qt *QualityTracker) RecordClassifier(src ClassifierSource) {
+	if src == ClassifierUnknown {
+		return // pre-classification / forced; don't pollute counters
+	}
+	qt.mu.Lock()
+	defer qt.mu.Unlock()
+	qt.classifierCount[src]++
+}
+
+// ClassifierCounts returns a copy of the per-source observation counts.
+func (qt *QualityTracker) ClassifierCounts() map[ClassifierSource]int {
+	qt.mu.RLock()
+	defer qt.mu.RUnlock()
+	out := make(map[ClassifierSource]int, len(qt.classifierCount))
+	for k, v := range qt.classifierCount {
+		out[k] = v
+	}
+	return out
 }
 
 // Record updates the EMA score for the given arm and task type.

@@ -1,8 +1,11 @@
 package router
 
-// QualitySnapshot is the serializable form of QualityTracker EMA data.
+// QualitySnapshot is the serializable form of QualityTracker EMA data plus
+// classifier-source counts. The ClassifierCounts field is omitted when empty
+// for backward compatibility with older quality.json files.
 type QualitySnapshot struct {
-	Scores map[string]map[string]*EMAScore `json:"scores"` // ArmID -> TaskType.String() -> score
+	Scores           map[string]map[string]*EMAScore `json:"scores"` // ArmID -> TaskType.String() -> score
+	ClassifierCounts map[string]int                  `json:"classifier_counts,omitempty"`
 }
 
 // Snapshot returns a serializable copy of current quality data.
@@ -21,11 +24,18 @@ func (qt *QualityTracker) Snapshot() QualitySnapshot {
 			}
 		}
 	}
+	if len(qt.classifierCount) > 0 {
+		snap.ClassifierCounts = make(map[string]int, len(qt.classifierCount))
+		for src, n := range qt.classifierCount {
+			snap.ClassifierCounts[src.String()] = n
+		}
+	}
 	return snap
 }
 
-// Restore loads previously persisted quality data.
-// Replaces all current scores.
+// Restore loads previously persisted quality data. Replaces all current
+// scores and classifier counts. Missing classifier_counts field (old files)
+// initialises to empty.
 func (qt *QualityTracker) Restore(snap QualitySnapshot) {
 	qt.mu.Lock()
 	defer qt.mu.Unlock()
@@ -42,6 +52,26 @@ func (qt *QualityTracker) Restore(snap QualitySnapshot) {
 				Count: score.Count,
 			}
 		}
+	}
+	qt.classifierCount = make(map[ClassifierSource]int)
+	for srcStr, n := range snap.ClassifierCounts {
+		if src, ok := parseClassifierSource(srcStr); ok {
+			qt.classifierCount[src] = n
+		}
+	}
+}
+
+// parseClassifierSource is the inverse of ClassifierSource.String().
+func parseClassifierSource(s string) (ClassifierSource, bool) {
+	switch s {
+	case "heuristic":
+		return ClassifierHeuristic, true
+	case "slm":
+		return ClassifierSLM, true
+	case "slm_fallback":
+		return ClassifierSLMFallback, true
+	default:
+		return ClassifierUnknown, false
 	}
 }
 

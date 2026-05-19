@@ -182,20 +182,23 @@ func (r *Router) RemoveArm(id ArmID) {
 
 // Outcome records the result of a task execution for quality feedback.
 type Outcome struct {
-	ArmID           ArmID
-	TaskType        TaskType
-	Success         bool
-	Tokens          int
-	Duration        time.Duration
-	ResultFilePaths []string // paths to /tmp tool result files (for M9 analysis)
+	ArmID            ArmID
+	TaskType         TaskType
+	ClassifierSource ClassifierSource
+	Success          bool
+	Tokens           int
+	Duration         time.Duration
+	ResultFilePaths  []string // paths to /tmp tool result files (for M9 analysis)
 }
 
 // ReportOutcome records a task execution result for quality tracking.
 func (r *Router) ReportOutcome(o Outcome) {
 	r.quality.Record(o.ArmID, o.TaskType, o.Success)
+	r.quality.RecordClassifier(o.ClassifierSource)
 	r.logger.Debug("outcome recorded",
 		"arm", o.ArmID,
 		"task", o.TaskType,
+		"classifier", o.ClassifierSource,
 		"success", o.Success,
 		"tokens", o.Tokens,
 		"duration", o.Duration,

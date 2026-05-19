@@ -60,15 +60,41 @@ const (
 	PriorityCritical
 )
 
+// ClassifierSource identifies which classifier produced a Task.
+// Phase 4 routing decisions depend on knowing whether the SLM is actually
+// firing or whether the heuristic is silently doing all the work.
+type ClassifierSource int
+
+const (
+	ClassifierUnknown     ClassifierSource = iota // unset / pre-classification
+	ClassifierHeuristic                           // router.HeuristicClassifier
+	ClassifierSLM                                 // slm.Classifier (SLM call succeeded)
+	ClassifierSLMFallback                         // slm.Classifier fell back internally (timeout, parse error)
+)
+
+func (s ClassifierSource) String() string {
+	switch s {
+	case ClassifierHeuristic:
+		return "heuristic"
+	case ClassifierSLM:
+		return "slm"
+	case ClassifierSLMFallback:
+		return "slm_fallback"
+	default:
+		return "unknown"
+	}
+}
+
 // Task represents a classified unit of work for routing.
 type Task struct {
-	Type            TaskType
-	Priority        Priority
-	EstimatedTokens int
-	RequiresTools   bool
-	ComplexityScore float64             // 0-1
-	RequiredEffort  provider.EffortLevel // EffortAuto = no constraint on thinking
-	ExcludedArms    []ArmID             // Arms to avoid (e.g. due to recent 429 errors)
+	Type             TaskType
+	Priority         Priority
+	EstimatedTokens  int
+	RequiresTools    bool
+	ComplexityScore  float64              // 0-1
+	RequiredEffort   provider.EffortLevel // EffortAuto = no constraint on thinking
+	ExcludedArms     []ArmID              // Arms to avoid (e.g. due to recent 429 errors)
+	ClassifierSource ClassifierSource     // which classifier produced this Task
 }
 
 // ValueScore computes a routing value based on priority and type.

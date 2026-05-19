@@ -66,6 +66,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 	loopStart := time.Now()
 	var lastArmID router.ArmID
 	var lastTaskType router.TaskType
+	var lastClassifierSource router.ClassifierSource
 
 	// Early-stop detectors — per-turn scope, single-goroutine use.
 	repetitionDet := NewRepetitionDetector()
@@ -77,11 +78,12 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			return
 		}
 		e.cfg.Router.ReportOutcome(router.Outcome{
-			ArmID:    lastArmID,
-			TaskType: lastTaskType,
-			Success:  err == nil,
-			Tokens:   int(turn.Usage.InputTokens + turn.Usage.OutputTokens),
-			Duration: time.Since(loopStart),
+			ArmID:            lastArmID,
+			TaskType:         lastTaskType,
+			ClassifierSource: lastClassifierSource,
+			Success:          err == nil,
+			Tokens:           int(turn.Usage.InputTokens + turn.Usage.OutputTokens),
+			Duration:         time.Since(loopStart),
 		})
 	}
 
@@ -121,6 +123,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			if decision.Arm != nil {
 				lastArmID = decision.Arm.ID
 				lastTaskType = task.Type
+				lastClassifierSource = task.ClassifierSource
 				e.logger.Debug("streaming request",
 					"provider", decision.Arm.Provider.Name(),
 					"model", decision.Arm.ModelName,

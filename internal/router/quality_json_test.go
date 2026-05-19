@@ -57,6 +57,70 @@ func TestQualityTracker_Snapshot_Empty(t *testing.T) {
 	}
 }
 
+func TestQualityTracker_ClassifierCounts_RecordAndSnapshot(t *testing.T) {
+	qt := router.NewQualityTracker()
+	qt.RecordClassifier(router.ClassifierHeuristic)
+	qt.RecordClassifier(router.ClassifierSLM)
+	qt.RecordClassifier(router.ClassifierSLM)
+	qt.RecordClassifier(router.ClassifierSLMFallback)
+	qt.RecordClassifier(router.ClassifierUnknown) // must be ignored
+
+	counts := qt.ClassifierCounts()
+	if counts[router.ClassifierHeuristic] != 1 {
+		t.Errorf("heuristic count = %d, want 1", counts[router.ClassifierHeuristic])
+	}
+	if counts[router.ClassifierSLM] != 2 {
+		t.Errorf("slm count = %d, want 2", counts[router.ClassifierSLM])
+	}
+	if counts[router.ClassifierSLMFallback] != 1 {
+		t.Errorf("slm_fallback count = %d, want 1", counts[router.ClassifierSLMFallback])
+	}
+	if counts[router.ClassifierUnknown] != 0 {
+		t.Errorf("unknown count = %d, want 0 (must be ignored)", counts[router.ClassifierUnknown])
+	}
+
+	// Snapshot round-trip.
+	snap := qt.Snapshot()
+	if snap.ClassifierCounts["slm"] != 2 {
+		t.Errorf("snapshot slm count = %d, want 2", snap.ClassifierCounts["slm"])
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored router.QualitySnapshot
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	qt2 := router.NewQualityTracker()
+	qt2.Restore(restored)
+	if qt2.ClassifierCounts()[router.ClassifierSLM] != 2 {
+		t.Errorf("restored slm count = %d, want 2", qt2.ClassifierCounts()[router.ClassifierSLM])
+	}
+}
+
+// Verifies that loading a quality.json predating this feature (no
+// classifier_counts field) doesn't break.
+func TestQualityTracker_Restore_BackCompat_NoClassifierCounts(t *testing.T) {
+	legacy := []byte(`{"scores":{"foo":{"generation":{"Value":1,"Count":3}}}}`)
+	var snap router.QualitySnapshot
+	if err := json.Unmarshal(legacy, &snap); err != nil {
+		t.Fatal(err)
+	}
+	qt := router.NewQualityTracker()
+	qt.Restore(snap)
+	if qt.ClassifierCounts() == nil {
+		t.Error("ClassifierCounts() must return a non-nil map after restoring old snapshot")
+	}
+	if len(qt.ClassifierCounts()) != 0 {
+		t.Errorf("expected empty counts, got %d entries", len(qt.ClassifierCounts()))
+	}
+	// Scores should still load.
+	if _, ok := qt.Quality("foo", router.TaskGeneration); !ok {
+		t.Error("legacy scores should still load")
+	}
+}
+
 func TestQualityTracker_Restore_Replaces(t *testing.T) {
 	qt := router.NewQualityTracker()
 	qt.Record("arm-a", router.TaskDebug, true)

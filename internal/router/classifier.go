@@ -18,5 +18,7 @@ type TaskClassifier interface {
 type HeuristicClassifier struct{}
 
 func (HeuristicClassifier) Classify(_ context.Context, prompt string, _ []message.Message) (Task, error) {
-	return ClassifyTask(prompt), nil
+	t := ClassifyTask(prompt)
+	t.ClassifierSource = ClassifierHeuristic
+	return t, nil
 }

@@ -157,6 +157,30 @@ func TestClassifier_UnknownTaskType_FallsBackToHeuristic(t *testing.T) {
 	_ = task // just verify no panic and no error
 }
 
+func TestClassifier_SetsClassifierSource_OnSuccess(t *testing.T) {
+	p := &mockProvider{text: `{"task_type":"Debug","complexity":0.3,"requires_tools":true}`}
+	cls := NewClassifier(p, "default", nil)
+	task, err := cls.Classify(context.Background(), "fix the failing test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ClassifierSource != router.ClassifierSLM {
+		t.Errorf("ClassifierSource = %v, want ClassifierSLM", task.ClassifierSource)
+	}
+}
+
+func TestClassifier_SetsClassifierSource_OnFallback(t *testing.T) {
+	p := &mockProvider{err: errors.New("backend unreachable")}
+	cls := NewClassifier(p, "default", nil)
+	task, err := cls.Classify(context.Background(), "fix the failing test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ClassifierSource != router.ClassifierSLMFallback {
+		t.Errorf("ClassifierSource = %v, want ClassifierSLMFallback", task.ClassifierSource)
+	}
+}
+
 func TestClassifier_ContextPassedToHistory(t *testing.T) {
 	p := &mockProvider{text: `{"task_type":"Explain","complexity":0.2,"requires_tools":false}`}
 	cls := NewClassifier(p, "default", nil)
