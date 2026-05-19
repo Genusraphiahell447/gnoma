@@ -34,6 +34,7 @@ Phases (2026-05-07 roadmap):
 
 - **Thinking mode** (disabled / budget / adaptive) — M12 in milestones
 - **Structured output** with JSON schema validation — M12
+- **Native agy JSON output** — update subprocess provider to use `--output-format stream-json` once supported by agy CLI, replacing the current prompt-augmentation fallback.
 - **SQLite session persistence** + serve mode — M10
 - **Task learning** (pattern recognition, persistent tasks) — M11
 - **Web UI** (`gnoma web`) — M15
