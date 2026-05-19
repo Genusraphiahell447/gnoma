@@ -51,6 +51,29 @@ func TestRenderContextBar_Warning(t *testing.T) {
 	}
 }
 
+func TestRenderProfileBadge_Legacy(t *testing.T) {
+	got := renderProfileBadge(ProfileInfo{})
+	if got != "" {
+		t.Errorf("inactive profile should render nothing, got %q", got)
+	}
+}
+
+func TestRenderProfileBadge_Active(t *testing.T) {
+	got := renderProfileBadge(ProfileInfo{Active: true, Name: "work"})
+	if !strings.Contains(got, "profile: work") {
+		t.Errorf("active badge should show 'profile: work', got %q", got)
+	}
+}
+
+func TestRenderProfileBadge_ActiveButNameEmpty(t *testing.T) {
+	// Defensive: never render a badge when Name happens to be empty
+	// even if Active was somehow set true.
+	got := renderProfileBadge(ProfileInfo{Active: true})
+	if got != "" {
+		t.Errorf("active+empty name should render nothing, got %q", got)
+	}
+}
+
 func TestFormatTurnUsage_Basic(t *testing.T) {
 	u := message.Usage{InputTokens: 1500, OutputTokens: 200}
 	got := formatTurnUsage(u)

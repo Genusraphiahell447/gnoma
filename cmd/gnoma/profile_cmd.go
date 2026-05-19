@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
@@ -285,6 +286,71 @@ func formatProfileShow(w io.Writer, cfg *gnomacfg.Config, profile gnomacfg.Profi
 	pln(w)
 	pf(w, "Quality data: %s\n", profile.QualityFile(globalDir))
 	pf(w, "Session dir:  %s\n", profile.SessionDir(projectRoot))
+}
+
+// reExecForProfileSwitch replaces the current process with a fresh
+// gnoma running under --profile <name>. Implemented as syscall.Exec
+// rather than a child fork so we don't stack a new process level on
+// every /profile switch, and so the child's exit code propagates to
+// the user's shell without ambiguous "did the parent fail or the
+// child?" error paths.
+//
+// The current process's defers will NOT run after syscall.Exec
+// succeeds — call any required cleanup (quality.json snapshot,
+// session.Close, etc.) before invoking this. On Unix targets only;
+// gnoma's documented platforms are Linux and macOS.
+//
+// Belt-and-braces: profile names are validated upstream in the TUI,
+// but we re-validate against the same `[A-Za-z0-9_-]+` rule the
+// config layer enforces as defense against argv injection if some
+// future caller skips validation.
+func reExecForProfileSwitch(newProfile string) error {
+	if newProfile == "" {
+		return fmt.Errorf("empty profile name")
+	}
+	for _, r := range newProfile {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			continue
+		default:
+			return fmt.Errorf("invalid profile name %q (refusing to exec)", newProfile)
+		}
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve self executable: %w", err)
+	}
+	newArgs := argsWithProfileReplaced(os.Args, newProfile)
+	// syscall.Exec wants argv[0] to be the program name.
+	argv := append([]string{exe}, newArgs...)
+	return syscall.Exec(exe, argv, os.Environ())
+}
+
+// argsWithProfileReplaced returns oldArgs[1:] with any prior --profile
+// argument (in any of its forms: `--profile X`, `--profile=X`,
+// `-profile X`, `-profile=X`) removed, plus `--profile <newProfile>`
+// appended. Other flags and positional args are preserved verbatim.
+func argsWithProfileReplaced(oldArgs []string, newProfile string) []string {
+	out := make([]string, 0, len(oldArgs))
+	skip := false
+	for i := 1; i < len(oldArgs); i++ {
+		if skip {
+			skip = false
+			continue
+		}
+		a := oldArgs[i]
+		switch {
+		case a == "--profile" || a == "-profile":
+			skip = true
+			continue
+		case strings.HasPrefix(a, "--profile="), strings.HasPrefix(a, "-profile="):
+			continue
+		}
+		out = append(out, a)
+	}
+	out = append(out, "--profile", newProfile)
+	return out
 }
 
 func sortedKeys(m map[string]string) string {

@@ -187,6 +187,21 @@ Both `profile list` and `profile show` work even when profile
 resolution is otherwise broken — they're the recovery affordance for
 diagnosing misconfigurations.
 
+## Inside the TUI
+
+The status bar carries a `· profile: <name>` indicator next to the SLM
+badge so the active profile is always visible while you work.
+
+`/profile` (no args) prints the active profile and the list of
+available ones. `/profile <name>` switches to another profile by
+re-executing gnoma with `--profile <name>` — the implementation uses
+`syscall.Exec` so no extra process level is stacked and the new
+gnoma's exit code propagates directly to your shell. Conversation
+history is not preserved across a switch; the new gnoma starts with
+a fresh session.
+
+Autocomplete after `/profile ` offers configured profile names.
+
 ## Merge semantics
 
 - **Scalars** (`provider.default`, `provider.model`, `tools.bash_timeout`,

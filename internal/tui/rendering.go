@@ -534,7 +534,7 @@ func (m Model) renderStatus() string {
 	if !status.ToolsAvailable {
 		provModel += " " + sStatusDim.Render("text-only")
 	}
-	left := sStatusHighlight.Render(provModel) + renderSLMBadge(m.config.SLM)
+	left := sStatusHighlight.Render(provModel) + renderSLMBadge(m.config.SLM) + renderProfileBadge(m.config.Profile)
 
 	// Center: cwd + git branch
 	dir := filepath.Base(m.cwd)
@@ -629,6 +629,17 @@ func renderSLMBadge(info SLMInfo) string {
 		label += " ⚙"
 	}
 	return sStatusDim.Render(label)
+}
+
+// renderProfileBadge produces " · profile: <name>" for the status bar's
+// left side. Returns "" when profile mode is not engaged so legacy
+// single-config installations don't carry a "profile: default" badge
+// that adds noise without information.
+func renderProfileBadge(info ProfileInfo) string {
+	if !info.Active || info.Name == "" {
+		return ""
+	}
+	return sStatusDim.Render(" · profile: " + info.Name)
 }
 
 // formatTurnUsage produces a compact token summary for a single turn.

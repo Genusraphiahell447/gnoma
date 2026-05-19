@@ -242,12 +242,27 @@ C-2 (CLI surface) shipped 2026-05-19:
   Show never prints API key *values*, only the set of configured
   provider names.
 
-C-3 (TUI integration, separate landing):
+C-3 (TUI integration) shipped 2026-05-19:
 
-- [ ] TUI `/profile` slash command (with autocomplete on profile
-  names, requires engine restart on switch).
-- [ ] Status-bar indicator shows the active profile (dim, next to the
+- [x] TUI `/profile` slash command (with autocomplete on profile
+  names, re-execs gnoma on switch — see note below on the engine-restart
+  approach).
+- [x] Status-bar indicator shows the active profile (dim, next to the
   SLM badge: `· profile: work`).
+
+**Engine restart approach (C-3 implementation note):** rather than
+attempting in-process teardown and reinitialisation of the engine,
+router, providers, and session store, `/profile <name>` calls
+`syscall.Exec` to replace the current gnoma process with a fresh one
+under `--profile <name>`. Critical cleanups (quality.json snapshot,
+SLM backend shutdown, session close) fire explicitly before exec
+because defers don't run after a successful `syscall.Exec`.
+
+The trade-off: conversation history is not preserved across a switch.
+This matches the plan's stated semantics — a profile change implies
+different context, different keys, different permission mode — so
+preserving chat state across the boundary would be confusing rather
+than helpful.
 
 ### Open design questions — resolved
 

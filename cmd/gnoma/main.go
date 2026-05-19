@@ -359,8 +359,11 @@ func main() {
 		}
 	}
 
-	// Save QualityTracker data on exit (best-effort, suppressed in incognito)
-	defer func() {
+	// Save QualityTracker data on exit (best-effort, suppressed in
+	// incognito). Lifted to a named closure so the /profile switch path
+	// can fire it explicitly before syscall.Exec, since defers don't run
+	// after a successful exec.
+	saveQuality := func() {
 		if *incognito {
 			return
 		}
@@ -372,7 +375,8 @@ func main() {
 		qualityPath := profile.QualityFile(gnomacfg.GlobalConfigDir())
 		_ = os.MkdirAll(filepath.Dir(qualityPath), 0o755)
 		_ = os.WriteFile(qualityPath, data, 0o644)
-	}()
+	}
+	defer saveQuality()
 	var armID router.ArmID
 	if primaryProviderOK {
 		armModel := *model
@@ -958,6 +962,9 @@ func main() {
 		modelUpdater = sess.SetModel
 		modelMu.Unlock()
 
+		profileNames, _ := gnomacfg.ListProfiles()
+		var switchTarget string
+
 		m := tui.New(sess, tui.Config{
 			Firewall:              fw,
 			Engine:                eng,
@@ -974,11 +981,32 @@ func main() {
 			Version:               buildVersion,
 			ModelUpdateCh:         modelUpdateCh,
 			SLM:                   slmInfo,
+			Profile:               tui.ProfileInfo{Active: profile.Active, Name: profile.Name},
+			ProfileNames:          profileNames,
+			SwitchProfile:         func(name string) { switchTarget = name },
 		})
 		p := tea.NewProgram(m)
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
+		}
+
+		// Re-exec for profile switching. syscall.Exec replaces this
+		// process image so defers do NOT run — fire the cleanups that
+		// matter (quality snapshot, SLM subprocess, session state)
+		// explicitly before handing off.
+		if switchTarget != "" {
+			saveQuality()
+			if slmCleanup != nil {
+				_ = slmCleanup()
+			}
+			if err := sess.Close(); err != nil {
+				logger.Warn("session close error before profile switch", "error", err)
+			}
+			if err := reExecForProfileSwitch(switchTarget); err != nil {
+				fmt.Fprintf(os.Stderr, "profile switch failed: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}
 }

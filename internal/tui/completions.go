@@ -28,6 +28,7 @@ var builtinCommands = []cmdEntry{
 	{"/perm", "show or set permission mode"},
 	{"/permission", "show or set permission mode"},
 	{"/plugins", "list installed plugins"},
+	{"/profile", "list profiles or switch to one (re-execs gnoma)"},
 	{"/provider", "list or switch provider"},
 	{"/quit", "quit gnoma"},
 	{"/replay", "replay last assistant response"},
@@ -79,13 +80,15 @@ func matchSuggestions(input string, commands []cmdEntry) []cmdEntry {
 }
 
 // matchCompletion returns the unique ghost-text completion, or "".
-// Used for Tab acceptance of a single unambiguous match.
-func matchCompletion(input string, commands []cmdEntry) string {
+// Used for Tab acceptance of a single unambiguous match. profileNames
+// is the dynamic completion source for `/profile <name>` — pass nil
+// when none are known.
+func matchCompletion(input string, commands []cmdEntry, profileNames []string) string {
 	if !strings.HasPrefix(input, "/") || len(input) < 2 {
 		return ""
 	}
 	if strings.Contains(input, " ") {
-		return matchArgCompletion(input)
+		return matchArgCompletion(input, profileNames)
 	}
 	suggestions := matchSuggestions(input, commands)
 	if len(suggestions) == 1 && suggestions[0].name != input {
@@ -123,7 +126,9 @@ func fuzzyMatchCommands(query string, commands []cmdEntry) []cmdEntry {
 }
 
 // matchArgCompletion handles second-level completion for commands with args.
-func matchArgCompletion(input string) string {
+// profileNames is the dynamic source for `/profile <name>`; pass nil when
+// profile mode isn't engaged.
+func matchArgCompletion(input string, profileNames []string) string {
 	parts := strings.SplitN(input, " ", 2)
 	if len(parts) != 2 {
 		return ""
@@ -140,6 +145,16 @@ func matchArgCompletion(input string) string {
 		for _, mode := range permissionModes {
 			if strings.HasPrefix(mode, lower) && mode != arg {
 				return cmd + " " + mode
+			}
+		}
+	case "/profile":
+		if arg == "" || len(profileNames) == 0 {
+			return ""
+		}
+		lower := strings.ToLower(arg)
+		for _, name := range profileNames {
+			if strings.HasPrefix(strings.ToLower(name), lower) && name != arg {
+				return cmd + " " + name
 			}
 		}
 	}

@@ -72,6 +72,17 @@ type Config struct {
 	Version              string                // build version string (from ldflags)
 	ModelUpdateCh        <-chan struct{}        // signals when the model name changes (discovery reconciliation)
 	SLM                  SLMInfo               // SLM backend status for the status bar
+	Profile              ProfileInfo           // active profile state for status bar + /profile command
+	ProfileNames         []string              // available profile names (sorted) for /profile autocomplete
+	SwitchProfile        func(name string)     // optional: when set, /profile <name> calls this and returns tea.Quit
+}
+
+// ProfileInfo mirrors the resolved profile state so the TUI can render
+// the active profile in the status bar and answer `/profile`. Zero value
+// (Active=false) renders nothing.
+type ProfileInfo struct {
+	Active bool
+	Name   string
 }
 
 // SLMInfo captures the resolved SLM backend state at startup so the TUI can
@@ -843,7 +854,7 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 		m.suggestion = ""
 	default:
 		// Normal mode: prefix-based ghost text and dropdown
-		m.suggestion = matchCompletion(val, m.completionSrc)
+		m.suggestion = matchCompletion(val, m.completionSrc, m.config.ProfileNames)
 		m.suggestions = matchSuggestions(val, m.completionSrc)
 	}
 	if len(m.suggestions) == 0 {
@@ -1168,6 +1179,9 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.injectSystemContext(msg)
 		return m, nil
 
+	case "/profile":
+		return m.handleProfileCommand(args)
+
 	case "/provider":
 		if args != "" {
 			m.messages = append(m.messages, chatMessage{role: "system",
@@ -1308,7 +1322,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/help":
 		m.messages = append(m.messages, chatMessage{role: "system",
-			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /keys               show keyboard shortcuts\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /provider           show current provider\n  /replay             scroll to top to re-read conversation\n  /resume [id]        list or restore saved sessions\n  /shell [cmd]        open interactive shell (or run cmd in shell)\n  /skills             list loaded skills\n  /usage              show token usage and cost\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
+			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /keys               show keyboard shortcuts\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /profile [name]     list profiles / switch (re-execs gnoma)\n  /provider           show current provider\n  /replay             scroll to top to re-read conversation\n  /resume [id]        list or restore saved sessions\n  /shell [cmd]        open interactive shell (or run cmd in shell)\n  /skills             list loaded skills\n  /usage              show token usage and cost\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
 		return m, nil
 
 	case "/keys":
@@ -1837,4 +1851,95 @@ func formatError(err error) string {
 		return msg[:1000] + "\n... [error truncated due to size]"
 	}
 	return msg
+}
+
+// handleProfileCommand implements the /profile slash command.
+//
+// `/profile` (no args) prints the active profile, the base config path,
+// and the list of available profiles. When profile mode isn't engaged,
+// it points the user at `gnoma profile list` for setup guidance.
+//
+// `/profile <name>` validates the name against the cached profile list
+// and, when SwitchProfile is wired, signals main to re-exec gnoma with
+// `--profile <name>`. The TUI returns tea.Quit so the current process
+// can tear down cleanly before the new gnoma takes over. We avoid
+// in-process profile swapping because the engine, router, providers,
+// and session store would all need coordinated reinitialisation —
+// a re-exec is simpler and more correct.
+func (m Model) handleProfileCommand(args string) (tea.Model, tea.Cmd) {
+	args = strings.TrimSpace(args)
+
+	if args == "" {
+		m.messages = append(m.messages, chatMessage{role: "system", content: m.formatProfileSummary()})
+		return m, nil
+	}
+
+	// Profile mode must be engaged for switching to be meaningful.
+	if !m.config.Profile.Active {
+		m.messages = append(m.messages, chatMessage{role: "error",
+			content: "profile mode is not enabled — see `gnoma profile list` for setup guidance"})
+		return m, nil
+	}
+
+	name := args
+	if !contains(m.config.ProfileNames, name) {
+		avail := strings.Join(m.config.ProfileNames, ", ")
+		m.messages = append(m.messages, chatMessage{role: "error",
+			content: fmt.Sprintf("unknown profile %q — available: %s", name, avail)})
+		return m, nil
+	}
+
+	if name == m.config.Profile.Name {
+		m.messages = append(m.messages, chatMessage{role: "system",
+			content: fmt.Sprintf("already using profile %q", name)})
+		return m, nil
+	}
+
+	if m.config.SwitchProfile == nil {
+		m.messages = append(m.messages, chatMessage{role: "error",
+			content: "in-process profile switching is not wired in this build; restart with: gnoma --profile " + name})
+		return m, nil
+	}
+
+	m.messages = append(m.messages, chatMessage{role: "system",
+		content: fmt.Sprintf("switching to profile %q — re-executing gnoma...", name)})
+	m.config.SwitchProfile(name)
+	return m, tea.Quit
+}
+
+func (m Model) formatProfileSummary() string {
+	var b strings.Builder
+	if m.config.Profile.Active {
+		fmt.Fprintf(&b, "Active profile: %s\n", m.config.Profile.Name)
+	} else {
+		b.WriteString("Profile mode: not enabled (legacy single-config)\n")
+		b.WriteString("\nTo enable profiles, see `gnoma profile list` or docs/profiles.md.\n")
+		return b.String()
+	}
+
+	if len(m.config.ProfileNames) == 0 {
+		b.WriteString("\n(no other profiles configured)\n")
+		return b.String()
+	}
+
+	b.WriteString("\nAvailable profiles:\n")
+	for _, n := range m.config.ProfileNames {
+		marker := "  "
+		if n == m.config.Profile.Name {
+			marker = "→ "
+		}
+		fmt.Fprintf(&b, "%s%s\n", marker, n)
+	}
+	b.WriteString("\nUsage: /profile <name>  — re-execs gnoma with the chosen profile.\n")
+	b.WriteString("Conversation history is not preserved across a switch.\n")
+	return b.String()
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }

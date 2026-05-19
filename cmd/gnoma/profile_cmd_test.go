@@ -2,11 +2,87 @@ package main
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 )
+
+func TestArgsWithProfileReplaced(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		next string
+		want []string
+	}{
+		{
+			name: "no_prior_profile_flag",
+			in:   []string{"gnoma", "--verbose"},
+			next: "private",
+			want: []string{"--verbose", "--profile", "private"},
+		},
+		{
+			name: "replaces_double_dash_pair",
+			in:   []string{"gnoma", "--profile", "work", "--verbose"},
+			next: "private",
+			want: []string{"--verbose", "--profile", "private"},
+		},
+		{
+			name: "replaces_double_dash_equals",
+			in:   []string{"gnoma", "--profile=work", "--max-turns", "50"},
+			next: "private",
+			want: []string{"--max-turns", "50", "--profile", "private"},
+		},
+		{
+			name: "replaces_single_dash_pair",
+			in:   []string{"gnoma", "-profile", "work"},
+			next: "private",
+			want: []string{"--profile", "private"},
+		},
+		{
+			name: "replaces_single_dash_equals",
+			in:   []string{"gnoma", "-profile=work"},
+			next: "private",
+			want: []string{"--profile", "private"},
+		},
+		{
+			name: "preserves_positional_args",
+			in:   []string{"gnoma", "providers"},
+			next: "work",
+			want: []string{"providers", "--profile", "work"},
+		},
+		{
+			name: "preserves_mixed_flags_and_positional",
+			in:   []string{"gnoma", "--verbose", "--profile", "old", "profile", "show", "work"},
+			next: "new",
+			want: []string{"--verbose", "profile", "show", "work", "--profile", "new"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := argsWithProfileReplaced(tc.in, tc.next)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("argsWithProfileReplaced(%v, %q) = %v, want %v", tc.in, tc.next, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReExecForProfileSwitch_RejectsBadName(t *testing.T) {
+	// Belt-and-braces validation: bad names must be refused even if the
+	// caller skipped upstream validation.
+	cases := []string{"", "../foo", "foo bar", "foo;rm", "../../etc/passwd"}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := reExecForProfileSwitch(name)
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", name)
+			}
+		})
+	}
+}
 
 func TestFormatProfileList_NoProfilesDir(t *testing.T) {
 	var buf bytes.Buffer
