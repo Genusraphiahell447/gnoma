@@ -10,7 +10,7 @@ import (
 )
 
 func TestAdapter_Name_Default(t *testing.T) {
-	a := NewAdapter("git", MCPTool{Name: "status"}, nil)
+	a := NewAdapter("git", MCPTool{Name: "status"}, nil, ToolPolicy{})
 	want := "mcp__git__status"
 	if got := a.Name(); got != want {
 		t.Errorf("Name() = %q, want %q", got, want)
@@ -18,7 +18,7 @@ func TestAdapter_Name_Default(t *testing.T) {
 }
 
 func TestAdapter_Name_Override(t *testing.T) {
-	a := NewAdapter("custom-fs", MCPTool{Name: "read_file"}, nil)
+	a := NewAdapter("custom-fs", MCPTool{Name: "read_file"}, nil, ToolPolicy{})
 	a.SetOverrideName("fs.read")
 	want := "fs.read"
 	if got := a.Name(); got != want {
@@ -38,7 +38,7 @@ func TestAdapter_NameConvention(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		a := NewAdapter(tt.server, MCPTool{Name: tt.tool}, nil)
+		a := NewAdapter(tt.server, MCPTool{Name: tt.tool}, nil, ToolPolicy{})
 		if got := a.Name(); got != tt.want {
 			t.Errorf("Name(%q, %q) = %q, want %q", tt.server, tt.tool, got, tt.want)
 		}
@@ -49,7 +49,7 @@ func TestAdapter_Description(t *testing.T) {
 	a := NewAdapter("git", MCPTool{
 		Name:        "status",
 		Description: "Get git status",
-	}, nil)
+	}, nil, ToolPolicy{})
 	if got := a.Description(); got != "Get git status" {
 		t.Errorf("Description() = %q, want %q", got, "Get git status")
 	}
@@ -60,7 +60,7 @@ func TestAdapter_Parameters(t *testing.T) {
 	a := NewAdapter("git", MCPTool{
 		Name:        "status",
 		InputSchema: schema,
-	}, nil)
+	}, nil, ToolPolicy{})
 
 	got := a.Parameters()
 	if string(got) != string(schema) {
@@ -69,21 +69,21 @@ func TestAdapter_Parameters(t *testing.T) {
 }
 
 func TestAdapter_IsReadOnly(t *testing.T) {
-	a := NewAdapter("git", MCPTool{Name: "status"}, nil)
+	a := NewAdapter("git", MCPTool{Name: "status"}, nil, ToolPolicy{})
 	if a.IsReadOnly() {
 		t.Error("IsReadOnly() = true, want false (conservative default)")
 	}
 }
 
 func TestAdapter_IsDestructive(t *testing.T) {
-	a := NewAdapter("git", MCPTool{Name: "status"}, nil)
+	a := NewAdapter("git", MCPTool{Name: "status"}, nil, ToolPolicy{})
 	if a.IsDestructive() {
 		t.Error("IsDestructive() = true, want false")
 	}
 }
 
 func TestAdapter_ShouldDefer(t *testing.T) {
-	a := NewAdapter("git", MCPTool{Name: "status"}, nil)
+	a := NewAdapter("git", MCPTool{Name: "status"}, nil, ToolPolicy{})
 	if !a.ShouldDefer() {
 		t.Error("ShouldDefer() = false, want true (MCP tools start deferred)")
 	}
@@ -111,7 +111,7 @@ func TestAdapter_Execute(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 
-	a := NewAdapter("git", tools[0], client)
+	a := NewAdapter("git", tools[0], client, ToolPolicy{})
 
 	result, err := a.Execute(ctx, json.RawMessage(`{}`))
 	if err != nil {
@@ -146,7 +146,7 @@ func TestAdapter_Execute_MultipleTextBlocks(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 
-	a := NewAdapter("test", tools[0], client)
+	a := NewAdapter("test", tools[0], client, ToolPolicy{})
 	result, err := a.Execute(ctx, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -191,7 +191,7 @@ done
 	defer func() { _ = client.Close() }()
 	_ = client.Initialize(ctx)
 
-	a := NewAdapter("err", MCPTool{Name: "broken", InputSchema: json.RawMessage(`{}`)}, client)
+	a := NewAdapter("err", MCPTool{Name: "broken", InputSchema: json.RawMessage(`{}`)}, client, ToolPolicy{})
 	result, err := a.Execute(ctx, json.RawMessage(`{}`))
 
 	// RPC errors should be returned as tool output (not Go errors)

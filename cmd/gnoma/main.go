@@ -495,7 +495,7 @@ func main() {
 	modelUpdateCh := make(chan struct{}, 1)
 	discoveryCtx, discoveryCancel := context.WithCancel(context.Background())
 	defer discoveryCancel()
-	providerFactory := func(provName, model string) provider.Provider {
+	providerFactory := func(provName, model string) router.SecureProvider {
 		p, err := createProvider(provName, "", model, cfg.Provider.Endpoints[provName])
 		if err != nil {
 			return nil
@@ -1135,7 +1135,7 @@ func discoverActiveModel(provName string, cfg *gnomacfg.Config, logger *slog.Log
 
 	switch provName {
 	case "llamacpp":
-		models, err = router.DiscoverLlamaCpp(ctx, cfg.Provider.Endpoints["llamacpp"])
+		models, err = router.DiscoverLlamaCPP(ctx, cfg.Provider.Endpoints["llamacpp"])
 	case "ollama":
 		models, err = router.DiscoverOllama(ctx, cfg.Provider.Endpoints["ollama"], nil)
 	default:
