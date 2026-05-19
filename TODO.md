@@ -1,14 +1,20 @@
 # Gnoma — TODO
 
-The active roadmap lives in:
+Active plans, newest first:
 
-**[`docs/superpowers/plans/2026-05-07-gnoma-roadmap.md`](docs/superpowers/plans/2026-05-07-gnoma-roadmap.md)**
+- **[`docs/superpowers/plans/2026-05-19-post-slm-unlock.md`](docs/superpowers/plans/2026-05-19-post-slm-unlock.md)**
+  — outstanding work after the SLM unlock session: two-stage tool routing,
+  CLI agent binary override, user profiles, per-arm capability tags,
+  compound tools.
+- **[`docs/superpowers/plans/2026-05-07-gnoma-roadmap.md`](docs/superpowers/plans/2026-05-07-gnoma-roadmap.md)**
+  — broader roadmap (PTY shell, USP integration, ELF, distribution).
+  Phase 4 ("Router Revisit") is superseded by the post-SLM plan above.
 
-Phases:
+Phases (2026-05-07 roadmap):
 1. M8 Cleanup (wiring gaps)
 2. PTY Interactive Shell (`tea.ExecProcess`)
-3. SLM Task Classifier (Ollama HTTP, opt-in)
-4. Router Revisit (post-SLM, see ADR-013)
+3. SLM Task Classifier (Ollama HTTP, opt-in) — **complete**
+4. Router Revisit — **superseded by post-SLM plan**
 5. USP Security Integration
 6. ELF Binary Support (deferred/opportunistic)
 7. Distribution (CI trigger for goreleaser)
