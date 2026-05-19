@@ -108,22 +108,37 @@ gemini = "gemini-work"
 
 ### Tasks
 
-- [ ] `CLIAgentsSection map[string]string` in `internal/config/`. Keys
-  are canonical agent names; values are override binary names.
-- [ ] `DiscoverCLIAgents(ctx, overrides)` consults the map before
-  falling back to the canonical name. The returned `DiscoveredAgent`
-  records the resolved binary path so downstream logs are accurate.
-- [ ] `gnoma providers` shows the resolved binary name when an
-  override is in effect (e.g. `claude-priv (via [cli_agents].claude)`).
-- [ ] Unit tests against a mock PATH-resolver that confirms override
-  precedence, fallback when override is empty, and graceful behavior
-  when the overridden binary isn't on PATH.
+- [x] `CLIAgentsSection map[string]string` in `internal/config/`. Keys
+  are canonical agent names; values are override binary names. Empty
+  value (`claude = ""`) is treated as "no override".
+- [x] `DiscoverCLIAgents(ctx, overrides)` consults the map. Extracted
+  `resolveAgentBinary()` with an injectable `lookPath` for test
+  isolation. `DiscoveredAgent` gains an `OverrideBinary` field
+  (empty when canonical name was used).
+- [x] `gnoma providers` shows `claude-priv (via [cli_agents].claude)`
+  when an override is in effect; canonical-only agents print just
+  `claude`.
+- [x] Unit tests against a mock PATH-resolver covering override
+  precedence, empty-value fallback, missing-canonical-binary, and
+  missing-overridden-binary (which warns + skips rather than silently
+  falling back to canonical — masks user typos).
 
-**Exit criteria:** with `[cli_agents].claude = "claude-priv"`, the
-discovery picks up `claude-priv` as the Claude Code arm and the
-`subprocess/claude` arm in the router routes through it.
+**Status: shipped.** Module map:
+- `internal/config/config.go` — `CLIAgentsSection` map and TOML key.
+- `internal/provider/subprocess/agent.go` — package-level `lookPath`
+  for test override, `resolveAgentBinary()` helper, new
+  `DiscoveredAgent.OverrideBinary` field.
+- `cmd/gnoma/main.go` — passes `cfg.CLIAgents` to both discovery
+  call sites and formats the "via" annotation in the providers list.
 
-**Effort:** ~80 LOC + tests.
+**Exit criteria — met:** with `[cli_agents].claude = "claude-priv"`,
+discovery resolves `claude-priv` to the Claude Code arm with
+`OverrideBinary="claude-priv"`. Router routes through the binary at
+that resolved path. If the override binary isn't on PATH, the agent
+is skipped with a warning (no silent fallback).
+
+**Effort:** ~150 LOC + tests (5 resolver cases + 4 discovery tests +
+2 config tests).
 
 ---
 

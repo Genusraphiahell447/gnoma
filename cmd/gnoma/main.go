@@ -277,7 +277,7 @@ func main() {
 		}()
 		go func() {
 			defer wg.Done()
-			cliAgents = subprocprov.DiscoverCLIAgents(context.Background())
+			cliAgents = subprocprov.DiscoverCLIAgents(context.Background(), cfg.CLIAgents)
 		}()
 		go func() {
 			defer wg.Done()
@@ -1261,12 +1261,16 @@ func runProvidersCommand(cfg *gnomacfg.Config, logger *slog.Logger) int {
 	}
 
 	fmt.Println("\nCLI agents (auto-discovered):")
-	agents := subprocprov.DiscoverCLIAgents(ctx)
+	agents := subprocprov.DiscoverCLIAgents(ctx, cfg.CLIAgents)
 	if len(agents) == 0 {
 		fmt.Println("  (none found on PATH)")
 	}
 	for _, a := range agents {
-		fmt.Printf("  %-12s  version: %-20s  path: %s\n", a.Name, a.Version, a.Path)
+		label := a.Name
+		if a.OverrideBinary != "" {
+			label = fmt.Sprintf("%s (via [cli_agents].%s)", a.OverrideBinary, a.Name)
+		}
+		fmt.Printf("  %-32s  version: %-20s  path: %s\n", label, a.Version, a.Path)
 	}
 
 	fmt.Println("\nLocal models (ollama / llama.cpp):")

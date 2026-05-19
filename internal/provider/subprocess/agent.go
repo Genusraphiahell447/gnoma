@@ -2,6 +2,8 @@ package subprocess
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os/exec"
 	"sort"
 	"sync"
@@ -9,6 +11,11 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 )
+
+// lookPath is package-level for test override. Defaults to exec.LookPath.
+// Tests that swap this must NOT call t.Parallel() and should restore via
+// t.Cleanup().
+var lookPath = exec.LookPath
 
 // StreamFormat identifies the line-delimited JSON format a CLI agent emits.
 type StreamFormat string
@@ -34,6 +41,10 @@ type DiscoveredAgent struct {
 	CLIAgent
 	Path    string
 	Version string
+	// OverrideBinary is the binary name from [cli_agents].<name>=<value> when
+	// an override caused this agent to resolve to a non-canonical binary.
+	// Empty when the canonical binary name was used.
+	OverrideBinary string
 }
 
 // knownAgents is the registry of CLI agents Gnoma supports.
@@ -95,9 +106,34 @@ func newParser(f StreamFormat) FormatParser {
 	}
 }
 
+// resolveAgentBinary picks the binary name to look up for an agent and
+// resolves it on PATH. If override is non-empty, only the override is tried
+// (a missing overridden binary returns an error — we do not silently fall
+// back to the canonical name, since that would mask a user typo). If
+// override is empty, the canonical name is used.
+//
+// Returns the resolved absolute path, the binary name actually used, and an
+// error if PATH lookup failed.
+func resolveAgentBinary(canonical, override string) (resolvedPath, binName string, err error) {
+	binName = canonical
+	if override != "" {
+		binName = override
+	}
+	resolvedPath, err = lookPath(binName)
+	if err != nil {
+		return "", binName, fmt.Errorf("lookpath %q: %w", binName, err)
+	}
+	return resolvedPath, binName, nil
+}
+
 // DiscoverCLIAgents scans PATH for known CLI agents in parallel and returns the
 // ones that are present and respond to their probe command.
-func DiscoverCLIAgents(ctx context.Context) []DiscoveredAgent {
+//
+// overrides maps canonical agent names to override binary names — see
+// config.CLIAgentsSection. An empty or nil map disables overrides entirely.
+// An empty value for a key (e.g. claude="") is treated as "no override":
+// the canonical name is used.
+func DiscoverCLIAgents(ctx context.Context, overrides map[string]string) []DiscoveredAgent {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -107,20 +143,40 @@ func DiscoverCLIAgents(ctx context.Context) []DiscoveredAgent {
 	sem := make(chan struct{}, 4)
 
 	for _, agent := range knownAgents {
-		path, err := exec.LookPath(agent.Name)
+		override := overrides[agent.Name]
+		path, binName, err := resolveAgentBinary(agent.Name, override)
 		if err != nil {
+			// Only warn when the user explicitly set an override; a missing
+			// canonical binary is the common "user doesn't have this agent
+			// installed" case and shouldn't be noisy.
+			if override != "" {
+				slog.Warn("cli_agents override binary not on PATH",
+					"agent", agent.Name,
+					"override", override,
+					"error", err,
+				)
+			}
 			continue
+		}
+		recordedOverride := ""
+		if binName != agent.Name {
+			recordedOverride = binName
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(a CLIAgent, p string) {
+		go func(a CLIAgent, p, ov string) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			version := probeAgentVersion(ctx, p, a.ProbeArgs)
 			mu.Lock()
-			found = append(found, DiscoveredAgent{CLIAgent: a, Path: p, Version: version})
+			found = append(found, DiscoveredAgent{
+				CLIAgent:       a,
+				Path:           p,
+				Version:        version,
+				OverrideBinary: ov,
+			})
 			mu.Unlock()
-		}(agent, path)
+		}(agent, path, recordedOverride)
 	}
 	wg.Wait()
 

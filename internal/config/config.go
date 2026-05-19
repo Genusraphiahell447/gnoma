@@ -12,6 +12,7 @@ type Config struct {
 	Session    SessionSection    `toml:"session"`
 	SLM        SLMSection        `toml:"slm"`
 	Router     RouterSection     `toml:"router"`
+	CLIAgents  CLIAgentsSection  `toml:"cli_agents"`
 	Hooks      []HookConfig      `toml:"hooks"`
 	MCPServers []MCPServerConfig `toml:"mcp_servers"`
 	Plugins    PluginsSection    `toml:"plugins"`
@@ -39,6 +40,23 @@ type SLMSection struct {
 	DataDir        string   `toml:"data_dir"`        // llamafile-only: where to put it (empty = XDG default)
 	StartupTimeout Duration `toml:"startup_timeout"` // llamafile-only: first-launch wait budget; 0 = default 5s
 }
+
+// CLIAgentsSection maps canonical CLI agent names to override binary names.
+//
+// Useful when a user has aliased the canonical binary — e.g. `claude-priv`
+// instead of `claude`, or `gemini-work` instead of `gemini` — and wants
+// gnoma's auto-discovery to find it.
+//
+// Example:
+//
+//	[cli_agents]
+//	claude = "claude-priv"   # use claude-priv as the Claude Code binary
+//	gemini = "gemini-work"
+//	# vibe is unset → falls back to the canonical "vibe" name
+//
+// An empty value (e.g. `claude = ""`) is treated as "no override" — the
+// canonical name is used.
+type CLIAgentsSection map[string]string
 
 // RouterSection holds router-level overrides. Most routing decisions are
 // driven automatically by arm capabilities and the bandit; this section

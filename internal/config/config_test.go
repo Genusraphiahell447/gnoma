@@ -225,6 +225,47 @@ tool_pattern = "bash*"
 	}
 }
 
+func TestCLIAgentsSection_TOML_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	_ = os.WriteFile(path, []byte(`
+[cli_agents]
+claude = "claude-priv"
+gemini = ""
+`), 0o644)
+
+	cfg := Defaults()
+	if err := loadTOML(&cfg, path); err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if got := cfg.CLIAgents["claude"]; got != "claude-priv" {
+		t.Errorf("CLIAgents[claude] = %q, want %q", got, "claude-priv")
+	}
+	if got := cfg.CLIAgents["gemini"]; got != "" {
+		t.Errorf("CLIAgents[gemini] = %q, want empty (no override)", got)
+	}
+	if _, set := cfg.CLIAgents["vibe"]; set {
+		t.Errorf("CLIAgents[vibe] should be absent, got %q", cfg.CLIAgents["vibe"])
+	}
+}
+
+func TestCLIAgentsSection_Absent_NilMap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	_ = os.WriteFile(path, []byte(`
+[provider]
+default = "anthropic"
+`), 0o644)
+
+	cfg := Defaults()
+	if err := loadTOML(&cfg, path); err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(cfg.CLIAgents) != 0 {
+		t.Errorf("CLIAgents = %v, want empty", cfg.CLIAgents)
+	}
+}
+
 func TestHookConfig_MergeOrder(t *testing.T) {
 	globalDir := t.TempDir()
 	gnomaDir := filepath.Join(globalDir, "gnoma")
