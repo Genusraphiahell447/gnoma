@@ -265,6 +265,13 @@ func (e *Engine) Usage() message.Usage {
 }
 
 // SetProvider swaps the active provider (for dynamic switching).
+//
+// Callers must pass a provider that has already been wrapped with
+// security.WrapProvider — the engine's buildRequest scans inline today,
+// but the boundary contract is "every Stream call routes through a
+// SafeProvider." Passing a raw provider here would silently open a
+// firewall bypass for any engine path that calls Provider.Stream
+// without going through buildRequest.
 func (e *Engine) SetProvider(p provider.Provider) {
 	e.mu.Lock()
 	e.cfg.Provider = p

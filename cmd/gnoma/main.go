@@ -342,6 +342,12 @@ func main() {
 	// sessions from cross-contaminating the resume list.
 	sessStore := session.NewSessionStoreAt(profile.SessionDir(gnomacfg.ProjectRoot()), cfg.Session.MaxKeep, logger)
 
+	// FirewallRef holds the *Firewall via atomic.Pointer so it can be
+	// installed into SafeProvider wrappers before NewFirewall runs below
+	// (~line 509). Until Set, wrappers pass through unmodified — matching
+	// pre-firewall behaviour for early-init code paths.
+	fwRef := new(security.FirewallRef)
+
 	// Create router and register the provider as a single arm
 	// (M4 foundation: one provider from CLI. Multi-provider routing comes with config.)
 	rtr := router.New(router.Config{Logger: logger})
@@ -392,7 +398,7 @@ func main() {
 			}
 		}
 		armID = router.NewArmID(*providerName, armModel)
-		armProvider := limitedProvider(prov, *providerName, armModel, cfg)
+		armProvider := security.WrapProvider(limitedProvider(prov, *providerName, armModel, cfg), fwRef)
 		arm := &router.Arm{
 			ID:        armID,
 			Provider:  armProvider,
@@ -423,7 +429,7 @@ func main() {
 		if err != nil {
 			return nil
 		}
-		return p
+		return security.WrapProvider(p, fwRef)
 	})
 	if len(localModels) > 0 {
 		logger.Debug("local models discovered", "count", len(localModels))
@@ -435,7 +441,7 @@ func main() {
 		if _, exists := rtr.LookupArm(cliArmID); !exists {
 			rtr.RegisterArm(&router.Arm{
 				ID:           cliArmID,
-				Provider:     subprocprov.New(agent),
+				Provider:     security.WrapProvider(subprocprov.New(agent), fwRef),
 				ModelName:    agent.Name,
 				IsCLIAgent:   true,
 				Capabilities: agent.Capabilities,
@@ -481,7 +487,7 @@ func main() {
 		if err != nil {
 			return nil
 		}
-		return p
+		return security.WrapProvider(p, fwRef)
 	}
 	router.StartDiscoveryLoop(discoveryCtx, rtr, logger,
 		cfg.Provider.Endpoints["ollama"],
@@ -512,6 +518,10 @@ func main() {
 		EntropyThreshold: entropyThreshold,
 		Logger:           logger,
 	})
+	// Install into the ref so every SafeProvider wrapper sees scanning
+	// from this point on. Wrappers created before this Set call
+	// pass through; wrappers created after see the active firewall.
+	fwRef.Set(fw)
 	// Wire custom scanner patterns from config
 	for _, p := range cfg.Security.Patterns {
 		action := security.ActionRedact
@@ -699,8 +709,11 @@ func main() {
 		logger.Debug("context window from arm capabilities", "arm", armID, "context_window", contextWindowSize)
 	}
 
-	// Create context window with summarize strategy (falls back to truncation)
-	var compactStrategy gnomactx.Strategy = gnomactx.NewSummarizeStrategy(prov)
+	// Create context window with summarize strategy (falls back to truncation).
+	// The summarizer talks to the provider directly (no engine.buildRequest in
+	// between), so it needs the SafeProvider wrapper to inherit firewall
+	// scanning. The engine itself still scans inline at buildRequest().
+	var compactStrategy gnomactx.Strategy = gnomactx.NewSummarizeStrategy(security.WrapProvider(prov, fwRef))
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{
 		MaxTokens:      contextWindowSize,
 		Strategy:       compactStrategy,
@@ -746,7 +759,11 @@ func main() {
 		case boot == nil:
 			fmt.Fprintln(os.Stderr, "SLM unavailable: no backend reachable — using heuristic classifier.")
 		default:
-			lazy.set(slm.NewClassifier(boot.Provider, boot.Model, logger))
+			// Wrap once — the SLM provider is used both as the classifier
+			// transport and as a router arm. Both paths route through the
+			// firewall after fwRef.Set fires above.
+			slmProvider := security.WrapProvider(boot.Provider, fwRef)
+			lazy.set(slm.NewClassifier(slmProvider, boot.Model, logger))
 			// ToolUse comes from the live probe of the actual model. For
 			// completion-only models (e.g. TinyLlama), the SLM arm only
 			// handles knowledge-only prompts where the trivial-prompt
@@ -755,7 +772,7 @@ func main() {
 			// by MaxComplexity=0.3.
 			rtr.RegisterArm(&router.Arm{
 				ID:            router.ArmID("slm/" + string(boot.Backend)),
-				Provider:      boot.Provider,
+				Provider:      slmProvider,
 				ModelName:     boot.Model,
 				IsLocal:       true,
 				MaxComplexity: 0.3,
@@ -786,7 +803,10 @@ func main() {
 
 	// Create engine
 	eng, err := engine.New(engine.Config{
-		Provider:    prov,
+		// Wrap even though the engine's own buildRequest scans inline —
+		// belt-and-suspenders so a future engine path that bypasses
+		// buildRequest still routes through the firewall.
+		Provider:    security.WrapProvider(prov, fwRef),
 		Router:      rtr,
 		Classifier:  engineClassifier,
 		Tools:       reg,
