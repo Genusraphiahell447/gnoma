@@ -11,6 +11,7 @@ type Config struct {
 	Security   SecuritySection   `toml:"security"`
 	Session    SessionSection    `toml:"session"`
 	SLM        SLMSection        `toml:"slm"`
+	Router     RouterSection     `toml:"router"`
 	Hooks      []HookConfig      `toml:"hooks"`
 	MCPServers []MCPServerConfig `toml:"mcp_servers"`
 	Plugins    PluginsSection    `toml:"plugins"`
@@ -37,6 +38,17 @@ type SLMSection struct {
 	ModelURL       string   `toml:"model_url"`       // llamafile-only: where to download the binary from
 	DataDir        string   `toml:"data_dir"`        // llamafile-only: where to put it (empty = XDG default)
 	StartupTimeout Duration `toml:"startup_timeout"` // llamafile-only: first-launch wait budget; 0 = default 5s
+}
+
+// RouterSection holds router-level overrides. Most routing decisions are
+// driven automatically by arm capabilities and the bandit; this section
+// exists for the rare overrides that don't fit elsewhere.
+type RouterSection struct {
+	// ForceTwoStage forces the two-stage tool-routing path regardless of
+	// arm context window. Useful for debugging or for forcing the behavior
+	// on a large local model. Defaults to false: two-stage activates
+	// automatically on local arms with context window <= 16k.
+	ForceTwoStage bool `toml:"force_two_stage"`
 }
 
 // MCPServerConfig defines an MCP server to start and connect to.

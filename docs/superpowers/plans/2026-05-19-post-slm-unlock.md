@@ -43,26 +43,49 @@ only that category's real schemas.
 
 ### Tasks
 
-- [ ] `Category()` method on `tool.Tool` (or a registry-side mapping).
+- [x] `Category()` method on `tool.Tool` (or a registry-side mapping).
   Default category for unspecified tools: `meta`.
-- [ ] New `engine.useTwoStageTools(arm)` predicate. Gates on
-  `arm.IsLocal && arm.Capabilities.ContextWindow <= 16384`, with an
-  optional `[router].force_two_stage = true` config override.
-- [ ] Synthetic `select_category` tool definition emitted in
+- [x] New `engine.useTwoStageTools()` predicate. Gates on
+  `arm.IsLocal && arm.Capabilities.ContextWindow <= 16384`, with the
+  `[router].force_two_stage = true` config override.
+- [x] Synthetic `select_category` tool definition emitted in
   `buildRequest()` when the predicate is true and we're in the first
-  round of a turn.
-- [ ] Engine recognises a `select_category` tool result and filters
+  round of a turn. Round 1 also forces `ToolChoiceRequired` so SLMs
+  don't fall back to prose instead of calling the tool.
+- [x] Engine recognises a `select_category` tool call and filters
   the next round's tool schemas. The selection itself doesn't run a
-  real tool — it's consumed internally.
-- [ ] Integration test covering the round-trip with a mocked
-  openaicompat arm.
+  real tool — it's consumed internally; `select_category` remains
+  available in round 2+ so the model can switch categories mid-turn.
+- [x] Integration test covering the round-trip with a recording
+  mock provider.
 
-**Exit criteria:** for an SLM-arm turn with ≤16 k context, the first
-request contains exactly one synthetic tool schema; the second
-contains only the schemas of the selected category. Real tool
-selection still works (the second-round tool call executes normally).
+**Status: shipped.** Phase A landed via the two-stage routing commit
+on `main`. Module map:
+- `internal/tool/category.go` — `Category` type, optional
+  `Categorized` interface, `CategoryOf()` helper with `meta` fallback.
+- Real tools now declare categories: `fs.read`/`fs.ls` → read,
+  `fs.write`/`fs.edit` → write, `fs.glob`/`fs.grep` → search,
+  `bash` → exec. Agent/sysinfo fall through to meta.
+- `internal/engine/twostage.go` — synthetic tool definition, intercept
+  helper, per-turn state (`selectedCategory`).
+- `internal/engine/engine.go` — `Config.ForceTwoStageTools`,
+  `useTwoStageTools()` predicate, `twoStageContextLimit = 16384`.
+- `internal/config/config.go` — `[router].force_two_stage` TOML key
+  wired through `cmd/gnoma/main.go`.
 
-**Effort:** ~150 LOC + tests.
+**Exit criteria — met:** for an SLM-arm turn with ≤16 k context, the
+first request contains exactly one synthetic tool schema with
+`ToolChoiceRequired`; the second contains only schemas of the
+selected category plus `select_category`. Real tool selection still
+works end-to-end (verified by `TestTwoStage_FullRoundTrip`).
+
+**Effort:** ~250 LOC + tests (including 4 test files).
+
+**Deferred for follow-up (not Phase A blockers):**
+- Elf engines spawned from `internal/elf/manager.go` don't pass
+  through `ForceTwoStageTools` — small local elves still get the full
+  tool catalogue. Add per-elf two-stage detection mirroring the main
+  engine's auto-activation when telemetry shows it's worth it.
 
 ---
 

@@ -750,9 +750,10 @@ func main() {
 		Model:       *model,
 		Temperature: cfg.Provider.Temperature,
 		MaxTurns:    *maxTurns,
-		Store:       store,
-		Hooks:       dispatcher,
-		Logger:      logger,
+		Store:              store,
+		Hooks:              dispatcher,
+		Logger:             logger,
+		ForceTwoStageTools: cfg.Router.ForceTwoStage,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

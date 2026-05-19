@@ -62,6 +62,11 @@ func (e *Engine) SubmitMessages(ctx context.Context, msgs []message.Message, cb 
 }
 
 func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
+	// Two-stage tool-routing state is per-turn; clear it so an aborted turn
+	// can't leak its last category selection into the next one.
+	e.resetTwoStageState()
+	defer e.resetTwoStageState()
+
 	turn := &Turn{}
 	loopStart := time.Now()
 	var lastArmID router.ArmID
@@ -481,26 +486,51 @@ func (e *Engine) buildRequest(ctx context.Context) provider.Request {
 		includeTools = caps == nil || caps.ToolUse
 	}
 	if includeTools {
-		allowed := turnOpts.AllowedTools
-		for _, t := range e.cfg.Tools.All() {
-			// Skip deferred tools until the model requests them
-			if dt, ok := t.(tool.DeferrableTool); ok && dt.ShouldDefer() && !e.isToolActivated(t.Name()) {
-				continue
+		twoStage := e.useTwoStageTools()
+		selected := e.snapshotSelectedCategory()
+
+		if twoStage && selected == "" {
+			// Round 1 of two-stage: send only the synthetic select_category tool
+			// and force the model to call it. Small SLMs given a single optional
+			// tool will often emit prose instead of calling it.
+			req.Tools = []provider.ToolDefinition{buildSelectCategoryDef()}
+			req.ToolChoice = provider.ToolChoiceRequired
+			e.logger.Debug("two-stage: round 1 — emitting select_category only",
+				"model", req.Model,
+			)
+		} else {
+			allowed := turnOpts.AllowedTools
+			for _, t := range e.cfg.Tools.All() {
+				// Skip deferred tools until the model requests them
+				if dt, ok := t.(tool.DeferrableTool); ok && dt.ShouldDefer() && !e.isToolActivated(t.Name()) {
+					continue
+				}
+				// Filter to allowed tools when a restrict list is set
+				if allowed != nil && !slices.Contains(allowed, t.Name()) {
+					continue
+				}
+				// Under two-stage round 2+, only schemas in the selected category.
+				if twoStage && tool.CategoryOf(t) != selected {
+					continue
+				}
+				req.Tools = append(req.Tools, provider.ToolDefinition{
+					Name:        t.Name(),
+					Description: t.Description(),
+					Parameters:  t.Parameters(),
+				})
 			}
-			// Filter to allowed tools when a restrict list is set
-			if allowed != nil && !slices.Contains(allowed, t.Name()) {
-				continue
+			// Keep select_category available while two-stage is active so the
+			// model can switch categories without aborting the turn.
+			if twoStage {
+				req.Tools = append(req.Tools, buildSelectCategoryDef())
 			}
-			req.Tools = append(req.Tools, provider.ToolDefinition{
-				Name:        t.Name(),
-				Description: t.Description(),
-				Parameters:  t.Parameters(),
-			})
+			e.logger.Debug("tools included in request",
+				"model", req.Model,
+				"count", len(req.Tools),
+				"two_stage", twoStage,
+				"category", string(selected),
+			)
 		}
-		e.logger.Debug("tools included in request",
-			"model", req.Model,
-			"count", len(req.Tools),
-		)
 	} else {
 		e.logger.Debug("tools omitted — model does not support tool use",
 			"model", req.Model,
@@ -542,6 +572,10 @@ Synthesis:
 }
 
 func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb Callback) ([]message.ToolResult, error) {
+	// Intercept the synthetic select_category tool first — it never reaches
+	// the registry and produces its own synthetic tool result.
+	calls, syntheticResults := e.interceptSelectCategoryCalls(calls)
+
 	// Partition into read-only (parallel) and write (serial) batches
 	type toolCallWithTool struct {
 		call message.ToolCall
@@ -577,7 +611,8 @@ func (e *Engine) executeTools(ctx context.Context, calls []message.ToolCall, cb 
 		}
 	}
 
-	results := make([]message.ToolResult, 0, len(calls))
+	results := make([]message.ToolResult, 0, len(calls)+len(syntheticResults))
+	results = append(results, syntheticResults...)
 	results = append(results, unknownResults...)
 
 	// Execute read-only tools in parallel

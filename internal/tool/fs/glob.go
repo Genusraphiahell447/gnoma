@@ -43,6 +43,7 @@ func (t *GlobTool) Description() string         { return "Find files matching a 
 func (t *GlobTool) Parameters() json.RawMessage { return globParams }
 func (t *GlobTool) IsReadOnly() bool            { return true }
 func (t *GlobTool) IsDestructive() bool         { return false }
+func (t *GlobTool) Category() tool.Category     { return tool.CategorySearch }
 
 func (t *GlobTool) ExtractPaths(args json.RawMessage) []string {
 	var a globArgs

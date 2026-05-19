@@ -54,6 +54,7 @@ func (t *WriteTool) Description() string         { return "Write content to a fi
 func (t *WriteTool) Parameters() json.RawMessage { return writeParams }
 func (t *WriteTool) IsReadOnly() bool            { return false }
 func (t *WriteTool) IsDestructive() bool         { return false }
+func (t *WriteTool) Category() tool.Category     { return tool.CategoryWrite }
 
 func (t *WriteTool) ExtractPaths(args json.RawMessage) []string {
 	var a writeArgs

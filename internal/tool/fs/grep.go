@@ -54,6 +54,7 @@ func (t *GrepTool) Description() string         { return "Search file contents u
 func (t *GrepTool) Parameters() json.RawMessage { return grepParams }
 func (t *GrepTool) IsReadOnly() bool            { return true }
 func (t *GrepTool) IsDestructive() bool         { return false }
+func (t *GrepTool) Category() tool.Category     { return tool.CategorySearch }
 
 func (t *GrepTool) ExtractPaths(args json.RawMessage) []string {
 	var a grepArgs

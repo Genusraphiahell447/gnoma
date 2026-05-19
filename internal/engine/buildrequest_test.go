@@ -95,7 +95,9 @@ func TestBuildRequest_ForcedArmWithToolSupport_IncludesTools(t *testing.T) {
 		Provider:  &mockProvider{name: "llamacpp"},
 		ModelName: "qwen3",
 		IsLocal:   true,
-		Capabilities: provider.Capabilities{ToolUse: true},
+		// ContextWindow > 16384 keeps two-stage routing inactive so this
+		// test exercises the plain "tools included" path.
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 32768},
 	})
 	rtr.ForceArm("llamacpp/qwen3")
 

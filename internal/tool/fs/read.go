@@ -55,11 +55,12 @@ func NewReadTool(opts ...ReadOption) *ReadTool {
 	return t
 }
 
-func (t *ReadTool) Name() string               { return readToolName }
-func (t *ReadTool) Description() string         { return "Read a file from the filesystem with optional offset and line limit" }
-func (t *ReadTool) Parameters() json.RawMessage { return readParams }
-func (t *ReadTool) IsReadOnly() bool            { return true }
-func (t *ReadTool) IsDestructive() bool         { return false }
+func (t *ReadTool) Name() string                { return readToolName }
+func (t *ReadTool) Description() string          { return "Read a file from the filesystem with optional offset and line limit" }
+func (t *ReadTool) Parameters() json.RawMessage  { return readParams }
+func (t *ReadTool) IsReadOnly() bool             { return true }
+func (t *ReadTool) IsDestructive() bool          { return false }
+func (t *ReadTool) Category() tool.Category      { return tool.CategoryRead }
 
 func (t *ReadTool) ExtractPaths(args json.RawMessage) []string {
 	var a readArgs

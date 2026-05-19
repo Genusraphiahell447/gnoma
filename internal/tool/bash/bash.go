@@ -66,6 +66,7 @@ func (t *Tool) Description() string         { return "Execute a bash command and
 func (t *Tool) Parameters() json.RawMessage { return parameterSchema }
 func (t *Tool) IsReadOnly() bool            { return false }
 func (t *Tool) IsDestructive() bool         { return true }
+func (t *Tool) Category() tool.Category     { return tool.CategoryExec }
 
 type bashArgs struct {
 	Command string `json:"command"`

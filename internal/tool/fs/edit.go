@@ -48,6 +48,7 @@ func (t *EditTool) Description() string         { return "Perform exact string r
 func (t *EditTool) Parameters() json.RawMessage { return editParams }
 func (t *EditTool) IsReadOnly() bool            { return false }
 func (t *EditTool) IsDestructive() bool         { return false }
+func (t *EditTool) Category() tool.Category     { return tool.CategoryWrite }
 
 func (t *EditTool) ExtractPaths(args json.RawMessage) []string {
 	var a editArgs

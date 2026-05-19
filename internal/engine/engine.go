@@ -33,7 +33,17 @@ type Config struct {
 	Store       *persist.Store           // nil = no result persistence
 	Hooks       *hook.Dispatcher         // nil = no hooks
 	Logger      *slog.Logger
+
+	// ForceTwoStageTools forces the two-stage tool-routing path on the forced
+	// arm regardless of its context window. When false, two-stage is enabled
+	// automatically for local arms with ContextWindow <= twoStageContextLimit.
+	ForceTwoStageTools bool
 }
+
+// twoStageContextLimit is the upper bound on arm context window (in tokens)
+// under which two-stage tool routing kicks in automatically. Models bigger
+// than this can afford the full tool catalogue in every request.
+const twoStageContextLimit = 16384
 
 func (c Config) validate() error {
 	if c.Provider == nil {
@@ -77,6 +87,12 @@ type Engine struct {
 	activatedTools map[string]bool
 
 	turnOpts TurnOptions
+
+	// selectedCategory is set when the model picks a category via the
+	// synthetic select_category tool under two-stage routing. Empty string
+	// means "round 1 of two-stage" (or two-stage inactive). Reset at the end
+	// of each turn together with turnOpts.
+	selectedCategory tool.Category
 }
 
 // ToolsAvailable reports whether the current model supports tool calling.
@@ -126,6 +142,40 @@ func (e *Engine) isLocalArm() bool {
 		return false
 	}
 	return arm.IsLocal
+}
+
+// useTwoStageTools reports whether the current turn should use the two-stage
+// tool-routing path. True when:
+//   - cfg.ForceTwoStageTools is set, OR
+//   - a forced arm exists, is local, and its ContextWindow is small enough
+//     that the full tool catalogue would burn a non-trivial fraction of the
+//     prompt budget.
+//
+// Multi-arm routing (no forced arm) and cloud arms do not trigger two-stage.
+func (e *Engine) useTwoStageTools() bool {
+	if e.cfg.ForceTwoStageTools {
+		return true
+	}
+	if e.cfg.Router == nil {
+		return false
+	}
+	id := e.cfg.Router.ForcedArm()
+	if id == "" {
+		return false
+	}
+	arm, ok := e.cfg.Router.LookupArm(id)
+	if !ok {
+		return false
+	}
+	if !arm.IsLocal {
+		return false
+	}
+	cw := arm.Capabilities.ContextWindow
+	if cw <= 0 {
+		// Unknown context window on a local arm — assume small.
+		return true
+	}
+	return cw <= twoStageContextLimit
 }
 
 // New creates an engine.

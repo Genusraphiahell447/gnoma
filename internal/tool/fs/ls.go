@@ -37,6 +37,7 @@ func (t *LSTool) Description() string         { return "List directory contents 
 func (t *LSTool) Parameters() json.RawMessage { return lsParams }
 func (t *LSTool) IsReadOnly() bool            { return true }
 func (t *LSTool) IsDestructive() bool         { return false }
+func (t *LSTool) Category() tool.Category     { return tool.CategoryRead }
 
 func (t *LSTool) ExtractPaths(args json.RawMessage) []string {
 	var a lsArgs
