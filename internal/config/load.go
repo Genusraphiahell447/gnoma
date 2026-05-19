@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,40 +9,21 @@ import (
 )
 
 // Load reads and merges config from all layers.
+//
+// Backward-compatible entry point: callers that don't care about
+// profiles get the same behaviour they always had. Behind the scenes
+// this delegates to LoadWithProfile(""), which engages profile mode
+// only when ~/.config/gnoma/profiles/ exists.
+//
 // Order (lowest to highest priority):
-// 1. Defaults
-// 2. Global config: ~/.config/gnoma/config.toml
-// 3. Project config: .gnoma/config.toml
-// 4. Environment variables
+//  1. Defaults
+//  2. Global config: ~/.config/gnoma/config.toml
+//  3. Selected profile (only if profiles/ exists): profiles/<name>.toml
+//  4. Project config: .gnoma/config.toml
+//  5. Environment variables
 func Load() (*Config, error) {
-	cfg := Defaults()
-
-	// Layer 1: Global config
-	globalPath := globalConfigPath()
-	if err := loadTOML(&cfg, globalPath); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("loading global config %s: %w", globalPath, err)
-	}
-	// Deep copy global hooks before the project layer.
-	// toml.Decode may reuse the backing array, so a plain slice-header copy
-	// would alias into whatever the project decode writes.
-	// Also reset cfg.Hooks to nil so the project layer starts clean —
-	// if the project config is absent, cfg.Hooks stays nil and the append
-	// below just returns the global hooks unchanged.
-	globalHooks := append([]HookConfig(nil), cfg.Hooks...)
-	cfg.Hooks = nil
-
-	// Layer 2: Project config
-	projectPath := projectConfigPath()
-	if err := loadTOML(&cfg, projectPath); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("loading project config %s: %w", projectPath, err)
-	}
-	// User hooks run first, project hooks after.
-	cfg.Hooks = append(globalHooks, cfg.Hooks...)
-
-	// Layer 3: Environment variables
-	applyEnv(&cfg)
-
-	return &cfg, nil
+	cfg, _, err := LoadWithProfile("")
+	return cfg, err
 }
 
 func loadTOML(cfg *Config, path string) error {

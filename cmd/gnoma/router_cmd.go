@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"text/tabwriter"
 
+	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 )
 
 // runRouterCommand handles `gnoma router <subcommand>`. Returns an exit code.
-func runRouterCommand(args []string) int {
+func runRouterCommand(args []string, profile gnomacfg.Profile) int {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: gnoma router <command>")
 		fmt.Fprintln(os.Stderr, "commands:")
@@ -21,20 +21,15 @@ func runRouterCommand(args []string) int {
 	}
 	switch args[0] {
 	case "stats":
-		return runRouterStats()
+		return runRouterStats(profile)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown router command: %s\n", args[0])
 		return 1
 	}
 }
 
-func runRouterStats() int {
-	userCfgDir, err := os.UserConfigDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
-	}
-	path := filepath.Join(userCfgDir, "gnoma", "quality.json")
+func runRouterStats(profile gnomacfg.Profile) int {
+	path := profile.QualityFile(gnomacfg.GlobalConfigDir())
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -52,6 +47,9 @@ func runRouterStats() int {
 		return 1
 	}
 
+	if profile.Active {
+		fmt.Printf("Profile: %s\n\n", profile.Name)
+	}
 	printArmTable(snap)
 	fmt.Println()
 	printClassifierTable(snap)

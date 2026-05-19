@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -66,6 +67,7 @@ func main() {
 		maxTurns     = flag.Int("max-turns", 50, "max tool-calling rounds per turn")
 		permMode     = flag.String("permission", "auto", "permission mode (default, accept_edits, bypass, deny, plan, auto)")
 		incognito    = flag.Bool("incognito", false, "incognito mode — no persistence, no learning")
+		profileFlag  = flag.String("profile", "", "config profile to load (empty = default_profile from base config)")
 		verbose      = flag.Bool("verbose", false, "enable debug logging")
 		version      = flag.Bool("version", false, "print version and exit")
 	)
@@ -118,9 +120,17 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
-	// Load config (defaults → global → project → env vars)
-	cfg, err := gnomacfg.Load()
+	// Load config (defaults → global base → profile → project → env vars).
+	// Profile mode engages only when ~/.config/gnoma/profiles/ exists.
+	cfg, profile, err := gnomacfg.LoadWithProfile(*profileFlag)
 	if err != nil {
+		// Profile resolution failures are fatal: we can't guess which
+		// profile the user meant, and silently falling back to defaults
+		// is the worst possible UX.
+		if errors.Is(err, gnomacfg.ErrProfileResolution) {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(2)
+		}
 		fmt.Fprintf(os.Stderr, "warning: config load: %v\n", err)
 		defaults := gnomacfg.Defaults()
 		cfg = &defaults
@@ -131,6 +141,8 @@ func main() {
 		"keys", len(cfg.Provider.APIKeys),
 		"perm_mode", cfg.Permission.Mode,
 		"perm_rules", len(cfg.Permission.Rules),
+		"profile_active", profile.Active,
+		"profile_name", profile.Name,
 	)
 
 	// CLI flags override config
@@ -152,7 +164,7 @@ func main() {
 		case "slm":
 			os.Exit(runSLMCommand(cliArgs[1:], cfg, logger))
 		case "router":
-			os.Exit(runRouterCommand(cliArgs[1:]))
+			os.Exit(runRouterCommand(cliArgs[1:], profile))
 		}
 	}
 
@@ -311,17 +323,18 @@ func main() {
 	// Elf manager (created now, agent tool registered after router exists)
 	// We'll register the agent tool after the router is created below
 
-	// Create session store
-	sessStore := session.NewSessionStore(gnomacfg.ProjectRoot(), cfg.Session.MaxKeep, logger)
+	// Create session store. Per-profile session dir keeps work/private
+	// sessions from cross-contaminating the resume list.
+	sessStore := session.NewSessionStoreAt(profile.SessionDir(gnomacfg.ProjectRoot()), cfg.Session.MaxKeep, logger)
 
 	// Create router and register the provider as a single arm
 	// (M4 foundation: one provider from CLI. Multi-provider routing comes with config.)
 	rtr := router.New(router.Config{Logger: logger})
 
-	// Restore QualityTracker data from disk (best-effort)
+	// Restore QualityTracker data from disk (best-effort). Per-profile
+	// path avoids bandit cross-contamination between work/private/etc.
 	{
-		userCfgDir, _ := os.UserConfigDir()
-		qualityPath := filepath.Join(userCfgDir, "gnoma", "quality.json")
+		qualityPath := profile.QualityFile(gnomacfg.GlobalConfigDir())
 		if data, err := os.ReadFile(qualityPath); err == nil {
 			var snap router.QualitySnapshot
 			if err := json.Unmarshal(data, &snap); err == nil {
@@ -341,14 +354,9 @@ func main() {
 		if err != nil {
 			return
 		}
-		userCfgDir, err := os.UserConfigDir()
-		if err != nil {
-			logger.Warn("quality save skipped: no user config dir", "error", err)
-			return
-		}
-		dir := filepath.Join(userCfgDir, "gnoma")
-		_ = os.MkdirAll(dir, 0o755)
-		_ = os.WriteFile(filepath.Join(dir, "quality.json"), data, 0o644)
+		qualityPath := profile.QualityFile(gnomacfg.GlobalConfigDir())
+		_ = os.MkdirAll(filepath.Dir(qualityPath), 0o755)
+		_ = os.WriteFile(qualityPath, data, 0o644)
 	}()
 	var armID router.ArmID
 	if primaryProviderOK {

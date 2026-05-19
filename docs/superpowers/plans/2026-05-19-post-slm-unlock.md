@@ -222,32 +222,62 @@ model = "reecdev/tiny3.5:500m"
 
 ### Tasks
 
-- [ ] Config loader merges `config.toml` base + selected profile
+C-1 (foundational config + CLI) shipped 2026-05-19:
+
+- [x] Config loader merges `config.toml` base + selected profile
   (profile overrides base, env vars override profile).
-- [ ] `--profile <name>` CLI flag.
+- [x] `--profile <name>` CLI flag.
+- [x] Migration path for existing single-config users: if no
+  `profiles/` directory exists, fall back to the current behaviour
+  (load `config.toml` as the sole config).
+- [x] Docs page with three full example profiles
+  (`docs/profiles.md`).
+
+C-2 (CLI surface, separate landing):
+
 - [ ] `gnoma profile list` / `gnoma profile show <name>` subcommands.
+
+C-3 (TUI integration, separate landing):
+
 - [ ] TUI `/profile` slash command (with autocomplete on profile
   names, requires engine restart on switch).
 - [ ] Status-bar indicator shows the active profile (dim, next to the
   SLM badge: `· profile: work`).
-- [ ] Migration path for existing single-config users: if no
-  `profiles/` directory exists, fall back to the current behaviour
-  (load `config.toml` as the sole config).
-- [ ] Docs page with two or three full example profiles.
 
-### Open design questions
+### Open design questions — resolved
 
-- Should profile selection persist (last-used) or always come from
-  `default_profile` on restart? Lean: always default unless `--profile`
-  is set, and `/profile` in TUI is per-session.
-- Where do session files (`~/.local/share/gnoma/sessions/`) live —
-  global or per-profile? Lean: per-profile, so resuming `work` doesn't
-  surface `private` sessions.
-- Per-profile `quality.json` (router telemetry) — yes, otherwise the
-  bandit cross-contaminates between profile workloads.
+- **Profile selection persistence**: per-session only. Restart
+  re-reads `default_profile`; `--profile` overrides for one
+  invocation; TUI `/profile` (C-3) will be session-scoped.
+- **Session file location**: per-profile, at
+  `<projectRoot>/.gnoma/sessions/<profile>/`. When no `profiles/`
+  directory exists, legacy `<projectRoot>/.gnoma/sessions/` path
+  is preserved (no migration).
+- **Per-profile `quality.json`**: yes, at
+  `~/.config/gnoma/quality-<profile>.json`. Legacy path preserved
+  for single-config installations.
 
-**Effort:** ~400 LOC across config loader, CLI, TUI; non-trivial because
-the config layering is foundational.
+### C-1 module map (shipped)
+
+- `internal/config/profile.go` — `Profile` struct,
+  `LoadWithProfile()`, `ListProfiles()`, slice-merge helpers
+  (`mergeArmsByID`, `mergeMCPServersByName`),
+  `validateProfileName()` (rejects path traversal), and the
+  `ErrProfileResolution` sentinel for actionable misconfigurations.
+- `internal/config/load.go` — `Load()` now delegates to
+  `LoadWithProfile("")` for backward compatibility.
+- `internal/config/config.go` — `DefaultProfile string` TOML key.
+- `internal/session/store.go` — `NewSessionStoreAt(dir, ...)`
+  constructor accepting an explicit sessions directory.
+- `cmd/gnoma/main.go` — `--profile` flag, fatal exit on
+  `ErrProfileResolution`, profile-aware quality.json and session
+  paths.
+- `cmd/gnoma/router_cmd.go` — `gnoma router stats` reads the
+  active profile's `quality-<name>.json` and prefixes output
+  with `Profile: <name>`.
+
+**Effort:** C-1 shipped at ~250 LOC + ~370 LOC tests + docs page.
+C-2 and C-3 still scoped at ~80 / ~120 LOC respectively.
 
 ---
 

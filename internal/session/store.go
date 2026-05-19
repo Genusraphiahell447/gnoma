@@ -21,8 +21,15 @@ type SessionStore struct {
 
 // NewSessionStore creates a store rooted at <projectRoot>/.gnoma/sessions/.
 func NewSessionStore(projectRoot string, maxKeep int, logger *slog.Logger) *SessionStore {
+	return NewSessionStoreAt(filepath.Join(projectRoot, ".gnoma", "sessions"), maxKeep, logger)
+}
+
+// NewSessionStoreAt creates a store rooted at an explicit sessions directory.
+// Use this when the directory layout differs from <projectRoot>/.gnoma/sessions
+// (e.g. per-profile session segregation under .gnoma/sessions/<profile>/).
+func NewSessionStoreAt(sessionsDir string, maxKeep int, logger *slog.Logger) *SessionStore {
 	return &SessionStore{
-		dir:     filepath.Join(projectRoot, ".gnoma", "sessions"),
+		dir:     sessionsDir,
 		maxKeep: maxKeep,
 		logger:  logger,
 	}

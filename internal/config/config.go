@@ -4,6 +4,11 @@ import "time"
 
 // Config is the top-level configuration.
 type Config struct {
+	// DefaultProfile names the profile loaded when no --profile flag is
+	// passed. Only meaningful when ~/.config/gnoma/profiles/ exists; see
+	// LoadWithProfile.
+	DefaultProfile string `toml:"default_profile"`
+
 	Provider   ProviderSection   `toml:"provider"`
 	Permission PermissionSection `toml:"permission"`
 	Tools      ToolsSection      `toml:"tools"`
