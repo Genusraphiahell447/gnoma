@@ -35,7 +35,7 @@ func writePluginWithSkill(t *testing.T, dir, pluginName, skillName, skillContent
 	t.Helper()
 	pluginDir := filepath.Join(dir, pluginName)
 	skillsDir := filepath.Join(pluginDir, "skills")
-	os.MkdirAll(skillsDir, 0o755)
+	_ = os.MkdirAll(skillsDir, 0o755)
 
 	m := Manifest{
 		Name:    pluginName,
@@ -45,8 +45,8 @@ func writePluginWithSkill(t *testing.T, dir, pluginName, skillName, skillContent
 		},
 	}
 	data, _ := marshalManifest(m)
-	os.WriteFile(filepath.Join(pluginDir, "plugin.json"), data, 0o644)
-	os.WriteFile(filepath.Join(skillsDir, skillName+".md"), []byte(skillContent), 0o644)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.json"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(skillsDir, skillName+".md"), []byte(skillContent), 0o644)
 }
 
 func marshalManifest(m Manifest) ([]byte, error) {
@@ -122,8 +122,8 @@ func TestLoader_Discover_SkipsInvalidManifest(t *testing.T) {
 
 	// Write an invalid plugin (bad JSON).
 	badDir := filepath.Join(globalDir, "bad")
-	os.MkdirAll(badDir, 0o755)
-	os.WriteFile(filepath.Join(badDir, "plugin.json"), []byte(`{invalid`), 0o644)
+	_ = os.MkdirAll(badDir, 0o755)
+	_ = os.WriteFile(filepath.Join(badDir, "plugin.json"), []byte(`{invalid`), 0o644)
 
 	loader := NewLoader(testLogger())
 	plugins, err := loader.Discover(globalDir, filepath.Join(dir, "project"))
@@ -274,8 +274,9 @@ func TestLoader_Load_TOFU_RecordsPinOnFirstLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(result.Skills)+len(result.Hooks)+len(result.MCPServers) != 0 {
-		// No capabilities declared, but plugin should still have been processed.
+	// Plugin declares no capabilities, but TOFU must still record a pin.
+	if n := len(result.Skills) + len(result.Hooks) + len(result.MCPServers); n != 0 {
+		t.Errorf("plugin with no capabilities produced %d entries", n)
 	}
 	if _, ok := pins.Get("newbie"); !ok {
 		t.Error("TOFU did not record a pin for the new plugin")

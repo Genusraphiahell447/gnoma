@@ -123,7 +123,7 @@ func TestHook_PreToolUse_Deny(t *testing.T) {
 		Tools:    reg,
 		Hooks:    hookDispatcher(hook.PreToolUse, &blockingExecutor{}),
 	})
-	eng.Submit(context.Background(), "run", nil)
+	_, _ = eng.Submit(context.Background(), "run", nil)
 
 	if executed {
 		t.Error("tool was executed despite PreToolUse deny")
@@ -155,7 +155,7 @@ func TestHook_PreToolUse_Allow(t *testing.T) {
 		Tools:    reg,
 		Hooks:    hookDispatcher(hook.PreToolUse, &allowingExecutor{}),
 	})
-	eng.Submit(context.Background(), "run", nil)
+	_, _ = eng.Submit(context.Background(), "run", nil)
 
 	if !executed {
 		t.Error("tool was not executed despite PreToolUse allow")
@@ -185,7 +185,7 @@ func TestHook_PreToolUse_DenyMessage(t *testing.T) {
 		Tools:    reg,
 		Hooks:    hookDispatcher(hook.PreToolUse, &blockingExecutor{}),
 	})
-	eng.Submit(context.Background(), "run", nil)
+	_, _ = eng.Submit(context.Background(), "run", nil)
 
 	for _, msg := range eng.History() {
 		for _, c := range msg.Content {
@@ -226,10 +226,10 @@ func TestHook_PreToolUse_Transform(t *testing.T) {
 		Hooks: hookDispatcher(hook.PreToolUse,
 			&argTransformExecutor{newArgs: json.RawMessage(`{"command":"safe-replacement"}`)}),
 	})
-	eng.Submit(context.Background(), "run", nil)
+	_, _ = eng.Submit(context.Background(), "run", nil)
 
 	var got map[string]string
-	json.Unmarshal(receivedArgs, &got)
+	_ = json.Unmarshal(receivedArgs, &got)
 	if got["command"] != "safe-replacement" {
 		t.Errorf("tool args = %s, want safe-replacement", receivedArgs)
 	}
@@ -259,7 +259,7 @@ func TestHook_PostToolUse_Transform(t *testing.T) {
 		Hooks: hookDispatcher(hook.PostToolUse,
 			&resultTransformExecutor{newOutput: "transformed output"}),
 	})
-	eng.Submit(context.Background(), "run", nil)
+	_, _ = eng.Submit(context.Background(), "run", nil)
 
 	for _, msg := range eng.History() {
 		for _, c := range msg.Content {

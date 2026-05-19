@@ -321,9 +321,9 @@ func TestGlobTool_Interface(t *testing.T) {
 
 func TestGlobTool_MatchFiles(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644)
-	os.WriteFile(filepath.Join(dir, "test.go"), []byte("package main"), 0o644)
-	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# readme"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "test.go"), []byte("package main"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# readme"), 0o644)
 
 	g := NewGlobTool()
 	result, err := g.Execute(context.Background(), mustJSON(t, globArgs{Pattern: "*.go", Path: dir}))
@@ -357,12 +357,12 @@ func TestGlobTool_NoMatches(t *testing.T) {
 
 func TestGlobTool_Doublestar(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "internal", "foo"), 0o755)
-	os.MkdirAll(filepath.Join(dir, "cmd", "bar"), 0o755)
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte(""), 0o644)
-	os.WriteFile(filepath.Join(dir, "internal", "foo", "foo.go"), []byte(""), 0o644)
-	os.WriteFile(filepath.Join(dir, "cmd", "bar", "bar.go"), []byte(""), 0o644)
-	os.WriteFile(filepath.Join(dir, "cmd", "bar", "bar_test.go"), []byte(""), 0o644)
+	_ = os.MkdirAll(filepath.Join(dir, "internal", "foo"), 0o755)
+	_ = os.MkdirAll(filepath.Join(dir, "cmd", "bar"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "main.go"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "internal", "foo", "foo.go"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "cmd", "bar", "bar.go"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "cmd", "bar", "bar_test.go"), []byte(""), 0o644)
 
 	g := NewGlobTool()
 
@@ -441,9 +441,9 @@ func TestGrepTool_SingleFile(t *testing.T) {
 
 func TestGrepTool_Directory(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("func main() {}\nfunc helper() {}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "b.go"), []byte("func test() {}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "c.txt"), []byte("func ignored() {}"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "a.go"), []byte("func main() {}\nfunc helper() {}"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "b.go"), []byte("func test() {}"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "c.txt"), []byte("func ignored() {}"), 0o644)
 
 	g := NewGrepTool()
 
@@ -537,9 +537,9 @@ func TestLSTool_Interface(t *testing.T) {
 
 func TestLSTool_ListDirectory(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main"), 0o644)
-	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# readme"), 0o644)
-	os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# readme"), 0o644)
+	_ = os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
 
 	l := NewLSTool()
 	result, err := l.Execute(context.Background(), mustJSON(t, lsArgs{Path: dir}))
@@ -591,7 +591,7 @@ func TestLSTool_DirectoryNotFound(t *testing.T) {
 
 func TestLSTool_ShowsSizes(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "small.txt"), []byte("hi"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "small.txt"), []byte("hi"), 0o644)
 
 	l := NewLSTool()
 	result, err := l.Execute(context.Background(), mustJSON(t, lsArgs{Path: dir}))

@@ -124,7 +124,7 @@ func TestLocal_SendWhileBusy(t *testing.T) {
 	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
-	sess.Send("first")
+	_ = sess.Send("first")
 
 	// Try to send while still processing
 	err := sess.Send("second")
@@ -151,7 +151,7 @@ func TestLocal_Cancel(t *testing.T) {
 	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
-	sess.Send("slow task")
+	_ = sess.Send("slow task")
 
 	// Read a few events then cancel
 	evts := sess.Events()
@@ -203,12 +203,12 @@ func TestLocal_StatusTracking(t *testing.T) {
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "mock-model"})
 
 	// Turn 1
-	sess.Send("one")
+	_ = sess.Send("one")
 	for range sess.Events() {
 	}
 
 	// Turn 2
-	sess.Send("two")
+	_ = sess.Send("two")
 	for range sess.Events() {
 	}
 

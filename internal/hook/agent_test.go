@@ -82,7 +82,7 @@ func TestAgentExecutor_TemplateRendered(t *testing.T) {
 	}
 	fn, captured := capturingSpawnFn("ALLOW")
 	ex := NewAgentExecutor(def, fn)
-	ex.Execute(context.Background(), MarshalPreToolPayload("bash", nil))
+	_, _ = ex.Execute(context.Background(), MarshalPreToolPayload("bash", nil))
 	if *captured != "Tool=bash Event=pre_tool_use" {
 		t.Errorf("prompt = %q", *captured)
 	}

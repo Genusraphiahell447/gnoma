@@ -173,7 +173,7 @@ func TestDispatcher_TransformChaining(t *testing.T) {
 		makeHandler(PreToolUse, exA),
 		makeHandler(PreToolUse, exB),
 	)
-	d.Fire(PreToolUse, []byte(`{"tool":"original"}`))
+	_, _, _ = d.Fire(PreToolUse, []byte(`{"tool":"original"}`))
 
 	if string(exB.receivedPayload) != string(transformed) {
 		t.Errorf("exB received %q, want %q", exB.receivedPayload, transformed)
@@ -190,7 +190,7 @@ func TestDispatcher_TransformChaining_EmptyOutputPassesThrough(t *testing.T) {
 		makeHandler(PreToolUse, exA),
 		makeHandler(PreToolUse, exB),
 	)
-	d.Fire(PreToolUse, original)
+	_, _, _ = d.Fire(PreToolUse, original)
 
 	if string(exB.receivedPayload) != string(original) {
 		t.Errorf("exB received %q, want %q", exB.receivedPayload, original)
@@ -223,11 +223,7 @@ func TestDispatcher_ToolPattern_Empty_MatchesAll(t *testing.T) {
 	payload := MarshalPreToolPayload("fs.read", nil)
 	d := dispatcherWith(PreToolUse, makePatternHandler("", ex))
 	_, action, _ := d.Fire(PreToolUse, payload)
-	if action != Allow {
-		// empty pattern + Deny → resolveAction sees Deny → Deny
-		// wait, empty pattern means fire for all tools
-	}
-	// correct: empty pattern fires → Deny
+	// Empty pattern fires for all tools; the Deny handler must resolve to Deny.
 	if action != Deny {
 		t.Errorf("empty pattern matches all: action = %v, want Deny", action)
 	}

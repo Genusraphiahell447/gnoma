@@ -198,7 +198,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			})
 			if err != nil {
 				// Try reactive compaction on 413 (request too large)
-				s, err = e.handleRequestTooLarge(ctx, err, req)
+				s, err = e.handleRequestTooLarge(ctx, err)
 				if err != nil {
 					decision.Rollback()
 					streamErr := fmt.Errorf("provider stream: %w", err)
@@ -698,8 +698,9 @@ func truncate(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
-// handleRequestTooLarge attempts compaction on 413 and retries once.
-func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req provider.Request) (stream.Stream, error) {
+// handleRequestTooLarge attempts compaction on 413 and retries once. The
+// request is rebuilt from the compacted history, so callers don't pass it in.
+func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error) (stream.Stream, error) {
 	var provErr *provider.ProviderError
 	if !errors.As(origErr, &provErr) || provErr.StatusCode != 413 {
 		return nil, origErr
@@ -716,7 +717,7 @@ func (e *Engine) handleRequestTooLarge(ctx context.Context, origErr error, req p
 	}
 
 	e.replaceHistory(e.cfg.Context.Messages())
-	req = e.buildRequest(ctx)
+	req := e.buildRequest(ctx)
 
 	if e.cfg.Router != nil {
 		prompt := e.latestUserPrompt()

@@ -14,7 +14,7 @@ import (
 func TestDownload_Success(t *testing.T) {
 	content := []byte("hello llamafile")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write(content)
+		_, _ = w.Write(content)
 	}))
 	defer srv.Close()
 
@@ -94,7 +94,7 @@ func TestDownload_ContextCancel(t *testing.T) {
 func TestDownload_NilProgress(t *testing.T) {
 	content := []byte("data")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write(content)
+		_, _ = w.Write(content)
 	}))
 	defer srv.Close()
 
@@ -111,8 +111,8 @@ func TestHashFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Write(content)
-	f.Close()
+	_, _ = f.Write(content)
+	_ = f.Close()
 
 	h := sha256.Sum256(content)
 	want := hex.EncodeToString(h[:])

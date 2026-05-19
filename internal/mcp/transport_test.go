@@ -74,7 +74,7 @@ func TestTransport_Call_Success(t *testing.T) {
 	if err := tr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	result, err := tr.Call(ctx, "tools/list", nil)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestTransport_Call_RPCError(t *testing.T) {
 	if err := tr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	_, err := tr.Call(ctx, "nonexistent", nil)
 	if err == nil {
@@ -131,7 +131,7 @@ func TestTransport_Call_Timeout(t *testing.T) {
 	if err := tr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
@@ -161,7 +161,7 @@ echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"val\":\"$TEST_MCP_VAR\"}}"
 	if err := tr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	result, err := tr.Call(ctx, "test", nil)
 	if err != nil {
@@ -205,7 +205,7 @@ echo "$line" > "` + filepath.Join(dir, "received.json") + `"
 
 	// Give the script a moment to write the file.
 	time.Sleep(50 * time.Millisecond)
-	tr.Close()
+	_ = tr.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "received.json"))
 	if err != nil {
@@ -233,7 +233,7 @@ func TestTransport_MultipleCalls(t *testing.T) {
 	if err := tr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	// First call.
 	r1, err := tr.Call(ctx, "first", nil)
@@ -242,7 +242,7 @@ func TestTransport_MultipleCalls(t *testing.T) {
 	}
 
 	var p1 struct{ Step string }
-	json.Unmarshal(r1, &p1)
+	_ = json.Unmarshal(r1, &p1)
 	if p1.Step != "first" {
 		t.Errorf("call 1 step = %q, want %q", p1.Step, "first")
 	}
@@ -254,7 +254,7 @@ func TestTransport_MultipleCalls(t *testing.T) {
 	}
 
 	var p2 struct{ Step string }
-	json.Unmarshal(r2, &p2)
+	_ = json.Unmarshal(r2, &p2)
 	if p2.Step != "second" {
 		t.Errorf("call 2 step = %q, want %q", p2.Step, "second")
 	}

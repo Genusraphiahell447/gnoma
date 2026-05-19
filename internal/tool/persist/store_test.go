@@ -11,7 +11,7 @@ import (
 
 func TestStore_SaveSkipsSmallContent(t *testing.T) {
 	s := persist.New("test-session-001")
-	t.Cleanup(func() { os.RemoveAll(s.Dir()) })
+	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	path, ok := s.Save("bash", "call-001", "small output")
 	if ok {
@@ -24,7 +24,7 @@ func TestStore_SaveSkipsSmallContent(t *testing.T) {
 
 func TestStore_SavePersistsLargeContent(t *testing.T) {
 	s := persist.New("test-session-002")
-	t.Cleanup(func() { os.RemoveAll(s.Dir()) })
+	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	content := strings.Repeat("x", 1024)
 	path, ok := s.Save("fs.grep", "call-002", content)
@@ -45,7 +45,7 @@ func TestStore_SavePersistsLargeContent(t *testing.T) {
 
 func TestStore_ListFilters(t *testing.T) {
 	s := persist.New("test-session-003")
-	t.Cleanup(func() { os.RemoveAll(s.Dir()) })
+	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	bigContent := strings.Repeat("y", 1024)
 	s.Save("bash", "c1", bigContent)
@@ -71,7 +71,7 @@ func TestStore_ListFilters(t *testing.T) {
 
 func TestStore_ReadValidatesPath(t *testing.T) {
 	s := persist.New("test-session-004")
-	t.Cleanup(func() { os.RemoveAll(s.Dir()) })
+	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	// Path outside session dir must be rejected
 	_, err := s.Read("/etc/passwd")

@@ -73,9 +73,9 @@ func TestSessionStore_Load_CorruptMetadata(t *testing.T) {
 	store := session.NewSessionStore(root, 3, slog.Default())
 
 	dir := filepath.Join(root, ".gnoma", "sessions", "corrupt-sess")
-	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "metadata.json"), []byte("not json"), 0o644)
-	os.WriteFile(filepath.Join(dir, "messages.json"), []byte("[]"), 0o644)
+	_ = os.MkdirAll(dir, 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "metadata.json"), []byte("not json"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "messages.json"), []byte("[]"), 0o644)
 
 	_, err := store.Load("corrupt-sess")
 	if err == nil {
@@ -87,9 +87,9 @@ func TestSessionStore_List_SortedByUpdatedAt(t *testing.T) {
 	store := makeStore(t)
 	now := time.Now().UTC()
 
-	store.Save(makeSnap("sess-old", now.Add(-2*time.Hour)))
-	store.Save(makeSnap("sess-new", now))
-	store.Save(makeSnap("sess-mid", now.Add(-1*time.Hour)))
+	_ = store.Save(makeSnap("sess-old", now.Add(-2*time.Hour)))
+	_ = store.Save(makeSnap("sess-new", now))
+	_ = store.Save(makeSnap("sess-mid", now.Add(-1*time.Hour)))
 
 	list, err := store.List()
 	if err != nil {
@@ -131,7 +131,7 @@ func TestSessionStore_Prune_RemovesOldest(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("sess-%03d", i)
-		store.Save(makeSnap(id, now.Add(time.Duration(i)*time.Minute)))
+		_ = store.Save(makeSnap(id, now.Add(time.Duration(i)*time.Minute)))
 	}
 
 	list, err := store.List()

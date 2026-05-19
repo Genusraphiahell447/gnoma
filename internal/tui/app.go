@@ -575,9 +575,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		if msg.Button == tea.MouseWheelUp {
+		switch msg.Button {
+		case tea.MouseWheelUp:
 			m.scrollOffset += 3
-		} else if msg.Button == tea.MouseWheelDown {
+		case tea.MouseWheelDown:
 			m.scrollOffset -= 3
 			if m.scrollOffset < 0 {
 				m.scrollOffset = 0
@@ -847,7 +848,8 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 
 func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 	// Prepend mode prefix and reset mode before dispatching.
-	if m.inputMode == "command" {
+	switch m.inputMode {
+	case "command":
 		if strings.TrimSpace(input) == "" {
 			m.inputMode = ""
 			m.suggestions = nil
@@ -860,7 +862,7 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		input = "/" + strings.TrimSpace(input)
-	} else if m.inputMode == "execute" {
+	case "execute":
 		if strings.TrimSpace(input) == "" {
 			m.inputMode = ""
 			m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {

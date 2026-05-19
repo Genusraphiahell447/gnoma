@@ -14,7 +14,7 @@ import (
 func makeTestStore(t *testing.T) *persist.Store {
 	t.Helper()
 	s := persist.New("test-coord-" + t.Name())
-	t.Cleanup(func() { os.RemoveAll(s.Dir()) })
+	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 	return s
 }
 
@@ -26,10 +26,8 @@ func TestListResultsTool_EmptyStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "no results") && result.Output != "" {
-		// both "no results" message and empty string are acceptable
-	}
-	// Verify it doesn't error on empty store
+	// Empty store: either a "no results" message or empty output is acceptable;
+	// verify only that we don't surface a hard error.
 	if strings.Contains(result.Output, "error") {
 		t.Errorf("unexpected error output for empty store: %s", result.Output)
 	}

@@ -60,7 +60,7 @@ func TestSetHistory_OverwritesPreviousHistory(t *testing.T) {
 		},
 	}
 	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
-	e.Submit(context.Background(), "first message", nil)
+	_, _ = e.Submit(context.Background(), "first message", nil)
 
 	if len(e.History()) == 0 {
 		t.Fatal("history should not be empty after Submit")
@@ -174,7 +174,7 @@ func TestSetUsage_OverwritesPreviousUsage(t *testing.T) {
 		},
 	}
 	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
-	e.Submit(context.Background(), "hello", nil)
+	_, _ = e.Submit(context.Background(), "hello", nil)
 
 	if e.Usage().InputTokens == 0 {
 		t.Fatal("usage should be non-zero after Submit")

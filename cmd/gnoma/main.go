@@ -344,8 +344,8 @@ func main() {
 			return
 		}
 		dir := filepath.Join(userCfgDir, "gnoma")
-		os.MkdirAll(dir, 0o755)
-		os.WriteFile(filepath.Join(dir, "quality.json"), data, 0o644)
+		_ = os.MkdirAll(dir, 0o755)
+		_ = os.WriteFile(filepath.Join(dir, "quality.json"), data, 0o644)
 	}()
 	var armID router.ArmID
 	if primaryProviderOK {
@@ -641,8 +641,7 @@ func main() {
 	}
 
 	// Create context window with summarize strategy (falls back to truncation)
-	var compactStrategy gnomactx.Strategy
-	compactStrategy = gnomactx.NewSummarizeStrategy(prov)
+	var compactStrategy gnomactx.Strategy = gnomactx.NewSummarizeStrategy(prov)
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{
 		MaxTokens:      contextWindowSize,
 		Strategy:       compactStrategy,
@@ -1334,9 +1333,10 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 			fmt.Printf("  sha256:  %s\n", mf.SHA256[:16]+"...")
 			fmt.Printf("  setup:   %s\n", mf.SetupAt.Format("2006-01-02 15:04 UTC"))
 		}
-		if status == slm.StatusNotSetUp {
+		switch status {
+		case slm.StatusNotSetUp:
 			fmt.Println("  run: gnoma slm setup")
-		} else if status == slm.StatusMissing {
+		case slm.StatusMissing:
 			fmt.Println("  file is missing; run: gnoma slm setup")
 		}
 		return 0

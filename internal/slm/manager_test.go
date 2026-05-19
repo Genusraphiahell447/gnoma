@@ -76,7 +76,7 @@ func TestManager_StatusMissing(t *testing.T) {
 func TestManager_Setup(t *testing.T) {
 	content := []byte("fake llamafile binary")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write(content)
+		_, _ = w.Write(content)
 	}))
 	defer srv.Close()
 

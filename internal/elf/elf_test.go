@@ -202,9 +202,9 @@ func TestManager_WaitAll(t *testing.T) {
 
 	mgr := NewManager(ManagerConfig{Router: rtr, Tools: tool.NewRegistry()})
 
-	mgr.Spawn(context.Background(), router.TaskGeneration, "a", "", 30)
-	mgr.Spawn(context.Background(), router.TaskGeneration, "b", "", 30)
-	mgr.Spawn(context.Background(), router.TaskGeneration, "c", "", 30)
+	_, _ = mgr.Spawn(context.Background(), router.TaskGeneration, "a", "", 30)
+	_, _ = mgr.Spawn(context.Background(), router.TaskGeneration, "b", "", 30)
+	_, _ = mgr.Spawn(context.Background(), router.TaskGeneration, "c", "", 30)
 
 	results := mgr.WaitAll()
 	if len(results) != 3 {

@@ -25,7 +25,7 @@ func probeLlamaCppToolSupport(ctx context.Context, baseURL string) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return false
@@ -73,7 +73,7 @@ func probeOllamaToolSupport(ctx context.Context, baseURL, modelName string) bool
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return false

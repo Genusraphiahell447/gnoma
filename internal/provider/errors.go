@@ -83,18 +83,18 @@ func ClassifyHTTPError(status int, message string) (ErrorKind, bool) {
 
 // ClassifyHTTPStatus returns the ErrorKind and retryability for an HTTP status code.
 func ClassifyHTTPStatus(status int) (ErrorKind, bool) {
-	switch {
-	case status == 401 || status == 403:
+	switch status {
+	case 401, 403:
 		return ErrAuth, false
-	case status == 400:
+	case 400:
 		return ErrBadRequest, false
-	case status == 404:
+	case 404:
 		return ErrNotFound, false
-	case status == 429 || status == 529:
+	case 429, 529:
 		return ErrTransient, true
-	case status == 500 || status == 502 || status == 503:
+	case 500, 502, 503:
 		return ErrTransient, true
-	case status == 504:
+	case 504:
 		return ErrOverloaded, true
 	default:
 		if status >= 500 {

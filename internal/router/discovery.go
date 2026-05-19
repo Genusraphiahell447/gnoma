@@ -45,7 +45,7 @@ func DiscoverOllama(ctx context.Context, baseURL string, toolCache map[string]bo
 	if err != nil {
 		return nil, fmt.Errorf("ollama not reachable at %s: %w", baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("ollama returned %d", resp.StatusCode)
@@ -115,7 +115,7 @@ func DiscoverLlamaCpp(ctx context.Context, baseURL string) ([]DiscoveredModel, e
 	if err != nil {
 		return nil, fmt.Errorf("llama.cpp not reachable at %s: %w", baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("llama.cpp returned %d", resp.StatusCode)

@@ -140,15 +140,14 @@ func inferGoogleModelCapabilities(m *genai.Model) provider.Capabilities {
 	}
 
 	// Model-specific overrides based on model name
-	name := m.Name
-	switch {
-	case name == "gemini-2.5-pro", name == "gemini-2.5-flash":
+	switch m.Name {
+	case "gemini-2.5-pro", "gemini-2.5-flash":
 		caps.ContextWindow = 1048576
 		caps.MaxOutput = 65536
-	case name == "gemini-2.0-pro", name == "gemini-2.0-flash":
+	case "gemini-2.0-pro", "gemini-2.0-flash":
 		caps.ContextWindow = 1048576
 		caps.MaxOutput = 8192
-	case name == "gemini-1.5-pro", name == "gemini-1.5-flash":
+	case "gemini-1.5-pro", "gemini-1.5-flash":
 		caps.ContextWindow = 1048576
 		caps.MaxOutput = 8192
 	}

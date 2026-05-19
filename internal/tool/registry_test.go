@@ -162,7 +162,7 @@ func TestStubTool_Execute(t *testing.T) {
 		execFn: func(ctx context.Context, args json.RawMessage) (Result, error) {
 			called = true
 			var input struct{ Value string }
-			json.Unmarshal(args, &input)
+			_ = json.Unmarshal(args, &input)
 			return Result{
 				Output:   "processed: " + input.Value,
 				Metadata: map[string]any{"key": "val"},

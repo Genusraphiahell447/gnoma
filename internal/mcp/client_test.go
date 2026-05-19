@@ -17,7 +17,7 @@ func writeMCPServer(t *testing.T, tools []MCPTool, callResult string) string {
 
 	// Write response payloads as files.
 	initResult := `{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"test-server","version":"1.0.0"}}`
-	os.WriteFile(filepath.Join(dir, "init.json"), []byte(initResult), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "init.json"), []byte(initResult), 0o644)
 
 	toolsJSON, err := json.Marshal(struct {
 		Tools []MCPTool `json:"tools"`
@@ -25,8 +25,8 @@ func writeMCPServer(t *testing.T, tools []MCPTool, callResult string) string {
 	if err != nil {
 		t.Fatalf("marshal tools: %v", err)
 	}
-	os.WriteFile(filepath.Join(dir, "tools.json"), toolsJSON, 0o644)
-	os.WriteFile(filepath.Join(dir, "call.json"), []byte(callResult), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "tools.json"), toolsJSON, 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "call.json"), []byte(callResult), 0o644)
 
 	// The script uses pure bash for JSON parsing — no python3 or jq dependency.
 	// We extract "method" and "id" with grep since the JSON-RPC format is predictable.
@@ -79,7 +79,7 @@ func TestClient_Initialize(t *testing.T) {
 	}
 
 	client := NewClient(tr, logger)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Initialize(ctx); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -117,7 +117,7 @@ func TestClient_ListTools(t *testing.T) {
 	}
 
 	client := NewClient(tr, logger)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Initialize(ctx); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -159,7 +159,7 @@ func TestClient_CallTool(t *testing.T) {
 	}
 
 	client := NewClient(tr, logger)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Initialize(ctx); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -210,7 +210,7 @@ echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32000,\"message\":\"i
 	}
 
 	client := NewClient(tr, logger)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	err := client.Initialize(ctx)
 	if err == nil {

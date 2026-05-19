@@ -429,7 +429,7 @@ func TestEngine_Reset(t *testing.T) {
 	}
 
 	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
-	e.Submit(context.Background(), "hello", nil)
+	_, _ = e.Submit(context.Background(), "hello", nil)
 
 	if len(e.History()) == 0 {
 		t.Fatal("history should not be empty before reset")
@@ -463,7 +463,7 @@ func TestEngine_Reset_ClearsContextWindow(t *testing.T) {
 		Tools:    tool.NewRegistry(),
 		Context:  ctxWindow,
 	})
-	e.Submit(context.Background(), "hello", nil)
+	_, _ = e.Submit(context.Background(), "hello", nil)
 
 	if len(ctxWindow.Messages()) == 0 {
 		t.Fatal("context window should have messages before reset")
@@ -542,7 +542,7 @@ func TestSubmit_TrackerReflectsInputTokens(t *testing.T) {
 	}
 	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry(), Context: ctxWindow})
 
-	e.Submit(context.Background(), "hi", nil)
+	_, _ = e.Submit(context.Background(), "hi", nil)
 
 	// Tracker should be InputTokens + OutputTokens = 150, not more
 	used := ctxWindow.Tracker().Used()
@@ -568,8 +568,8 @@ func TestSubmit_CumulativeUsage(t *testing.T) {
 
 	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
 
-	e.Submit(context.Background(), "one", nil)
-	e.Submit(context.Background(), "two", nil)
+	_, _ = e.Submit(context.Background(), "one", nil)
+	_, _ = e.Submit(context.Background(), "two", nil)
 
 	if e.Usage().InputTokens != 300 {
 		t.Errorf("cumulative InputTokens = %d, want 300", e.Usage().InputTokens)

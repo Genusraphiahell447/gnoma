@@ -105,7 +105,7 @@ func TestAdapter_Execute(t *testing.T) {
 	}
 
 	client := NewClient(tr, logger)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Initialize(ctx); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -140,7 +140,7 @@ func TestAdapter_Execute_MultipleTextBlocks(t *testing.T) {
 	}
 
 	client := NewClient(tr, logger)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Initialize(ctx); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -180,16 +180,16 @@ while IFS= read -r line; do
   esac
 done
 `
-	os.WriteFile(script, []byte(content), 0o755)
+	_ = os.WriteFile(script, []byte(content), 0o755)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tr := NewTransport("bash", []string{script}, nil, logger)
 
 	ctx := context.Background()
-	tr.Start(ctx)
+	_ = tr.Start(ctx)
 	client := NewClient(tr, logger)
-	defer client.Close()
-	client.Initialize(ctx)
+	defer func() { _ = client.Close() }()
+	_ = client.Initialize(ctx)
 
 	a := NewAdapter("err", MCPTool{Name: "broken", InputSchema: json.RawMessage(`{}`)}, client)
 	result, err := a.Execute(ctx, json.RawMessage(`{}`))

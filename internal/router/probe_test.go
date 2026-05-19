@@ -13,7 +13,7 @@ func TestProbeLlamaCppToolSupport_SupportsTools(t *testing.T) {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"chat_template": "...",
 			"chat_template_caps": {
 				"supports_tools": true,
@@ -34,7 +34,7 @@ func TestProbeLlamaCppToolSupport_SupportsTools(t *testing.T) {
 func TestProbeLlamaCppToolSupport_NoToolSupport(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"chat_template": "...",
 			"chat_template_caps": {
 				"supports_tools": false,
@@ -55,7 +55,7 @@ func TestProbeLlamaCppToolSupport_NoCaps(t *testing.T) {
 	// Old llama.cpp version that doesn't return chat_template_caps
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"chat_template": "...", "total_slots": 1}`))
+		_, _ = w.Write([]byte(`{"chat_template": "...", "total_slots": 1}`))
 	}))
 	defer srv.Close()
 
@@ -75,7 +75,7 @@ func TestProbeLlamaCppToolSupport_ServerDown(t *testing.T) {
 func TestProbeLlamaCppToolSupport_ToolsWithoutToolCalls(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"chat_template_caps": {
 				"supports_tools": true,
 				"supports_tool_calls": false
@@ -96,7 +96,7 @@ func TestProbeOllamaToolSupport_HasTools(t *testing.T) {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"details": {"family": "qwen2", "parameter_size": "7B"},
 			"capabilities": ["completion", "tools"]
 		}`))
@@ -112,7 +112,7 @@ func TestProbeOllamaToolSupport_HasTools(t *testing.T) {
 func TestProbeOllamaToolSupport_NoTools(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"details": {"family": "phi", "parameter_size": "3B"},
 			"capabilities": ["completion"]
 		}`))
@@ -129,7 +129,7 @@ func TestProbeOllamaToolSupport_NoCapsField(t *testing.T) {
 	// Old Ollama version without capabilities
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"details": {"family": "llama"}}`))
+		_, _ = w.Write([]byte(`{"details": {"family": "llama"}}`))
 	}))
 	defer srv.Close()
 

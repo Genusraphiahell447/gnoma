@@ -37,7 +37,7 @@ func TestManager_StartAll_RegistersTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartAll: %v", err)
 	}
-	defer mgr.Shutdown()
+	defer func() { _ = mgr.Shutdown() }()
 
 	// Tools should be registered with mcp__ prefix.
 	if _, ok := reg.Get("mcp__git__status"); !ok {
@@ -77,7 +77,7 @@ func TestManager_StartAll_ReplaceDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartAll: %v", err)
 	}
-	defer mgr.Shutdown()
+	defer func() { _ = mgr.Shutdown() }()
 
 	// The "bash" tool should now be the MCP adapter, not the mock.
 	bashTool, ok := reg.Get("bash")
@@ -111,7 +111,7 @@ func TestManager_StartAll_BadCommand(t *testing.T) {
 	}, reg)
 	if err == nil {
 		t.Error("expected error for bad command")
-		mgr.Shutdown()
+		_ = mgr.Shutdown()
 	}
 }
 
@@ -176,7 +176,7 @@ func TestManager_StartAll_ReplaceDefault_PicksMatchingTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartAll: %v", err)
 	}
-	defer mgr.Shutdown()
+	defer func() { _ = mgr.Shutdown() }()
 
 	// fs.read and fs.write should be replaced.
 	if fsRead, ok := reg.Get("fs.read"); !ok {

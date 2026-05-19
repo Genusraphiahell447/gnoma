@@ -10,15 +10,15 @@ func TestManager_Install(t *testing.T) {
 	dir := t.TempDir()
 	globalDir := filepath.Join(dir, "global")
 	projectDir := filepath.Join(dir, "project")
-	os.MkdirAll(globalDir, 0o755)
-	os.MkdirAll(projectDir, 0o755)
+	_ = os.MkdirAll(globalDir, 0o755)
+	_ = os.MkdirAll(projectDir, 0o755)
 
 	// Create a source plugin directory.
 	srcDir := filepath.Join(dir, "src", "my-plugin")
-	os.MkdirAll(srcDir, 0o755)
+	_ = os.MkdirAll(srcDir, 0o755)
 	m := Manifest{Name: "my-plugin", Version: "1.0.0", Description: "Test plugin"}
 	data, _ := marshalJSON(m)
-	os.WriteFile(filepath.Join(srcDir, "plugin.json"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(srcDir, "plugin.json"), data, 0o644)
 
 	mgr := NewManager(globalDir, projectDir, testLogger())
 
@@ -38,14 +38,14 @@ func TestManager_Install_ProjectScope(t *testing.T) {
 	dir := t.TempDir()
 	globalDir := filepath.Join(dir, "global")
 	projectDir := filepath.Join(dir, "project")
-	os.MkdirAll(globalDir, 0o755)
-	os.MkdirAll(projectDir, 0o755)
+	_ = os.MkdirAll(globalDir, 0o755)
+	_ = os.MkdirAll(projectDir, 0o755)
 
 	srcDir := filepath.Join(dir, "src", "proj-plugin")
-	os.MkdirAll(srcDir, 0o755)
+	_ = os.MkdirAll(srcDir, 0o755)
 	m := Manifest{Name: "proj-plugin", Version: "1.0.0"}
 	data, _ := marshalJSON(m)
-	os.WriteFile(filepath.Join(srcDir, "plugin.json"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(srcDir, "plugin.json"), data, 0o644)
 
 	mgr := NewManager(globalDir, projectDir, testLogger())
 
@@ -62,18 +62,18 @@ func TestManager_Install_ProjectScope(t *testing.T) {
 func TestManager_Install_AlreadyInstalled(t *testing.T) {
 	dir := t.TempDir()
 	globalDir := filepath.Join(dir, "global")
-	os.MkdirAll(globalDir, 0o755)
+	_ = os.MkdirAll(globalDir, 0o755)
 
 	srcDir := filepath.Join(dir, "src", "dup")
-	os.MkdirAll(srcDir, 0o755)
+	_ = os.MkdirAll(srcDir, 0o755)
 	m := Manifest{Name: "dup", Version: "1.0.0"}
 	data, _ := marshalJSON(m)
-	os.WriteFile(filepath.Join(srcDir, "plugin.json"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(srcDir, "plugin.json"), data, 0o644)
 
 	mgr := NewManager(globalDir, filepath.Join(dir, "project"), testLogger())
 
 	// First install.
-	mgr.Install(srcDir, "user")
+	_ = mgr.Install(srcDir, "user")
 
 	// Second install should fail.
 	err := mgr.Install(srcDir, "user")
@@ -85,10 +85,10 @@ func TestManager_Install_AlreadyInstalled(t *testing.T) {
 func TestManager_Install_NoManifest(t *testing.T) {
 	dir := t.TempDir()
 	globalDir := filepath.Join(dir, "global")
-	os.MkdirAll(globalDir, 0o755)
+	_ = os.MkdirAll(globalDir, 0o755)
 
 	srcDir := filepath.Join(dir, "src", "empty")
-	os.MkdirAll(srcDir, 0o755)
+	_ = os.MkdirAll(srcDir, 0o755)
 
 	mgr := NewManager(globalDir, filepath.Join(dir, "project"), testLogger())
 	err := mgr.Install(srcDir, "user")
@@ -100,14 +100,14 @@ func TestManager_Install_NoManifest(t *testing.T) {
 func TestManager_Uninstall(t *testing.T) {
 	dir := t.TempDir()
 	globalDir := filepath.Join(dir, "global")
-	os.MkdirAll(globalDir, 0o755)
+	_ = os.MkdirAll(globalDir, 0o755)
 
 	// Pre-install a plugin.
 	pluginDir := filepath.Join(globalDir, "to-remove")
-	os.MkdirAll(pluginDir, 0o755)
+	_ = os.MkdirAll(pluginDir, 0o755)
 	m := Manifest{Name: "to-remove", Version: "1.0.0"}
 	data, _ := marshalJSON(m)
-	os.WriteFile(filepath.Join(pluginDir, "plugin.json"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.json"), data, 0o644)
 
 	mgr := NewManager(globalDir, filepath.Join(dir, "project"), testLogger())
 

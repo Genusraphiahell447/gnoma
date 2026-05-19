@@ -25,7 +25,7 @@ func TestSubprocessStream_EchoShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var texts []string
 	for s.Next() {
@@ -57,7 +57,7 @@ func TestSubprocessStream_ContextCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	cancel()
 	// Drain — should stop quickly due to context cancellation.
@@ -76,7 +76,7 @@ func TestSubprocessStream_ProcessError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	for s.Next() {
 	}

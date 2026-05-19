@@ -176,7 +176,7 @@ func TestPromptExecutor_TemplateRendered(t *testing.T) {
 		Exec:    "Tool={{.Tool}} Event={{.Event}}",
 	}
 	ex := NewPromptExecutor(def, capturingStreamer)
-	ex.Execute(context.Background(), MarshalPreToolPayload("bash", nil))
+	_, _ = ex.Execute(context.Background(), MarshalPreToolPayload("bash", nil))
 	capturedPrompt = capturingStreamer.prompt
 	if capturedPrompt == "" {
 		t.Fatal("prompt not captured")

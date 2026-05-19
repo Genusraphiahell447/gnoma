@@ -179,7 +179,7 @@ func TestWindow_CircuitBreaker(t *testing.T) {
 
 	// Try to compact — should fail 3 times then stop
 	for i := 0; i < 5; i++ {
-		w.CompactIfNeeded()
+		_, _ = w.CompactIfNeeded()
 	}
 
 	if failStrategy.calls > 3 {

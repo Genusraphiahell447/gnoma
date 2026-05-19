@@ -40,7 +40,7 @@ ollama = "http://myhost:11434/v1"
 bash_timeout = "60s"
 max_file_size = 2097152
 `
-	os.WriteFile(path, []byte(content), 0o644)
+	_ = os.WriteFile(path, []byte(content), 0o644)
 
 	cfg := Defaults()
 	if err := loadTOML(&cfg, path); err != nil {
@@ -122,12 +122,12 @@ func TestApplyEnv_EnvVarReference(t *testing.T) {
 func TestProjectRoot_GoMod(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "pkg", "util")
-	os.MkdirAll(sub, 0o755)
-	os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/foo\n"), 0o644)
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/foo\n"), 0o644)
 
 	origDir, _ := os.Getwd()
-	os.Chdir(sub)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(sub)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	got := ProjectRoot()
 	if got != root {
@@ -138,12 +138,12 @@ func TestProjectRoot_GoMod(t *testing.T) {
 func TestProjectRoot_Git(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "src")
-	os.MkdirAll(sub, 0o755)
-	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
 
 	origDir, _ := os.Getwd()
-	os.Chdir(sub)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(sub)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	got := ProjectRoot()
 	if got != root {
@@ -154,12 +154,12 @@ func TestProjectRoot_Git(t *testing.T) {
 func TestProjectRoot_GnomaDir(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "internal")
-	os.MkdirAll(sub, 0o755)
-	os.MkdirAll(filepath.Join(root, ".gnoma"), 0o755)
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.MkdirAll(filepath.Join(root, ".gnoma"), 0o755)
 
 	origDir, _ := os.Getwd()
-	os.Chdir(sub)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(sub)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	got := ProjectRoot()
 	if got != root {
@@ -171,8 +171,8 @@ func TestProjectRoot_Fallback(t *testing.T) {
 	dir := t.TempDir()
 
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(dir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	got := ProjectRoot()
 	if got != dir {
@@ -183,7 +183,7 @@ func TestProjectRoot_Fallback(t *testing.T) {
 func TestHookConfig_TOML_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	os.WriteFile(path, []byte(`
+	_ = os.WriteFile(path, []byte(`
 [[hooks]]
 name = "log-tools"
 event = "post_tool_use"
@@ -228,8 +228,8 @@ tool_pattern = "bash*"
 func TestHookConfig_MergeOrder(t *testing.T) {
 	globalDir := t.TempDir()
 	gnomaDir := filepath.Join(globalDir, "gnoma")
-	os.MkdirAll(gnomaDir, 0o755)
-	os.WriteFile(filepath.Join(gnomaDir, "config.toml"), []byte(`
+	_ = os.MkdirAll(gnomaDir, 0o755)
+	_ = os.WriteFile(filepath.Join(gnomaDir, "config.toml"), []byte(`
 [[hooks]]
 name = "global-hook"
 event = "pre_tool_use"
@@ -239,8 +239,8 @@ exec = "echo global"
 
 	projectDir := t.TempDir()
 	pGnomaDir := filepath.Join(projectDir, ".gnoma")
-	os.MkdirAll(pGnomaDir, 0o755)
-	os.WriteFile(filepath.Join(pGnomaDir, "config.toml"), []byte(`
+	_ = os.MkdirAll(pGnomaDir, 0o755)
+	_ = os.WriteFile(filepath.Join(pGnomaDir, "config.toml"), []byte(`
 [[hooks]]
 name = "project-hook"
 event = "post_tool_use"
@@ -250,8 +250,8 @@ exec = "echo project"
 
 	t.Setenv("XDG_CONFIG_HOME", globalDir)
 	origDir, _ := os.Getwd()
-	os.Chdir(projectDir)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(projectDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	cfg, err := Load()
 	if err != nil {
@@ -273,8 +273,8 @@ func TestHookConfig_ProjectOnly(t *testing.T) {
 	// No global hooks, project defines one.
 	projectDir := t.TempDir()
 	pGnomaDir := filepath.Join(projectDir, ".gnoma")
-	os.MkdirAll(pGnomaDir, 0o755)
-	os.WriteFile(filepath.Join(pGnomaDir, "config.toml"), []byte(`
+	_ = os.MkdirAll(pGnomaDir, 0o755)
+	_ = os.WriteFile(filepath.Join(pGnomaDir, "config.toml"), []byte(`
 [[hooks]]
 name = "project-only"
 event = "stop"
@@ -285,8 +285,8 @@ exec = "echo done"
 	emptyGlobalDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", emptyGlobalDir)
 	origDir, _ := os.Getwd()
-	os.Chdir(projectDir)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(projectDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	cfg, err := Load()
 	if err != nil {
@@ -301,8 +301,8 @@ func TestHookConfig_GlobalOnly(t *testing.T) {
 	// Global defines a hook, no project config.
 	globalDir := t.TempDir()
 	gnomaDir := filepath.Join(globalDir, "gnoma")
-	os.MkdirAll(gnomaDir, 0o755)
-	os.WriteFile(filepath.Join(gnomaDir, "config.toml"), []byte(`
+	_ = os.MkdirAll(gnomaDir, 0o755)
+	_ = os.WriteFile(filepath.Join(gnomaDir, "config.toml"), []byte(`
 [[hooks]]
 name = "global-only"
 event = "session_start"
@@ -313,8 +313,8 @@ exec = "echo start"
 	projectDir := t.TempDir() // no .gnoma dir
 	t.Setenv("XDG_CONFIG_HOME", globalDir)
 	origDir, _ := os.Getwd()
-	os.Chdir(projectDir)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(projectDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	cfg, err := Load()
 	if err != nil {
@@ -329,8 +329,8 @@ func TestLayeredLoad(t *testing.T) {
 	// Set up global config
 	globalDir := t.TempDir()
 	gnomaDir := filepath.Join(globalDir, "gnoma")
-	os.MkdirAll(gnomaDir, 0o755)
-	os.WriteFile(filepath.Join(gnomaDir, "config.toml"), []byte(`
+	_ = os.MkdirAll(gnomaDir, 0o755)
+	_ = os.WriteFile(filepath.Join(gnomaDir, "config.toml"), []byte(`
 [provider]
 default = "anthropic"
 max_tokens = 4096
@@ -339,8 +339,8 @@ max_tokens = 4096
 	// Set up project config that overrides
 	projectDir := t.TempDir()
 	pGnomaDir := filepath.Join(projectDir, ".gnoma")
-	os.MkdirAll(pGnomaDir, 0o755)
-	os.WriteFile(filepath.Join(pGnomaDir, "config.toml"), []byte(`
+	_ = os.MkdirAll(pGnomaDir, 0o755)
+	_ = os.WriteFile(filepath.Join(pGnomaDir, "config.toml"), []byte(`
 [provider]
 model = "claude-haiku"
 `), 0o644)
@@ -348,8 +348,8 @@ model = "claude-haiku"
 	// Override XDG_CONFIG_HOME and working directory
 	t.Setenv("XDG_CONFIG_HOME", globalDir)
 	origDir, _ := os.Getwd()
-	os.Chdir(projectDir)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(projectDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	cfg, err := Load()
 	if err != nil {

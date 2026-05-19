@@ -61,8 +61,8 @@ func TestRegistry_OverridePrecedence(t *testing.T) {
 	writeSkillFile(t, dir2, "shared.md", "---\nname: shared\ndescription: from dir2\n---\nbody2\n")
 
 	reg := NewRegistry()
-	reg.LoadDir(dir1, "user")
-	reg.LoadDir(dir2, "project")
+	_ = reg.LoadDir(dir1, "user")
+	_ = reg.LoadDir(dir2, "project")
 
 	sk := reg.Get("shared")
 	if sk == nil {
@@ -90,7 +90,7 @@ func TestRegistry_Names_Sorted(t *testing.T) {
 	writeSkillFile(t, dir, "middle.md", "---\nname: middle\n---\nbody\n")
 
 	reg := NewRegistry()
-	reg.LoadDir(dir, "test")
+	_ = reg.LoadDir(dir, "test")
 
 	names := reg.Names()
 	if len(names) != 3 {
@@ -116,7 +116,7 @@ func TestRegistry_All_ReturnsCopy(t *testing.T) {
 	writeSkillFile(t, dir, "a.md", "---\nname: aaa\n---\nbody\n")
 
 	reg := NewRegistry()
-	reg.LoadDir(dir, "test")
+	_ = reg.LoadDir(dir, "test")
 
 	all := reg.All()
 	if len(all) != 1 {
