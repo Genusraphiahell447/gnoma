@@ -157,7 +157,13 @@ func probeOllamaModel(ctx context.Context, baseURL, model string) (bool, int) {
 	return supported, contextSize
 }
 
-// DiscoverLlamaCPP checks if a local llama.cpp server is reachable.
+// DiscoverLlamaCPP enumerates models served by a llama.cpp server.
+//
+// llama-server exposes /v1/models (OpenAI-compatible) — single-model
+// deployments return one entry with the actual model ID; multi-model proxies
+// (llama-swap, custom routers in front of llama-server) return many. We
+// enumerate that list and share the context window read from /props across
+// the entries, since llama-server is one process per context.
 func DiscoverLlamaCPP(ctx context.Context, baseURL string) ([]DiscoveredModel, error) {
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
@@ -165,7 +171,33 @@ func DiscoverLlamaCPP(ctx context.Context, baseURL string) ([]DiscoveredModel, e
 	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/props", nil)
+	ids, err := fetchLlamaCppModelIDs(ctx, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// /props is best-effort — if it fails or omits n_ctx, fall back to the
+	// documented default rather than aborting discovery.
+	ctxSize := fetchLlamaCppContextSize(ctx, baseURL)
+	if ctxSize == 0 {
+		ctxSize = defaultLlamaCppContextSize
+	}
+
+	models := make([]DiscoveredModel, 0, len(ids))
+	for _, id := range ids {
+		models = append(models, DiscoveredModel{
+			ID:            id,
+			Name:          id,
+			Provider:      "llamacpp",
+			ContextSize:   ctxSize,
+			SupportsTools: true, // assume true for modern llama.cpp
+		})
+	}
+	return models, nil
+}
+
+func fetchLlamaCppModelIDs(ctx context.Context, baseURL string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/v1/models", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -175,30 +207,57 @@ func DiscoverLlamaCPP(ctx context.Context, baseURL string) ([]DiscoveredModel, e
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("llama.cpp returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("llama.cpp returned status %d on /v1/models", resp.StatusCode)
 	}
 
-	// llama.cpp /props often returns the model path
+	var body struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("llama.cpp /v1/models parse: %w", err)
+	}
+	if len(body.Data) == 0 {
+		return nil, fmt.Errorf("llama.cpp /v1/models returned no entries")
+	}
+	ids := make([]string, 0, len(body.Data))
+	for _, m := range body.Data {
+		if m.ID == "" {
+			continue
+		}
+		ids = append(ids, m.ID)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("llama.cpp /v1/models returned only empty IDs")
+	}
+	return ids, nil
+}
+
+// fetchLlamaCppContextSize returns the configured n_ctx from /props, or 0 if
+// the endpoint is unavailable / malformed. Caller applies a default.
+func fetchLlamaCppContextSize(ctx context.Context, baseURL string) int {
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/props", nil)
+	if err != nil {
+		return 0
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		return 0
+	}
 	var data struct {
 		DefaultGenerationSettings struct {
 			N_Ctx int `json:"n_ctx"`
 		} `json:"default_generation_settings"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+		return 0
 	}
-
-	ctxSize := data.DefaultGenerationSettings.N_Ctx
-	if ctxSize == 0 {
-		ctxSize = defaultLlamaCppContextSize
-	}
-	return []DiscoveredModel{{
-		ID:            "default",
-		Name:          "llama.cpp",
-		Provider:      "llamacpp",
-		ContextSize:   ctxSize,
-		SupportsTools: true, // assume true for modern llama.cpp
-	}}, nil
+	return data.DefaultGenerationSettings.N_Ctx
 }
 
 // DiscoverLocalModels polls all known local providers.

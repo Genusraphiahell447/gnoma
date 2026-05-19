@@ -316,27 +316,108 @@ func TestDiscoverOllama_PrunesCacheOnDisappearance(t *testing.T) {
 	}
 }
 
-// TestDiscoverLlamaCPP_AppliesDefaultContextSize verifies that a llama.cpp
-// /props response with n_ctx=0 (or missing) falls back to the documented
-// default rather than registering an arm with ContextWindow=0.
-func TestDiscoverLlamaCPP_AppliesDefaultContextSize(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/props" {
-			_, _ = w.Write([]byte(`{"default_generation_settings":{}}`))
-			return
+// llamaCPPStub serves configurable /v1/models and /props responses.
+type llamaCPPStub struct {
+	modelsBody string // body for /v1/models, or empty to return 404
+	propsBody  string // body for /props, or empty to return 404
+	modelsCode int    // override status code for /v1/models (0 = 200)
+	propsCode  int    // override status code for /props (0 = 200)
+}
+
+func (s *llamaCPPStub) server() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			if s.modelsBody == "" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if s.modelsCode != 0 {
+				w.WriteHeader(s.modelsCode)
+			}
+			_, _ = w.Write([]byte(s.modelsBody))
+		case "/props":
+			if s.propsBody == "" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if s.propsCode != 0 {
+				w.WriteHeader(s.propsCode)
+			}
+			_, _ = w.Write([]byte(s.propsBody))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		w.WriteHeader(http.StatusNotFound)
 	}))
+}
+
+// TestDiscoverLlamaCPP_EnumeratesMultipleModels verifies that a server (or
+// front-proxy like llama-swap) returning multiple /v1/models entries is fully
+// enumerated, not collapsed into a single placeholder.
+func TestDiscoverLlamaCPP_EnumeratesMultipleModels(t *testing.T) {
+	stub := &llamaCPPStub{
+		modelsBody: `{"data":[{"id":"qwen2.5-coder:7b"},{"id":"llama-3.2:3b"}]}`,
+		propsBody:  `{"default_generation_settings":{"n_ctx":16384}}`,
+	}
+	srv := stub.server()
 	defer srv.Close()
 
 	models, err := DiscoverLlamaCPP(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("DiscoverLlamaCPP: %v", err)
 	}
-	if len(models) != 1 {
-		t.Fatalf("got %d models, want 1", len(models))
+	if len(models) != 2 {
+		t.Fatalf("got %d models, want 2", len(models))
+	}
+	want := map[string]bool{"qwen2.5-coder:7b": true, "llama-3.2:3b": true}
+	for _, m := range models {
+		if !want[m.ID] {
+			t.Errorf("unexpected model id %q", m.ID)
+		}
+		if m.ContextSize != 16384 {
+			t.Errorf("ContextSize = %d, want 16384 (shared from /props)", m.ContextSize)
+		}
+		if !m.SupportsTools {
+			t.Errorf("model %q: SupportsTools should be true", m.ID)
+		}
+	}
+}
+
+// TestDiscoverLlamaCPP_PropsFailsFallsBackToDefault verifies that when /props
+// is unreachable (older builds, custom proxies that don't expose it), we
+// still enumerate models and apply the conservative context-size default
+// rather than aborting discovery.
+func TestDiscoverLlamaCPP_PropsFailsFallsBackToDefault(t *testing.T) {
+	stub := &llamaCPPStub{
+		modelsBody: `{"data":[{"id":"only-model"}]}`,
+		// propsBody empty -> 404
+	}
+	srv := stub.server()
+	defer srv.Close()
+
+	models, err := DiscoverLlamaCPP(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("DiscoverLlamaCPP: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "only-model" {
+		t.Fatalf("got %+v, want one entry with id=only-model", models)
 	}
 	if models[0].ContextSize != defaultLlamaCppContextSize {
-		t.Errorf("ContextSize = %d, want %d", models[0].ContextSize, defaultLlamaCppContextSize)
+		t.Errorf("ContextSize = %d, want %d (fallback)", models[0].ContextSize, defaultLlamaCppContextSize)
+	}
+}
+
+// TestDiscoverLlamaCPP_NoModelsIsError verifies that a /v1/models response
+// with an empty list errors out instead of registering a phantom arm.
+func TestDiscoverLlamaCPP_NoModelsIsError(t *testing.T) {
+	stub := &llamaCPPStub{
+		modelsBody: `{"data":[]}`,
+		propsBody:  `{"default_generation_settings":{"n_ctx":8192}}`,
+	}
+	srv := stub.server()
+	defer srv.Close()
+
+	if _, err := DiscoverLlamaCPP(context.Background(), srv.URL); err == nil {
+		t.Error("expected error when /v1/models returns no entries, got nil")
 	}
 }
