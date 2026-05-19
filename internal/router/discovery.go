@@ -281,10 +281,10 @@ func RegisterDiscoveredModels(r *Router, models []DiscoveredModel, providerFacto
 			IsLocal:   true,
 			Capabilities: provider.Capabilities{
 				// Conservative default: don't assume tool support.
-				// Many small local models (phi, tinyllama, etc.) don't support
+				// Many small local models (phi, etc.) don't support
 				// function calling and will produce confused output if selected
 				// for tool-requiring tasks. Larger known models (mistral, llama3,
-				// qwen2.5-coder) support tools. Callers can update the arm's
+				// qwen2.5-coder, tiny3.5) support tools. Callers can update the arm's
 				// Capabilities after probing the model template.
 				ToolUse:       m.SupportsTools,
 				ContextWindow: m.ContextSize,

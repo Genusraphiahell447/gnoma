@@ -65,7 +65,7 @@ Prereq: a running `llama-server` (or `llama.cpp` server) on the configured port.
 enabled = true
 backend  = "llamafile"
 # Optional overrides:
-# model_url       = "https://huggingface.co/.../TinyLlama-...-llamafile"
+# model_url       = "https://huggingface.co/Mozilla/Qwen2.5-0.5B-Instruct-llamafile/resolve/main/Qwen2.5-0.5B-Instruct-Q6_K.llamafile"
 # data_dir        = ""        # empty = XDG default (~/.local/share/gnoma/slm)
 # startup_timeout = "10s"     # how long to block on first-boot before falling back
 ```
@@ -79,7 +79,7 @@ Prereq: `gnoma slm setup` once to download the binary. After that gnoma starts/s
 enabled = true
 backend = "openaicompat"
 base_url = "http://localhost:1234/v1"   # LM Studio's default
-model    = "tinyllama-1.1b"
+model    = "qwen2.5-0.5b"
 ```
 
 Use this for any OpenAI-compatible endpoint that isn't Ollama or llama.cpp: LM Studio, vLLM, llamaedge, a remote relay, etc.
