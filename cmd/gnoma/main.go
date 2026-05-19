@@ -375,7 +375,16 @@ func main() {
 		}
 		arm.Pools = resolveRateLimitPools(armID, *providerName, armModel, cfg)
 		rtr.RegisterArm(arm)
-		rtr.ForceArm(armID)
+		// Pin this arm only when the user passed --provider explicitly on
+		// the command line. A config-default provider is *one* registered
+		// arm among many — the router still picks by tier and score, which
+		// is what lets the SLM arm win trivial tasks. Without this guard,
+		// every gnoma launch with [provider].default set short-circuits
+		// the whole routing tree to one arm.
+		if isFlagSet("provider") {
+			rtr.ForceArm(armID)
+			logger.Info("provider pinned via --provider flag", "arm", armID)
+		}
 		if len(arm.Pools) > 0 {
 			logger.Debug("rate limit pools attached", "arm", armID, "pools", len(arm.Pools))
 		}

@@ -80,6 +80,13 @@ func (c *Classifier) Classify(ctx context.Context, prompt string, history []mess
 	task.ComplexityScore = resp.Complexity
 	task.RequiresTools = resp.RequiresTools
 	task.ClassifierSource = router.ClassifierSLM
+	// Re-apply the per-task-type complexity floor after the SLM overlay.
+	// The SLM may have under-reported complexity for a Refactor-style
+	// task; the floor protects the SLM arm from being picked for its own
+	// kind of misclassification.
+	if floor := router.MinComplexityForType(task.Type); task.ComplexityScore < floor {
+		task.ComplexityScore = floor
+	}
 	return task, nil
 }
 

@@ -222,6 +222,14 @@ func ClassifyTask(prompt string) Task {
 	// Estimate complexity from prompt length and keywords
 	task.ComplexityScore = estimateComplexity(lower)
 
+	// Per-task-type complexity floor. A short "refactor X" prompt looks
+	// trivial by word count but the task itself implies existing code and
+	// non-trivial reasoning — clamping the floor up keeps such tasks out
+	// of the SLM arm's MaxComplexity ceiling.
+	if floor := MinComplexityForType(task.Type); task.ComplexityScore < floor {
+		task.ComplexityScore = floor
+	}
+
 	// Trivial-prompt override: short, knowledge-only prompts whose task
 	// type doesn't imply existing code to read or modify can run without
 	// tools — making the SLM arm (ToolUse=false) feasible for genuinely
@@ -233,6 +241,23 @@ func ClassifyTask(prompt string) Task {
 	task.RequiredEffort = inferEffort(task)
 
 	return task
+}
+
+// MinComplexityForType returns the inherent complexity floor for a task
+// type. Tasks that imply existing code or multi-step reasoning get a
+// non-zero floor so short prompts don't slip past the SLM arm's
+// MaxComplexity ceiling.
+func MinComplexityForType(t TaskType) float64 {
+	switch t {
+	case TaskSecurityReview, TaskOrchestration:
+		return 0.6
+	case TaskRefactor, TaskPlanning, TaskDebug:
+		return 0.4
+	case TaskUnitTest, TaskReview:
+		return 0.35
+	default:
+		return 0
+	}
 }
 
 // trivialEligibleTypes are the task types where a "no tools needed" verdict
