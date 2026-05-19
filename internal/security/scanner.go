@@ -230,7 +230,13 @@ func defaultPatterns() []SecretPattern {
 		{"sentry_auth_token", `sntrys_[a-zA-Z0-9_]{50,}`},
 
 		// --- Infrastructure ---
+		// Full-block match captures the entire key body for redaction.
 		{"private_key", `(?s)-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`},
+		// Fallback for truncated keys (header + body but END marker missing,
+		// e.g. log slice or buffered output). Matches the BEGIN line plus the
+		// trailing base64 body up to the first non-base64 character. Always
+		// fires when private_key does — Redact merges the overlapping spans.
+		{"private_key_header", `-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[A-Za-z0-9+/=\s]*`},
 		{"database_url", `(?i)(?:postgres|mysql|mongodb|redis)://[^:]+:[^@]+@`},
 		{"heroku_api_key", `(?i)HEROKU_API_KEY\s*=\s*[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`},
 		{"mailgun_api_key", `key-[a-f0-9]{32}`},

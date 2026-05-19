@@ -69,6 +69,70 @@ func TestScanner_DetectsPrivateKey(t *testing.T) {
 	}
 }
 
+// TestScanner_DetectsTruncatedPrivateKey covers the case where a log slice or
+// buffered stream contains the BEGIN line and key body but the END marker is
+// missing. The full-block private_key pattern doesn't match — the
+// private_key_header fallback must fire so the body is still redacted.
+func TestScanner_DetectsTruncatedPrivateKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "header + body, no END",
+			content: "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxyz...",
+		},
+		{
+			name:    "OPENSSH header truncated",
+			content: "log line\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewScanner(4.5, false)
+			matches := s.Scan(tc.content)
+			hasFallback := false
+			hasFullBlock := false
+			for _, m := range matches {
+				switch m.Pattern {
+				case "private_key_header":
+					hasFallback = true
+				case "private_key":
+					hasFullBlock = true
+				}
+			}
+			if hasFullBlock {
+				t.Error("full-block private_key should not match a truncated key")
+			}
+			if !hasFallback {
+				t.Error("private_key_header fallback should match a truncated key")
+			}
+			redacted := Redact(tc.content, matches)
+			if strings.Contains(redacted, "MIIEowIBAAKCAQEAxyz") || strings.Contains(redacted, "b3BlbnNzaC1rZXk") {
+				t.Errorf("key body leaked after redaction: %q", redacted)
+			}
+		})
+	}
+}
+
+// TestRedact_PrivateKeyOverlap_SinglePlaceholder verifies that when both the
+// full-block private_key pattern and the private_key_header fallback fire on
+// the same complete key block, Redact merges the overlapping spans into one
+// [REDACTED] placeholder rather than two.
+func TestRedact_PrivateKeyOverlap_SinglePlaceholder(t *testing.T) {
+	s := NewScanner(4.5, false)
+	content := "x=" + "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAA\n-----END RSA PRIVATE KEY-----" + ";"
+	matches := s.Scan(content)
+	redacted := Redact(content, matches)
+	count := strings.Count(redacted, "[REDACTED]")
+	if count != 1 {
+		t.Errorf("expected exactly one [REDACTED] block, got %d: %q", count, redacted)
+	}
+	if !strings.HasPrefix(redacted, "x=[REDACTED]") || !strings.HasSuffix(redacted, ";") {
+		t.Errorf("surrounding context not preserved: %q", redacted)
+	}
+}
+
 func TestScanner_DetectsGenericSecret(t *testing.T) {
 	s := NewScanner(4.5, false)
 	matches := s.Scan(`password = "supersecretpassword123"`)
