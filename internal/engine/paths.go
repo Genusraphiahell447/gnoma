@@ -8,12 +8,14 @@ import (
 	"strings"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
 
 // isUnderAllowedPaths reports whether target is equal to or a descendant of any
-// path in allowed. Both sides are cleaned before comparison. Returns false when
-// allowed is empty.
+// path in allowed. Both sides are canonicalized (symlink-evaluated, with the
+// non-existent tail preserved) before comparison. Returns false when allowed
+// is empty.
 //
 // The trailing-separator check prevents "/tmp" from matching "/tmpx/foo".
 func isUnderAllowedPaths(target string, allowed []string) bool {
@@ -39,40 +41,15 @@ func isUnderAllowedPaths(target string, allowed []string) bool {
 	return false
 }
 
-// resolveCanonical returns the absolute, symlink-evaluated path.
-// If the path doesn't exist, it resolves the deepest existing ancestor and
-// appends the remaining tail.
+// resolveCanonical absolutises against the process cwd and delegates the
+// symlink-aware ancestor walk to security.CanonicalizePath. Kept as a thin
+// wrapper so callers in this package can pass relative paths.
 func resolveCanonical(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-
-	ancestor := abs
-	var tail []string
-	for {
-		if _, err := os.Lstat(ancestor); err == nil {
-			break
-		}
-		parent := filepath.Dir(ancestor)
-		if parent == ancestor {
-			// Hit root, nothing exists? highly unlikely for Abs() but handle it.
-			break
-		}
-		tail = append([]string{filepath.Base(ancestor)}, tail...)
-		ancestor = parent
-	}
-
-	canonicalAncestor, err := filepath.EvalSymlinks(ancestor)
-	if err != nil {
-		return "", err
-	}
-
-	resolved := canonicalAncestor
-	if len(tail) > 0 {
-		resolved = filepath.Join(append([]string{canonicalAncestor}, tail...)...)
-	}
-	return filepath.Clean(resolved), nil
+	return security.CanonicalizePath(abs)
 }
 
 // checkPathRestriction enforces AllowedPaths on a single tool call.

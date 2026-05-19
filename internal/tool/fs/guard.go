@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"somegit.dev/Owlibou/gnoma/internal/security"
 )
 
 var ErrOutsideWorkspace = errors.New("path outside workspace")
@@ -67,28 +69,9 @@ func (g *Guard) ResolveWrite(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	ancestor := abs
-	tail := ""
-	for {
-		if _, err := os.Lstat(ancestor); err == nil {
-			break
-		}
-		parent := filepath.Dir(ancestor)
-		if parent == ancestor {
-			return "", fmt.Errorf("resolve %q: no existing ancestor", path)
-		}
-		tail = filepath.Join(filepath.Base(ancestor), tail)
-		ancestor = parent
-	}
-
-	canonicalAncestor, err := filepath.EvalSymlinks(ancestor)
+	resolved, err := security.CanonicalizePath(abs)
 	if err != nil {
-		return "", fmt.Errorf("resolve ancestor of %q: %w", path, err)
-	}
-	resolved := canonicalAncestor
-	if tail != "" {
-		resolved = filepath.Join(canonicalAncestor, tail)
+		return "", fmt.Errorf("resolve %q: %w", path, err)
 	}
 	if !g.contains(resolved) {
 		return "", fmt.Errorf("%w: %s", ErrOutsideWorkspace, path)
