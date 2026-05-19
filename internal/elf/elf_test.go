@@ -11,6 +11,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
@@ -307,6 +308,43 @@ func TestManager_CleanupRemovesMeta(t *testing.T) {
 	}
 	if metaExists {
 		t.Error("meta should be removed after cleanup (was leaking)")
+	}
+}
+
+func TestManager_ReportResultSuppressedWhenIncognito(t *testing.T) {
+	// Incognito sessions must not leave bandit signal behind, even for
+	// background elf turns. ReportOutcome should be skipped; pool
+	// reservations must still commit so capacity accounting stays sane.
+	mp := &mockProvider{
+		name:    "test",
+		streams: []stream.Stream{newEventStream("result")},
+	}
+
+	rtr := router.New(router.Config{})
+	armID := router.ArmID("test/mock")
+	rtr.RegisterArm(&router.Arm{
+		ID: armID, Provider: mp, ModelName: "mock",
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+
+	fw := security.NewFirewall(security.FirewallConfig{ScanOutgoing: true})
+	fw.Incognito().Activate()
+
+	mgr := NewManager(ManagerConfig{
+		Router:   rtr,
+		Tools:    tool.NewRegistry(),
+		Firewall: fw,
+	})
+
+	e, err := mgr.Spawn(context.Background(), router.TaskGeneration, "task", "", 30)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	result := e.Wait()
+	mgr.ReportResult(result)
+
+	if _, hasData := rtr.QualityTracker().Quality(armID, router.TaskGeneration); hasData {
+		t.Error("quality tracker received outcome despite incognito — gating not effective")
 	}
 }
 

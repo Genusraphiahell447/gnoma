@@ -125,6 +125,37 @@ func TestSessionStore_Save_RejectsPathTraversal(t *testing.T) {
 	}
 }
 
+func TestSessionStore_Save_FilesArePrivate(t *testing.T) {
+	// Session files contain conversation history including raw user
+	// input — keep them 0o600 / 0o700 so other local users on shared
+	// hosts can't read them.
+	root := t.TempDir()
+	store := session.NewSessionStore(root, 3, slog.Default())
+	snap := makeSnap("sess-perms", time.Now().UTC())
+	if err := store.Save(snap); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(root, ".gnoma", "sessions", "sess-perms")
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat session dir: %v", err)
+	}
+	if dirInfo.Mode().Perm() != 0o700 {
+		t.Errorf("session dir mode = %o, want 0700", dirInfo.Mode().Perm())
+	}
+
+	for _, name := range []string{"metadata.json", "messages.json"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode = %o, want 0600", name, info.Mode().Perm())
+		}
+	}
+}
+
 func TestSessionStore_Prune_RemovesOldest(t *testing.T) {
 	store := makeStore(t) // maxKeep = 3
 	now := time.Now().UTC()

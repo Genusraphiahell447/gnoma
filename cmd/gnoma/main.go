@@ -354,7 +354,11 @@ func main() {
 
 	// Restore QualityTracker data from disk (best-effort). Per-profile
 	// path avoids bandit cross-contamination between work/private/etc.
-	{
+	// Skipped under --incognito to keep prior learned quality out of the
+	// session's selection biases. (TUI-runtime incognito can't fire this
+	// early — the firewall doesn't exist yet — so the CLI flag is the
+	// only source of truth at restore time.)
+	if !*incognito {
 		qualityPath := profile.QualityFile(gnomacfg.GlobalConfigDir())
 		if data, err := os.ReadFile(qualityPath); err == nil {
 			var snap router.QualitySnapshot
@@ -369,8 +373,17 @@ func main() {
 	// incognito). Lifted to a named closure so the /profile switch path
 	// can fire it explicitly before syscall.Exec, since defers don't run
 	// after a successful exec.
+	//
+	// Two gates: the CLI flag is the unconditional first check (covers
+	// the window between `defer saveQuality()` here and `fwRef.Set(fw)`
+	// downstream, where fwRef.Get() still returns nil). The firewall
+	// state is the second check so TUI-runtime Ctrl+X correctly
+	// suppresses the snapshot on exit.
 	saveQuality := func() {
 		if *incognito {
+			return
+		}
+		if fw := fwRef.Get(); fw != nil && !fw.Incognito().ShouldLearn() {
 			return
 		}
 		snap := rtr.QualityTracker().Snapshot()
@@ -379,8 +392,8 @@ func main() {
 			return
 		}
 		qualityPath := profile.QualityFile(gnomacfg.GlobalConfigDir())
-		_ = os.MkdirAll(filepath.Dir(qualityPath), 0o755)
-		_ = os.WriteFile(qualityPath, data, 0o644)
+		_ = os.MkdirAll(filepath.Dir(qualityPath), 0o700)
+		_ = os.WriteFile(qualityPath, data, 0o600)
 	}
 	defer saveQuality()
 	var armID router.ArmID
@@ -536,9 +549,25 @@ func main() {
 		}
 	}
 
-	// Incognito mode
+	// Incognito mode. Both flags must move together — the firewall owns
+	// the intent flag, the router owns the local-only enforcement, and
+	// they go out of sync if either is set in isolation. We also reject
+	// the --incognito + --provider <cloud-arm> combination here rather
+	// than silently routing to a forced cloud arm under an "incognito"
+	// badge (audit finding W2-1).
 	if *incognito {
+		if forced := rtr.ForcedArm(); forced != "" {
+			if arm, ok := rtr.LookupArm(forced); ok && !arm.IsLocal {
+				fmt.Fprintf(os.Stderr,
+					"error: --incognito conflicts with --provider %s (non-local arm). "+
+						"Clear the provider pin or drop --incognito.\n",
+					forced,
+				)
+				os.Exit(1)
+			}
+		}
 		fw.Incognito().Activate()
+		rtr.SetLocalOnly(true)
 		logger.Debug("incognito mode enabled")
 	}
 
@@ -572,7 +601,10 @@ func main() {
 		time.Now().Format("20060102-150405"),
 		mrand.Int63()&0xffffff,
 	)
-	store := persist.New(sessionID)
+	// Pass the firewall's incognito mode so Save no-ops while incognito
+	// is active. Mode is consulted on every Save (dynamic), so TUI
+	// runtime toggles take effect without reconstructing the store.
+	store := persist.New(sessionID, fw.Incognito())
 	logger.Debug("session store initialized", "dir", store.Dir())
 
 	// Create elf manager and register agent tools.

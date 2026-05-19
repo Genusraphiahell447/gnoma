@@ -23,29 +23,50 @@ type ResultFile struct {
 	ModTime  time.Time
 }
 
-// Store persists tool results to /tmp for cross-tool session sharing.
-type Store struct {
-	dir string // /tmp/gnoma-<sessionID>/tool-results
+// IncognitoGate is the minimal contract Store needs from
+// security.IncognitoMode. Defined locally so the persist package keeps
+// a stdlib-only dependency surface; *security.IncognitoMode satisfies
+// this interface naturally.
+//
+// A nil IncognitoGate means "no gate" — Save runs unconditionally.
+// A non-nil gate is consulted on every Save call (dynamic), so TUI
+// runtime toggles take effect without reconstructing the Store.
+type IncognitoGate interface {
+	ShouldPersist() bool
 }
 
-// New creates a Store for the given session ID.
+// Store persists tool results to /tmp for cross-tool session sharing.
+type Store struct {
+	dir  string        // /tmp/gnoma-<sessionID>/tool-results
+	mode IncognitoGate // nil = always persist; non-nil = consult on Save
+}
+
+// New creates a Store for the given session ID. Pass mode=nil for the
+// pre-W2-2 behaviour (always persist when content is large enough).
+// Pass fw.Incognito() to block persistence whenever incognito is active.
 // The directory is created on first Save.
-func New(sessionID string) *Store {
+func New(sessionID string, mode IncognitoGate) *Store {
 	return &Store{
-		dir: filepath.Join("/tmp", "gnoma-"+sessionID, "tool-results"),
+		dir:  filepath.Join("/tmp", "gnoma-"+sessionID, "tool-results"),
+		mode: mode,
 	}
 }
 
 // Dir returns the absolute path to the tool-results directory.
 func (s *Store) Dir() string { return s.dir }
 
-// Save writes content to disk if len(content) >= minPersistSize.
-// Returns (filePath, true) on persistence, ("", false) if content is too small.
+// Save writes content to disk if len(content) >= minPersistSize and
+// the configured incognito gate (if any) permits persistence.
+// Returns (filePath, true) on persistence; ("", false) if content is too
+// small, if incognito is active, or if a filesystem error occurred.
 func (s *Store) Save(toolName, callID, content string) (string, bool) {
 	if len(content) < minPersistSize {
 		return "", false
 	}
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+	if s.mode != nil && !s.mode.ShouldPersist() {
+		return "", false
+	}
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		slog.Warn("persist: failed to create session directory", "dir", s.dir, "error", err)
 		return "", false
 	}
@@ -54,7 +75,7 @@ func (s *Store) Save(toolName, callID, content string) (string, bool) {
 	safeCallID := strings.NewReplacer("/", "_", "..", "_").Replace(callID)
 	filename := safeName + "-" + safeCallID + ".txt"
 	path := filepath.Join(s.dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		slog.Warn("persist: failed to write tool result", "path", path, "error", err)
 		return "", false
 	}

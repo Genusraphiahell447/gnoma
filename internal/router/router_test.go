@@ -345,6 +345,40 @@ func TestRouter_SelectForcedNotFound(t *testing.T) {
 	}
 }
 
+func TestRouter_SelectForcedNonLocalUnderLocalOnlyErrors(t *testing.T) {
+	// Audit finding: --provider anthropic pins a cloud arm, then Ctrl+X
+	// enables local-only. Select used to short-circuit on forcedArm and
+	// return the cloud arm anyway, breaking the "local-only routing"
+	// promise the UI badge makes. Must now error out.
+	r := New(Config{})
+	r.RegisterArm(&Arm{ID: "anthropic/sonnet", IsLocal: false, Capabilities: provider.Capabilities{ToolUse: true}})
+	r.ForceArm("anthropic/sonnet")
+	r.SetLocalOnly(true)
+
+	decision := r.Select(Task{Type: TaskGeneration})
+	if decision.Error == nil {
+		t.Fatal("expected error: forced cloud arm under local-only must not select")
+	}
+	if decision.Arm != nil {
+		t.Errorf("decision.Arm = %v, want nil", decision.Arm)
+	}
+}
+
+func TestRouter_SelectForcedLocalUnderLocalOnlyAllowed(t *testing.T) {
+	r := New(Config{})
+	r.RegisterArm(&Arm{ID: "ollama/qwen", IsLocal: true, Capabilities: provider.Capabilities{ToolUse: true}})
+	r.ForceArm("ollama/qwen")
+	r.SetLocalOnly(true)
+
+	decision := r.Select(Task{Type: TaskGeneration})
+	if decision.Error != nil {
+		t.Fatalf("forced local arm under local-only should select: %v", decision.Error)
+	}
+	if decision.Arm == nil || decision.Arm.ID != "ollama/qwen" {
+		t.Errorf("decision.Arm = %v, want ollama/qwen", decision.Arm)
+	}
+}
+
 // --- Gap A: Pool Reservations ---
 
 func TestRoutingDecision_CommitReleasesReservation(t *testing.T) {

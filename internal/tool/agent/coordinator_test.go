@@ -13,7 +13,7 @@ import (
 
 func makeTestStore(t *testing.T) *persist.Store {
 	t.Helper()
-	s := persist.New("test-coord-" + t.Name())
+	s := persist.New("test-coord-"+t.Name(), nil)
 	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 	return s
 }

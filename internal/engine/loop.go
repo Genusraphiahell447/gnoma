@@ -82,6 +82,11 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		if e.cfg.Router == nil || lastArmID == "" {
 			return
 		}
+		// Suppress quality feedback while incognito is active — bandit
+		// learning would otherwise persist signal about the session.
+		if e.cfg.Firewall != nil && !e.cfg.Firewall.Incognito().ShouldLearn() {
+			return
+		}
 		e.cfg.Router.ReportOutcome(router.Outcome{
 			ArmID:            lastArmID,
 			TaskType:         lastTaskType,
