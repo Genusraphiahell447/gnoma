@@ -249,6 +249,44 @@ gemini = ""
 	}
 }
 
+func TestArmConfig_TOML_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	_ = os.WriteFile(path, []byte(`
+[[arms]]
+id = "anthropic/claude-opus-4-7"
+strengths = ["security_review", "planning"]
+cost_weight = 0.3
+
+[[arms]]
+id = "subprocess/claude"
+strengths = ["orchestration"]
+`), 0o644)
+
+	cfg := Defaults()
+	if err := loadTOML(&cfg, path); err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(cfg.Arms) != 2 {
+		t.Fatalf("len(Arms) = %d, want 2", len(cfg.Arms))
+	}
+	if cfg.Arms[0].ID != "anthropic/claude-opus-4-7" {
+		t.Errorf("Arms[0].ID = %q", cfg.Arms[0].ID)
+	}
+	if len(cfg.Arms[0].Strengths) != 2 || cfg.Arms[0].Strengths[0] != "security_review" {
+		t.Errorf("Arms[0].Strengths = %v", cfg.Arms[0].Strengths)
+	}
+	if cfg.Arms[0].CostWeight != 0.3 {
+		t.Errorf("Arms[0].CostWeight = %v, want 0.3", cfg.Arms[0].CostWeight)
+	}
+	if cfg.Arms[1].ID != "subprocess/claude" {
+		t.Errorf("Arms[1].ID = %q", cfg.Arms[1].ID)
+	}
+	if cfg.Arms[1].CostWeight != 0 {
+		t.Errorf("Arms[1].CostWeight = %v, want 0 (default)", cfg.Arms[1].CostWeight)
+	}
+}
+
 func TestCLIAgentsSection_Absent_NilMap(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

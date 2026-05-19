@@ -219,6 +219,47 @@ func (r *Router) QualityTracker() *QualityTracker {
 	return r.quality
 }
 
+// ArmOverride is a config-supplied tweak to a registered arm. Use it to
+// declare per-task strengths and a CostWeight override.
+type ArmOverride struct {
+	ID         string   // ArmID as registered (e.g. "anthropic/claude-opus-4-7")
+	Strengths  []string // task-type names, parsed via ParseTaskType
+	CostWeight float64  // 0 leaves arm's current CostWeight untouched
+}
+
+// ApplyArmOverrides walks the override list, locates each by ID, and
+// applies the requested Strengths/CostWeight in place. Returns the list of
+// IDs that did not match a registered arm so the caller can warn about
+// typos. Apply after all arms have been registered.
+func (r *Router) ApplyArmOverrides(overrides []ArmOverride) (unknownIDs []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ov := range overrides {
+		arm, ok := r.arms[ArmID(ov.ID)]
+		if !ok {
+			unknownIDs = append(unknownIDs, ov.ID)
+			continue
+		}
+		if len(ov.Strengths) > 0 {
+			parsed := make([]TaskType, 0, len(ov.Strengths))
+			for _, s := range ov.Strengths {
+				t, ok := ParseTaskTypeStrict(s)
+				if !ok {
+					r.logger.Warn("unknown strength task-type; skipping",
+						"arm", ov.ID, "strength", s)
+					continue
+				}
+				parsed = append(parsed, t)
+			}
+			arm.Strengths = parsed
+		}
+		if ov.CostWeight != 0 {
+			arm.CostWeight = ov.CostWeight
+		}
+	}
+	return unknownIDs
+}
+
 // Arms returns all registered arms.
 func (r *Router) Arms() []*Arm {
 	r.mu.RLock()

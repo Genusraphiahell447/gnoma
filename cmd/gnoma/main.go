@@ -420,6 +420,26 @@ func main() {
 		logger.Debug("CLI agents discovered", "count", len(cliAgents))
 	}
 
+	// Apply [[arms]] overrides (strengths, cost_weight) now that all initial
+	// arms are registered. Late-discovered arms (background polling) won't
+	// pick these up — by design: overrides target arms the user knows exist.
+	if len(cfg.Arms) > 0 {
+		overrides := make([]router.ArmOverride, 0, len(cfg.Arms))
+		for _, ac := range cfg.Arms {
+			overrides = append(overrides, router.ArmOverride{
+				ID:         ac.ID,
+				Strengths:  ac.Strengths,
+				CostWeight: ac.CostWeight,
+			})
+		}
+		if unknown := rtr.ApplyArmOverrides(overrides); len(unknown) > 0 {
+			logger.Warn("[[arms]] config references unregistered arm IDs",
+				"ids", unknown,
+				"hint", "run `gnoma providers` to see registered arms",
+			)
+		}
+	}
+
 	// Start background discovery polling (30s interval).
 	// modelUpdater is set after the session is created so the discovery loop
 	// can update the displayed model name when it reconciles the forced arm.

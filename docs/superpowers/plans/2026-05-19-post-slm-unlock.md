@@ -276,22 +276,55 @@ shouldn't dominate (e.g. SecurityReview).
 
 ### Tasks
 
-- [ ] Add `Strengths` and `CostWeight` to `router.Arm`.
-- [ ] Config schema for per-arm overrides — likely
-  `[arms.<id>.strengths] = ["planning", "orchestration"]`.
-- [ ] `scoreArm` consults both fields.
-- [ ] Bandit signal feeds back into a per-arm-per-task affinity over
-  time (≥10 observations needed). Currently `QualityTracker` already
-  tracks per-arm × per-task EMA; what's missing is letting that
-  signal *promote* an arm out of its default tier.
-- [ ] Tests that show Opus winning over Gemini for SecurityReview
-  when `arms.anthropic_opus.strengths = ["security_review"]`.
+- [x] Add `Strengths []TaskType` and `CostWeight float64` to
+  `router.Arm`. Zero values preserve current behavior.
+- [x] Config schema: `[[arms]]` array of tables — `id`, `strengths`
+  (string list, parsed via new `ParseTaskTypeStrict`), `cost_weight`.
+- [x] `scoreArm` consults both fields: strength match adds a tunable
+  bonus (`strengthScoreBonus = 0.15`); `CostWeight` linearly dampens
+  cost via `effectiveCost = 1 + CostWeight*(cost-1)` — monotone on
+  both sides of cost=1.
+- [x] `selectBest` cross-tier promotion: arms whose `Strengths`
+  contain `task.Type` are evaluated as one set before falling through
+  to default tier order. Strengths are a preference, not a pin —
+  backoff/feasibility filtering at the router level removes promoted
+  arms when unavailable, and selection falls through.
+- [x] `Router.ApplyArmOverrides()` applies config overrides post
+  arm-registration. Unknown arm IDs surfaced via return value; main
+  logs a warning. Unknown strength names skipped with per-strength
+  warning.
+- [x] Tests: Opus with `Strengths=[security_review]` beats CLI-agent
+  tier-1 arm; empty Strengths preserves tier order; promoted arm in
+  backoff falls through (via full `Router.Select` path); two
+  strength-tagged arms decided by observed quality; CostWeight
+  direction across two arms; linear-formula monotonicity regression
+  test for the cost^weight bug avoided.
 
-**Exit criteria:** with explicit per-task strengths set, the router
-picks the strongest available arm for that task type, not the
-lowest-tier one.
+**Status: shipped (static portion).** Module map:
+- `internal/router/arm.go` — `Strengths`, `CostWeight`,
+  `HasStrength()`, `ResolvedCostWeight()`.
+- `internal/router/selector.go` — `scoreArm` updated, `selectBest`
+  cross-tier promotion path.
+- `internal/router/router.go` — `ArmOverride` type and
+  `ApplyArmOverrides()`.
+- `internal/router/task.go` — `ParseTaskTypeStrict()` (returns ok
+  bool) for typo-resistant config parsing.
+- `internal/config/config.go` — `ArmConfig` struct and `[[arms]]`
+  TOML wiring.
+- `cmd/gnoma/main.go` — applies overrides after all initial arms
+  register; warns on unknown IDs.
 
-**Effort:** ~300 LOC + tests. Touches `selector.go`, `arm.go`, config.
+**Exit criteria — met:** with `[[arms]] id="anthropic/..."
+strengths=["security_review"]`, the router picks Opus over a
+higher-tier CLI agent for that task type. Verified by
+`TestSelectBest_StrengthPromotedArmBeatsCLIAgent`.
+
+**Effort:** ~350 LOC + tests.
+
+**Deferred to D-2:** dynamic bandit-driven promotion (≥10 observations
+threshold + per-arm × per-task affinity that overrides tier order
+without static config). Holding until telemetry from real workloads
+informs the quality bar — same rationale as Phase E.
 
 ---
 

@@ -30,6 +30,24 @@ type Arm struct {
 	// Zero means no ceiling (default for all existing arms).
 	MaxComplexity float64
 
+	// Strengths lists task types where this arm is preferred. When any
+	// listed task type matches an incoming task, the arm crosses tier
+	// boundaries during selection — Opus tagged with TaskSecurityReview
+	// can beat a CLI-agent tier-1 arm for that task type, for example.
+	// Strengths are a preference, not a pin: if no strength-matching arm
+	// is feasible (rate-limited, backoff), selection falls back to the
+	// default tier order.
+	Strengths []TaskType
+
+	// CostWeight scales how much per-arm cost matters during scoring.
+	// effectiveCost = 1 + CostWeight*(cost-1):
+	//   - 1.0 (or zero, which is normalized to 1.0): current behavior.
+	//   - 0.5: half-weight cost — pricey arms penalized less.
+	//   - 0.0: cost ignored, pure quality wins.
+	// Use sub-1.0 values for task types where being right matters more
+	// than being cheap (e.g. SecurityReview).
+	CostWeight float64
+
 	// Cost per 1k tokens (EUR, estimated)
 	CostPer1kInput  float64
 	CostPer1kOutput float64
@@ -70,6 +88,29 @@ func (a *Arm) EstimateCost(estimatedTokens int) float64 {
 // SupportsTools returns true if this arm's model supports function calling.
 func (a *Arm) SupportsTools() bool {
 	return a.Capabilities.ToolUse
+}
+
+// HasStrength reports whether the arm is tagged as strong at the given task
+// type. Used by the selector to consider cross-tier promotion.
+func (a *Arm) HasStrength(t TaskType) bool {
+	for _, s := range a.Strengths {
+		if s == t {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolvedCostWeight normalizes the CostWeight field. A zero value means
+// "unset" and is treated as 1.0 (current full-cost behavior). Users who
+// want minimal cost influence set a small positive value like 0.05 — no
+// real use case wants exactly zero ("ignore cost entirely") and 0 doubles
+// as the Go zero value for arms registered before this field existed.
+func (a *Arm) ResolvedCostWeight() float64 {
+	if a.CostWeight == 0 {
+		return 1.0
+	}
+	return a.CostWeight
 }
 
 // perfAlpha is the EMA smoothing factor for ArmPerf updates (0.3 = ~3-sample memory).

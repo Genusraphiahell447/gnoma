@@ -56,11 +56,30 @@ func armTier(arm *Arm, task Task) int {
 	return 3
 }
 
-// selectBest picks the best arm, preferring lower-tier arms first.
-// Within a tier, the highest-scoring arm (by quality/cost) wins.
+// selectBest picks the best arm.
+//
+// Step 1: arms whose Strengths list contains task.Type cross all tier
+// boundaries — Opus tagged with SecurityReview beats a CLI-agent tier-1
+// arm for that task. Strengths are a preference, not a pin: if no
+// strength-matching arm is in the input set (filterFeasible already
+// removed arms in backoff, lacking tool support, or out of pool capacity),
+// selection falls through to the default tier order.
+//
+// Step 2 (fallback): walk tiers low→high. Within a tier, highest-scoring
+// arm wins.
 func selectBest(qt *QualityTracker, arms []*Arm, task Task) *Arm {
 	if len(arms) == 0 {
 		return nil
+	}
+
+	var promoted []*Arm
+	for _, arm := range arms {
+		if arm.HasStrength(task.Type) {
+			promoted = append(promoted, arm)
+		}
+	}
+	if len(promoted) > 0 {
+		return bestScored(qt, promoted, task)
 	}
 
 	for tier := 0; tier <= 3; tier++ {
@@ -91,10 +110,23 @@ func bestScored(qt *QualityTracker, arms []*Arm, task Task) *Arm {
 	return best
 }
 
+// strengthScoreBonus is added to quality when an arm's Strengths list
+// matches the incoming task type. Tunable in one place.
+const strengthScoreBonus = 0.15
+
 // scoreArm computes a quality/cost score for an arm.
 // When the quality tracker has sufficient observations, blends observed EMA
 // (70%) with heuristic (30%). Falls back to pure heuristic otherwise.
-// Score = (quality × value) / effective_cost
+//
+// Strengths add a fixed bonus to quality when matching task.Type. CostWeight
+// dampens the cost penalty linearly:
+//
+//	effectiveCost = 1 + CostWeight * (cost - 1)
+//
+// With CostWeight=1.0 (or unset → resolved to 1.0) the formula collapses to
+// the original effectiveCost == cost. With CostWeight=0 cost is fully
+// ignored (effectiveCost = 1.0). Local arms with sub-1 raw costs are not
+// amplified by fractional weights (the linear formula stays monotone).
 func scoreArm(qt *QualityTracker, arm *Arm, task Task) float64 {
 	hq := heuristicQuality(arm, task)
 	quality := hq
@@ -103,12 +135,19 @@ func scoreArm(qt *QualityTracker, arm *Arm, task Task) float64 {
 			quality = 0.7*observed + 0.3*hq
 		}
 	}
-	value := task.ValueScore()
-	cost := effectiveCost(arm, task)
-	if cost <= 0 {
-		cost = 0.001
+	if arm.HasStrength(task.Type) {
+		quality += strengthScoreBonus
 	}
-	return (quality * value) / cost
+	value := task.ValueScore()
+	rawCost := effectiveCost(arm, task)
+	if rawCost <= 0 {
+		rawCost = 0.001
+	}
+	weighted := 1.0 + arm.ResolvedCostWeight()*(rawCost-1.0)
+	if weighted <= 0 {
+		weighted = 0.001
+	}
+	return (quality * value) / weighted
 }
 
 // heuristicQuality estimates arm quality without historical data.

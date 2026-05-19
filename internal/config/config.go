@@ -13,6 +13,7 @@ type Config struct {
 	SLM        SLMSection        `toml:"slm"`
 	Router     RouterSection     `toml:"router"`
 	CLIAgents  CLIAgentsSection  `toml:"cli_agents"`
+	Arms       []ArmConfig       `toml:"arms"`
 	Hooks      []HookConfig      `toml:"hooks"`
 	MCPServers []MCPServerConfig `toml:"mcp_servers"`
 	Plugins    PluginsSection    `toml:"plugins"`
@@ -39,6 +40,30 @@ type SLMSection struct {
 	ModelURL       string   `toml:"model_url"`       // llamafile-only: where to download the binary from
 	DataDir        string   `toml:"data_dir"`        // llamafile-only: where to put it (empty = XDG default)
 	StartupTimeout Duration `toml:"startup_timeout"` // llamafile-only: first-launch wait budget; 0 = default 5s
+}
+
+// ArmConfig tunes routing for a single registered arm. Multiple [[arms]]
+// blocks may appear; each is matched by ID against the runtime arm
+// registry. An ID that doesn't match any registered arm logs a warning at
+// startup — typos here are otherwise silent.
+//
+// Example:
+//
+//	[[arms]]
+//	id = "anthropic/claude-opus-4-7"
+//	strengths = ["security_review", "planning"]  # task types this arm is preferred for
+//	cost_weight = 0.3                            # 1.0 = full cost penalty, 0 = ignore cost
+//
+//	[[arms]]
+//	id = "subprocess/claude"
+//	strengths = ["orchestration"]
+//
+// Strength names map to router.TaskType via router.ParseTaskType — same
+// names the SLM classifier emits (snake_case or no separator both work).
+type ArmConfig struct {
+	ID         string   `toml:"id"`
+	Strengths  []string `toml:"strengths"`
+	CostWeight float64  `toml:"cost_weight"`
 }
 
 // CLIAgentsSection maps canonical CLI agent names to override binary names.

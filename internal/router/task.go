@@ -347,31 +347,40 @@ func estimateComplexity(prompt string) float64 {
 	return score
 }
 
-// ParseTaskType converts a string from an SLM JSON response to a TaskType.
-// Matching is case-insensitive. Unknown strings fall back to TaskGeneration.
-func ParseTaskType(s string) TaskType {
+// ParseTaskTypeStrict is like ParseTaskType but reports whether the input
+// matched a known type. Used by config wiring to surface typos in
+// user-supplied task-type names instead of silently falling back to
+// TaskGeneration.
+func ParseTaskTypeStrict(s string) (TaskType, bool) {
 	switch strings.ToLower(strings.ReplaceAll(s, "_", "")) {
 	case "debug":
-		return TaskDebug
+		return TaskDebug, true
 	case "explain":
-		return TaskExplain
+		return TaskExplain, true
 	case "generation":
-		return TaskGeneration
+		return TaskGeneration, true
 	case "refactor":
-		return TaskRefactor
+		return TaskRefactor, true
 	case "unittest":
-		return TaskUnitTest
+		return TaskUnitTest, true
 	case "boilerplate":
-		return TaskBoilerplate
+		return TaskBoilerplate, true
 	case "planning":
-		return TaskPlanning
+		return TaskPlanning, true
 	case "orchestration":
-		return TaskOrchestration
+		return TaskOrchestration, true
 	case "securityreview":
-		return TaskSecurityReview
+		return TaskSecurityReview, true
 	case "review":
-		return TaskReview
-	default:
-		return TaskGeneration
+		return TaskReview, true
 	}
+	return TaskGeneration, false
+}
+
+// ParseTaskType converts a string from an SLM JSON response to a TaskType.
+// Matching is case-insensitive. Unknown strings fall back to TaskGeneration.
+// Use ParseTaskTypeStrict when you need to detect typos.
+func ParseTaskType(s string) TaskType {
+	t, _ := ParseTaskTypeStrict(s)
+	return t
 }
