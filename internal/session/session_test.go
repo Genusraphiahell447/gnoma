@@ -26,6 +26,7 @@ type mockProvider struct {
 
 func (m *mockProvider) Name() string         { return m.name }
 func (m *mockProvider) DefaultModel() string  { return "mock-model" }
+func (m *mockProvider) IsSecure() bool       { return true }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, nil
 }

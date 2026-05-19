@@ -437,7 +437,7 @@ func main() {
 	}
 
 	// Register local models discovered above in parallel.
-	router.RegisterDiscoveredModels(rtr, localModels, func(provName, model string) provider.Provider {
+	router.RegisterDiscoveredModels(rtr, localModels, func(provName, model string) router.SecureProvider {
 		p, err := createProvider(provName, "", model, cfg.Provider.Endpoints[provName])
 		if err != nil {
 			return nil
@@ -1451,7 +1451,11 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 	if dataDir == "" {
 		dataDir = slm.DefaultDataDir()
 	}
-	mgr := slm.New(slm.Config{DataDir: dataDir, ModelURL: cfg.SLM.ModelURL}, logger)
+	mgr := slm.New(slm.Config{
+		DataDir:        dataDir,
+		ModelURL:       cfg.SLM.ModelURL,
+		ExpectedSHA256: cfg.SLM.ExpectedSHA256,
+	}, logger)
 
 	switch args[0] {
 	case "setup":
@@ -1465,7 +1469,14 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 				return 1
 			}
 			cfg.SLM.ModelURL = slm.DefaultModelURL
-			mgr = slm.New(slm.Config{DataDir: dataDir, ModelURL: cfg.SLM.ModelURL}, logger)
+			if cfg.SLM.ExpectedSHA256 == "" {
+				cfg.SLM.ExpectedSHA256 = slm.DefaultModelSHA256
+			}
+			mgr = slm.New(slm.Config{
+				DataDir:        dataDir,
+				ModelURL:       cfg.SLM.ModelURL,
+				ExpectedSHA256: cfg.SLM.ExpectedSHA256,
+			}, logger)
 		}
 		if mgr.Status() == slm.StatusReady {
 			mf := mgr.Manifest()

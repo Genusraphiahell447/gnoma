@@ -33,6 +33,7 @@ func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 		Capabilities: provider.Capabilities{ToolUse: true},
 	}}, nil
 }
+func (m *mockProvider) IsSecure() bool { return true }
 func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	if m.calls >= len(m.streams) {
 		return nil, fmt.Errorf("mock: no more streams (called %d times)", m.calls+1)

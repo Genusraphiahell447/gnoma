@@ -40,6 +40,11 @@ func (p *SafeProvider) Inner() provider.Provider {
 	return p.inner
 }
 
+// IsSecure returns true. Satisfies the router's SecureProvider interface.
+func (p *SafeProvider) IsSecure() bool {
+	return true
+}
+
 func (p *SafeProvider) Stream(ctx context.Context, req provider.Request) (stream.Stream, error) {
 	if p.fwRef != nil {
 		if fw := p.fwRef.Get(); fw != nil {

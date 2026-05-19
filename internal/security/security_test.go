@@ -10,7 +10,7 @@ import (
 // --- Scanner ---
 
 func TestScanner_DetectsAnthropicKey(t *testing.T) {
-	s := NewScanner(4.5)
+	s := NewScanner(4.5, false)
 	matches := s.Scan("my key is sk-ant-api03-abcdefghijklmnopqrstuvwxyz")
 	if len(matches) == 0 {
 		t.Error("should detect Anthropic API key")
@@ -21,7 +21,7 @@ func TestScanner_DetectsAnthropicKey(t *testing.T) {
 }
 
 func TestScanner_DetectsOpenAIKey(t *testing.T) {
-	s := NewScanner(4.5)
+	s := NewScanner(4.5, false)
 	matches := s.Scan("key: sk-proj-abcdefghijklmnopqrstuvwxyz123456")
 	if len(matches) == 0 {
 		t.Error("should detect OpenAI API key")
@@ -29,7 +29,7 @@ func TestScanner_DetectsOpenAIKey(t *testing.T) {
 }
 
 func TestScanner_DetectsAWSKey(t *testing.T) {
-	s := NewScanner(4.5)
+	s := NewScanner(4.5, false)
 	matches := s.Scan("AKIAIOSFODNN7EXAMPLE")
 	if len(matches) == 0 {
 		t.Error("should detect AWS access key")
@@ -40,7 +40,7 @@ func TestScanner_DetectsAWSKey(t *testing.T) {
 }
 
 func TestScanner_DetectsGitHubPAT(t *testing.T) {
-	s := NewScanner(4.5)
+	s := NewScanner(4.5, false)
 	matches := s.Scan("token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
 	hasGH := false
 	for _, m := range matches {
@@ -55,8 +55,8 @@ func TestScanner_DetectsGitHubPAT(t *testing.T) {
 }
 
 func TestScanner_DetectsPrivateKey(t *testing.T) {
-	s := NewScanner(4.5)
-	matches := s.Scan("-----BEGIN RSA PRIVATE KEY-----\nMIIE...")
+	s := NewScanner(4.5, false)
+	matches := s.Scan("-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----")
 	hasKey := false
 	for _, m := range matches {
 		if m.Pattern == "private_key" {
@@ -70,7 +70,7 @@ func TestScanner_DetectsPrivateKey(t *testing.T) {
 }
 
 func TestScanner_DetectsGenericSecret(t *testing.T) {
-	s := NewScanner(4.5)
+	s := NewScanner(4.5, false)
 	matches := s.Scan(`password = "supersecretpassword123"`)
 	hasGeneric := false
 	for _, m := range matches {
@@ -85,7 +85,7 @@ func TestScanner_DetectsGenericSecret(t *testing.T) {
 }
 
 func TestScanner_DetectsDatabaseURL(t *testing.T) {
-	s := NewScanner(4.5)
+	s := NewScanner(4.5, false)
 	matches := s.Scan("postgres://admin:secretpass@db.example.com:5432/mydb")
 	hasDB := false
 	for _, m := range matches {
@@ -100,7 +100,7 @@ func TestScanner_DetectsDatabaseURL(t *testing.T) {
 }
 
 func TestScanner_DetectsMistralKey(t *testing.T) {
-	s := NewScanner(6.0)
+	s := NewScanner(6.0, false)
 
 	// Should detect Mistral key in assignment contexts.
 	positives := []string{
@@ -139,7 +139,7 @@ func TestScanner_DetectsMistralKey(t *testing.T) {
 }
 
 func TestScanner_NoFalsePositives(t *testing.T) {
-	s := NewScanner(6.0) // high entropy threshold to avoid false positives
+	s := NewScanner(6.0, false) // high entropy threshold to avoid false positives
 	safe := []string{
 		"hello world",
 		"func main() {}",
@@ -156,7 +156,7 @@ func TestScanner_NoFalsePositives(t *testing.T) {
 }
 
 func TestScanner_Entropy(t *testing.T) {
-	s := NewScanner(4.0) // lower threshold for testing
+	s := NewScanner(4.0, false) // lower threshold for testing
 
 	// High entropy string (random-looking)
 	matches := s.Scan("token: aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1v")
@@ -195,7 +195,7 @@ func TestShannonEntropy(t *testing.T) {
 
 func TestRedact_SingleMatch(t *testing.T) {
 	content := `AKIAIOSFODNN7EXAMPLE is my key`
-	s := NewScanner(6.0)
+	s := NewScanner(6.0, false)
 	matches := s.Scan(content)
 
 	result := Redact(content, matches)
@@ -209,7 +209,7 @@ func TestRedact_SingleMatch(t *testing.T) {
 
 func TestRedact_MultipleMatches(t *testing.T) {
 	content := "aws: AKIAIOSFODNN7EXAMPLE github: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
-	s := NewScanner(6.0)
+	s := NewScanner(6.0, false)
 	matches := s.Scan(content)
 
 	result := Redact(content, matches)
@@ -442,7 +442,7 @@ func TestFirewall_ActionBlockReturnsBlockedString(t *testing.T) {
 func TestScanner_DedupKeyNoCollision(t *testing.T) {
 	// Two matches at byte offsets > 127 in the same pattern should both appear,
 	// not get deduplicated because of hash collision in the key.
-	s := NewScanner(3.0)
+	s := NewScanner(3.0, false)
 	// Build a string where two matches appear after offset 127
 	prefix := strings.Repeat("x", 128) // push matches past offset 127
 	input := prefix + "sk-ant-api03-aaaaaaaabbbbbbbbcccccccc " + prefix + "sk-ant-api03-ddddddddeeeeeeeeffffffff"

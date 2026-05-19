@@ -27,6 +27,7 @@ type mockProvider struct {
 func (m *mockProvider) Name() string         { return m.name }
 func (m *mockProvider) DefaultModel() string  { return "mock" }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) { return nil, nil }
+func (m *mockProvider) IsSecure() bool       { return true }
 func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	idx := m.calls.Add(1) - 1
 	if int(idx) >= len(m.streams) {
@@ -265,6 +266,7 @@ func (p *panicOnStreamProvider) DefaultModel() string { return "panic" }
 func (p *panicOnStreamProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, nil
 }
+func (p *panicOnStreamProvider) IsSecure() bool { return true }
 func (p *panicOnStreamProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	panic("intentional test panic")
 }

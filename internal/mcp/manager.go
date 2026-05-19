@@ -93,7 +93,8 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig) (*Client, e
 
 func (m *Manager) registerTools(srv ServerConfig, tools []MCPTool, client *Client, registry *tool.Registry) {
 	for _, mt := range tools {
-		adapter := NewAdapter(srv.Name, mt, client)
+		policy := srv.ToolPolicy[mt.Name]
+		adapter := NewAdapter(srv.Name, mt, client, policy)
 
 		// Explicit mapping: if this MCP tool name has a replace_default entry,
 		// register it under the built-in's name instead of mcp__{server}__{tool}.

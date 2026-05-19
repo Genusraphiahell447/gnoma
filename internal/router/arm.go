@@ -11,10 +11,18 @@ import (
 // ArmID uniquely identifies a model+provider pair.
 type ArmID string
 
+// SecureProvider is the interface that all router arms must satisfy.
+// It ensures that the provider has been wrapped with security controls
+// (e.g. security.SafeProvider).
+type SecureProvider interface {
+	provider.Provider
+	IsSecure() bool
+}
+
 // Arm represents a provider+model pair available for routing.
 type Arm struct {
 	ID           ArmID
-	Provider     provider.Provider
+	Provider     SecureProvider
 	ModelName    string
 	IsLocal      bool
 	IsCLIAgent   bool // subprocess-based CLI agent (claude, gemini, vibe); tier 0 in routing

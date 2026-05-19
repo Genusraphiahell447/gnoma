@@ -8,7 +8,6 @@ import (
 
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
-	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
@@ -151,7 +150,7 @@ func (m *Manager) ReportResult(result Result) {
 }
 
 // SpawnWithProvider creates an elf using a specific provider (bypasses router).
-func (m *Manager) SpawnWithProvider(prov provider.Provider, model, prompt, systemPrompt string, maxTurns int) (Elf, error) {
+func (m *Manager) SpawnWithProvider(prov router.SecureProvider, model, prompt, systemPrompt string, maxTurns int) (Elf, error) {
 	elfPerms := m.permissions
 	if elfPerms != nil {
 		elfPerms = elfPerms.WithDenyPrompt()

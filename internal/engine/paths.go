@@ -17,15 +17,62 @@ import (
 //
 // The trailing-separator check prevents "/tmp" from matching "/tmpx/foo".
 func isUnderAllowedPaths(target string, allowed []string) bool {
-	target = filepath.Clean(target)
+	if len(allowed) == 0 {
+		return false
+	}
+
+	canonicalTarget, err := resolveCanonical(target)
+	if err != nil {
+		return false
+	}
+
 	sep := string(filepath.Separator)
 	for _, a := range allowed {
-		a = filepath.Clean(a)
-		if target == a || strings.HasPrefix(target, a+sep) {
+		canonicalAllowed, err := resolveCanonical(a)
+		if err != nil {
+			continue
+		}
+		if canonicalTarget == canonicalAllowed || strings.HasPrefix(canonicalTarget, canonicalAllowed+sep) {
 			return true
 		}
 	}
 	return false
+}
+
+// resolveCanonical returns the absolute, symlink-evaluated path.
+// If the path doesn't exist, it resolves the deepest existing ancestor and
+// appends the remaining tail.
+func resolveCanonical(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	ancestor := abs
+	var tail []string
+	for {
+		if _, err := os.Lstat(ancestor); err == nil {
+			break
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			// Hit root, nothing exists? highly unlikely for Abs() but handle it.
+			break
+		}
+		tail = append([]string{filepath.Base(ancestor)}, tail...)
+		ancestor = parent
+	}
+
+	canonicalAncestor, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		return "", err
+	}
+
+	resolved := canonicalAncestor
+	if len(tail) > 0 {
+		resolved = filepath.Join(append([]string{canonicalAncestor}, tail...)...)
+	}
+	return filepath.Clean(resolved), nil
 }
 
 // checkPathRestriction enforces AllowedPaths on a single tool call.

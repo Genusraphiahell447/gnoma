@@ -45,7 +45,7 @@ func TestArmID_Model(t *testing.T) {
 
 // --- reconcileArms ---
 
-func noopFactory(name, model string) provider.Provider { return nil }
+func noopFactory(name, model string) SecureProvider { return nil }
 
 func dummyArm(id ArmID, local bool) *Arm {
 	return &Arm{
@@ -139,7 +139,7 @@ func TestReconcileArms_NoForcedArm(t *testing.T) {
 		{ID: "gemma-26b", Provider: "llamacpp", SupportsTools: true},
 	}
 
-	factory := func(name, model string) provider.Provider {
+	factory := func(name, model string) SecureProvider {
 		return &stubProvider{name: name, model: model}
 	}
 
@@ -212,3 +212,4 @@ func (s *stubProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 func (s *stubProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	return nil, nil
 }
+func (s *stubProvider) IsSecure() bool { return true }

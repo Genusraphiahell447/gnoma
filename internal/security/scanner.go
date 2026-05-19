@@ -32,17 +32,19 @@ type SecretMatch struct {
 
 // Scanner detects secrets and sensitive data in content.
 type Scanner struct {
-	patterns         []SecretPattern
-	entropyThreshold float64
+	patterns          []SecretPattern
+	entropyThreshold  float64
+	redactHighEntropy bool
 }
 
-func NewScanner(entropyThreshold float64) *Scanner {
+func NewScanner(entropyThreshold float64, redactHighEntropy bool) *Scanner {
 	if entropyThreshold <= 0 {
 		entropyThreshold = 4.5
 	}
 	return &Scanner{
-		patterns:         defaultPatterns(),
-		entropyThreshold: entropyThreshold,
+		patterns:          defaultPatterns(),
+		entropyThreshold:  entropyThreshold,
+		redactHighEntropy: redactHighEntropy,
 	}
 }
 
@@ -104,9 +106,13 @@ func (s *Scanner) scanEntropy(content string) []SecretMatch {
 		}
 		entropy := shannonEntropy(w.text)
 		if entropy >= s.entropyThreshold {
+			action := ActionWarn
+			if s.redactHighEntropy {
+				action = ActionRedact
+			}
 			matches = append(matches, SecretMatch{
 				Pattern: "high_entropy",
-				Action:  ActionWarn,
+				Action:  action,
 				Start:   w.start,
 				End:     w.start + len(w.text),
 			})
@@ -224,7 +230,7 @@ func defaultPatterns() []SecretPattern {
 		{"sentry_auth_token", `sntrys_[a-zA-Z0-9_]{50,}`},
 
 		// --- Infrastructure ---
-		{"private_key", `-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`},
+		{"private_key", `(?s)-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`},
 		{"database_url", `(?i)(?:postgres|mysql|mongodb|redis)://[^:]+:[^@]+@`},
 		{"heroku_api_key", `(?i)HEROKU_API_KEY\s*=\s*[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`},
 		{"mailgun_api_key", `key-[a-f0-9]{32}`},

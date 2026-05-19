@@ -20,6 +20,7 @@ const pidFile = "llamafile.pid"
 // DefaultModelURL is the default llamafile to download when none is configured.
 // Qwen2.5 0.5B Instruct Q6_K (~450 MB) — small, fast, and supports tools.
 const DefaultModelURL = "https://huggingface.co/Mozilla/Qwen2.5-0.5B-Instruct-llamafile/resolve/main/Qwen2.5-0.5B-Instruct-Q6_K.llamafile"
+const DefaultModelSHA256 = "c4e991af9ea7077339b8768e349da486a76392e72b3ef47ad372e6582779a8dd"
 
 // DefaultDataDir returns the platform default SLM data directory.
 // Follows XDG Base Directory Specification: $XDG_DATA_HOME/gnoma/slm,
@@ -57,8 +58,9 @@ func (s Status) String() string {
 
 // Config holds Manager configuration.
 type Config struct {
-	DataDir  string // XDG data home / gnoma / slm; must be set
-	ModelURL string // required for Setup
+	DataDir        string // XDG data home / gnoma / slm; must be set
+	ModelURL       string // required for Setup
+	ExpectedSHA256 string // if non-empty, Setup verifies against this
 }
 
 // Manager controls the llamafile lifecycle.
@@ -129,6 +131,11 @@ func (m *Manager) Setup(ctx context.Context, progress func(downloaded, total int
 	sha256hex, size, err := download(ctx, m.cfg.ModelURL, dst, progress)
 	if err != nil {
 		return err
+	}
+
+	if m.cfg.ExpectedSHA256 != "" && sha256hex != m.cfg.ExpectedSHA256 {
+		_ = os.Remove(dst) // cleanup corrupt/malicious download
+		return fmt.Errorf("slm: hash mismatch for %s: got %s, want %s", m.cfg.ModelURL, sha256hex, m.cfg.ExpectedSHA256)
 	}
 
 	mf := &Manifest{

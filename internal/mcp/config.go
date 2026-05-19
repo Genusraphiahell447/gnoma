@@ -17,6 +17,11 @@ type ServerConfig struct {
 	Env            map[string]string
 	Timeout        time.Duration
 	ReplaceDefault map[string]string // MCP tool name → built-in name to replace
+	ToolPolicy     map[string]ToolPolicy
+}
+
+type ToolPolicy struct {
+	PathArgs []string
 }
 
 // ParseServerConfigs validates and converts raw config entries.
@@ -46,14 +51,19 @@ func ParseServerConfigs(raw []config.MCPServerConfig) ([]ServerConfig, error) {
 			}
 		}
 
-		result = append(result, ServerConfig{
+		entry := ServerConfig{
 			Name:           r.Name,
 			Command:        r.Command,
 			Args:           r.Args,
 			Env:            r.Env,
 			Timeout:        timeout,
 			ReplaceDefault: r.ReplaceDefault,
-		})
+			ToolPolicy:     map[string]ToolPolicy{},
+		}
+		for name, p := range r.ToolPolicy {
+			entry.ToolPolicy[name] = ToolPolicy{PathArgs: p.PathArgs}
+		}
+		result = append(result, entry)
 	}
 
 	return result, nil

@@ -16,20 +16,23 @@ type Adapter struct {
 	mcpTool      MCPTool
 	client       *Client
 	overrideName string // non-empty when replacing a built-in
+	policy       ToolPolicy
 }
 
 // Compile-time interface checks.
 var (
-	_ tool.Tool         = (*Adapter)(nil)
-	_ tool.DeferrableTool = (*Adapter)(nil)
+	_ tool.Tool           = (*Adapter)(nil)
+	_ tool.DeferrableTool    = (*Adapter)(nil)
+	_ tool.PathSensitiveTool = (*Adapter)(nil)
 )
 
 // NewAdapter creates a tool adapter for the given MCP tool.
-func NewAdapter(serverName string, mcpTool MCPTool, client *Client) *Adapter {
+func NewAdapter(serverName string, mcpTool MCPTool, client *Client, policy ToolPolicy) *Adapter {
 	return &Adapter{
 		serverName: serverName,
 		mcpTool:    mcpTool,
 		client:     client,
+		policy:     policy,
 	}
 }
 
@@ -55,6 +58,22 @@ func (a *Adapter) Description() string {
 // Parameters returns the MCP tool's input schema (zero-copy passthrough).
 func (a *Adapter) Parameters() json.RawMessage {
 	return a.mcpTool.InputSchema
+}
+
+func (a *Adapter) ExtractPaths(args json.RawMessage) []string {
+	var m map[string]any
+	if err := json.Unmarshal(args, &m); err != nil {
+		return nil
+	}
+	var paths []string
+	for _, argName := range a.policy.PathArgs {
+		if v, ok := m[argName]; ok {
+			if s, ok := v.(string); ok {
+				paths = append(paths, s)
+			}
+		}
+	}
+	return paths
 }
 
 // Execute calls the MCP server's tools/call method.

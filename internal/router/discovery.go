@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
@@ -22,7 +23,6 @@ type DiscoveredModel struct {
 	SupportsTools bool   // whether the model supports function/tool calling
 	ContextSize   int    // context window in tokens (0 = unknown, use default)
 }
-
 
 // DiscoverOllama polls the local Ollama instance for available models.
 // toolCache caches /api/show probe results per model name to avoid N requests
@@ -48,125 +48,144 @@ func DiscoverOllama(ctx context.Context, baseURL string, toolCache map[string]bo
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("ollama returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("ollama returned status %d", resp.StatusCode)
 	}
 
-	var result struct {
+	var data struct {
 		Models []struct {
-			Name    string `json:"name"`
-			Size    int64  `json:"size"`
-			Details struct {
-				Family        string `json:"family"`
-				ParameterSize string `json:"parameter_size"`
-			} `json:"details"`
+			Name string `json:"name"`
+			Size int64  `json:"size"`
 		} `json:"models"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("ollama response parse: %w", err)
-	}
-
-	currentModels := make(map[string]bool, len(result.Models))
-	var models []DiscoveredModel
-	for _, m := range result.Models {
-		currentModels[m.Name] = true
-		supportsTools, cached := false, false
-		if toolCache != nil {
-			supportsTools, cached = toolCache[m.Name]
-		}
-		if !cached {
-			supportsTools = probeOllamaToolSupport(ctx, baseURL, m.Name)
-			if toolCache != nil {
-				toolCache[m.Name] = supportsTools
-			}
-		}
-		models = append(models, DiscoveredModel{
-			ID:            m.Name,
-			Name:          m.Name,
-			Provider:      "ollama",
-			Size:          m.Size,
-			SupportsTools: supportsTools,
-			ContextSize:   32768, // conservative default; Ollama /api/show can refine this
-		})
-	}
-	// Prune cache entries for disappeared models (may be a different quant next time).
-	for name := range toolCache {
-		if !currentModels[name] {
-			delete(toolCache, name)
-		}
-	}
-	return models, nil
-}
-
-// DiscoverLlamaCpp polls a local llama.cpp server for available models.
-func DiscoverLlamaCpp(ctx context.Context, baseURL string) ([]DiscoveredModel, error) {
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/v1/models", nil)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 
+	discovered := make([]DiscoveredModel, 0, len(data.Models))
+	for _, m := range data.Models {
+		dm := DiscoveredModel{
+			ID:       m.Name,
+			Name:     m.Name,
+			Provider: "ollama",
+			Size:     m.Size,
+		}
+
+		// Try to probe capabilities if we have a cache or if we want to probe
+		if toolCache != nil {
+			if supported, ok := toolCache[m.Name]; ok {
+				dm.SupportsTools = supported
+			} else {
+				// Probe once
+				supported, contextSize := probeOllamaModel(ctx, baseURL, m.Name)
+				toolCache[m.Name] = supported
+				dm.SupportsTools = supported
+				dm.ContextSize = contextSize
+			}
+		}
+
+		discovered = append(discovered, dm)
+	}
+	return discovered, nil
+}
+
+func probeOllamaModel(ctx context.Context, baseURL, model string) (bool, int) {
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/show", strings.NewReader(fmt.Sprintf(`{"name":"%s"}`, model)))
+	if err != nil {
+		return false, 0
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, 0
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		return false, 0
+	}
+	var data struct {
+		Template   string `json:"template"`
+		Parameters string `json:"parameters"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return false, 0
+	}
+
+	// Heuristic for tool support: many modern models that support tools
+	// have "call" or "tool" or "json" in their template or system prompt
+	// logic. More specifically, Ollama's own tool-calling models often
+	// include specific jinja templates.
+	supported := strings.Contains(data.Template, ".Tool") ||
+		strings.Contains(data.Template, "tools") ||
+		strings.Contains(data.Template, "json")
+
+	// Context size heuristic from parameters
+	contextSize := 0
+	if strings.Contains(data.Parameters, "num_ctx") {
+		// Ollama parameters are often a block of text: "num_ctx 4096\nstop <|end|>"
+		lines := strings.Split(data.Parameters, "\n")
+		for _, l := range lines {
+			if strings.HasPrefix(l, "num_ctx") {
+				fmt.Sscanf(l, "num_ctx %d", &contextSize)
+				break
+			}
+		}
+	}
+
+	return supported, contextSize
+}
+
+// DiscoverLlamaCPP checks if a local llama.cpp server is reachable.
+func DiscoverLlamaCPP(ctx context.Context, baseURL string) ([]DiscoveredModel, error) {
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/props", nil)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("llama.cpp not reachable at %s: %w", baseURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("llama.cpp returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("llama.cpp returned status %d", resp.StatusCode)
 	}
 
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+	// llama.cpp /props often returns the model path
+	var data struct {
+		DefaultGenerationSettings struct {
+			N_Ctx int `json:"n_ctx"`
+		} `json:"default_generation_settings"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("llama.cpp response parse: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
 	}
 
-	// llama.cpp loads one model server-wide; probe once for tool support.
-	toolSupport := probeLlamaCppToolSupport(ctx, baseURL)
-	slog.Debug("llamacpp discovery probe complete",
-		"models_found", len(result.Data),
-		"tool_support", toolSupport,
-	)
-
-	var models []DiscoveredModel
-	for _, m := range result.Data {
-		models = append(models, DiscoveredModel{
-			ID:            m.ID,
-			Name:          m.ID,
-			Provider:      "llamacpp",
-			SupportsTools: toolSupport,
-			ContextSize:   8192, // llama.cpp default; --ctx-size configurable
-		})
-	}
-	return models, nil
+	return []DiscoveredModel{{
+		ID:            "default",
+		Name:          "llama.cpp",
+		Provider:      "llamacpp",
+		ContextSize:   data.DefaultGenerationSettings.N_Ctx,
+		SupportsTools: true, // assume true for modern llama.cpp
+	}}, nil
 }
 
-// DiscoverLocalModels discovers all available local models (ollama + llama.cpp).
-// Non-blocking: failures are logged and skipped.
-// ollamaToolCache is passed to DiscoverOllama; nil skips caching.
+// DiscoverLocalModels polls all known local providers.
 func DiscoverLocalModels(ctx context.Context, logger *slog.Logger, ollamaURL, llamacppURL string, ollamaToolCache map[string]bool) []DiscoveredModel {
 	var all []DiscoveredModel
 
 	if models, err := DiscoverOllama(ctx, ollamaURL, ollamaToolCache); err != nil {
-		logger.Debug("ollama discovery failed (non-fatal)", "error", err)
+		logger.Debug("ollama discovery skipped", "error", err)
 	} else {
-		logger.Debug("discovered ollama models", "count", len(models))
 		all = append(all, models...)
 	}
 
-	if models, err := DiscoverLlamaCpp(ctx, llamacppURL); err != nil {
-		logger.Debug("llamacpp discovery failed (non-fatal)", "error", err)
+	if models, err := DiscoverLlamaCPP(ctx, llamacppURL); err != nil {
+		logger.Debug("llama.cpp discovery skipped", "error", err)
 	} else {
-		logger.Debug("discovered llamacpp models", "count", len(models))
 		all = append(all, models...)
 	}
 
@@ -177,7 +196,7 @@ func DiscoverLocalModels(ctx context.Context, logger *slog.Logger, ollamaURL, ll
 // onReconcile is called when the forced arm identity changes (may be nil).
 func StartDiscoveryLoop(ctx context.Context, r *Router, logger *slog.Logger,
 	ollamaURL, llamacppURL string,
-	providerFactory func(name, model string) provider.Provider,
+	providerFactory func(name, model string) SecureProvider,
 	interval time.Duration,
 	onReconcile func(ArmID),
 ) {
@@ -200,7 +219,7 @@ func StartDiscoveryLoop(ctx context.Context, r *Router, logger *slog.Logger,
 // reconcileArms adds newly discovered models, removes disappeared ones, and
 // reconciles the forced arm when discovery reveals its real model name.
 // onReconcile is called (if non-nil) when the forced arm identity changes.
-func reconcileArms(r *Router, discovered []DiscoveredModel, providerFactory func(name, model string) provider.Provider, logger *slog.Logger, onReconcile func(ArmID)) {
+func reconcileArms(r *Router, discovered []DiscoveredModel, providerFactory func(name, model string) SecureProvider, logger *slog.Logger, onReconcile func(ArmID)) {
 	discoveredSet := make(map[ArmID]bool, len(discovered))
 	for _, m := range discovered {
 		discoveredSet[NewArmID(m.Provider, m.ID)] = true
@@ -253,7 +272,7 @@ func reconcileArms(r *Router, discovered []DiscoveredModel, providerFactory func
 }
 
 // RegisterDiscoveredModels registers discovered local models as arms in the router.
-func RegisterDiscoveredModels(r *Router, models []DiscoveredModel, providerFactory func(name, model string) provider.Provider) {
+func RegisterDiscoveredModels(r *Router, models []DiscoveredModel, providerFactory func(name, model string) SecureProvider) {
 	for _, m := range models {
 		armID := NewArmID(m.Provider, m.ID)
 

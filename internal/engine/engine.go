@@ -19,7 +19,7 @@ import (
 
 // Config holds engine configuration.
 type Config struct {
-	Provider    provider.Provider        // direct provider (used if Router is nil)
+	Provider    router.SecureProvider    // direct provider (used if Router is nil)
 	Router      *router.Router           // nil = use Provider directly
 	Classifier  router.TaskClassifier    // nil = HeuristicClassifier
 	Tools       *tool.Registry
@@ -272,7 +272,8 @@ func (e *Engine) Usage() message.Usage {
 // SafeProvider." Passing a raw provider here would silently open a
 // firewall bypass for any engine path that calls Provider.Stream
 // without going through buildRequest.
-func (e *Engine) SetProvider(p provider.Provider) {
+// SetProvider changes the provider for the engine.
+func (e *Engine) SetProvider(p router.SecureProvider) {
 	e.mu.Lock()
 	e.cfg.Provider = p
 	e.mu.Unlock()

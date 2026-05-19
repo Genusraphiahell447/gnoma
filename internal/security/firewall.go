@@ -21,10 +21,11 @@ type Firewall struct {
 }
 
 type FirewallConfig struct {
-	ScanOutgoing     bool
-	ScanToolResults  bool
-	EntropyThreshold float64
-	Logger           *slog.Logger
+	ScanOutgoing      bool
+	ScanToolResults   bool
+	RedactHighEntropy bool
+	EntropyThreshold  float64
+	Logger            *slog.Logger
 }
 
 func NewFirewall(cfg FirewallConfig) *Firewall {
@@ -33,7 +34,7 @@ func NewFirewall(cfg FirewallConfig) *Firewall {
 		logger = slog.Default()
 	}
 	return &Firewall{
-		scanner:         NewScanner(cfg.EntropyThreshold),
+		scanner:         NewScanner(cfg.EntropyThreshold, cfg.RedactHighEntropy),
 		incognito:       NewIncognitoMode(),
 		logger:          logger,
 		scanOutgoing:    cfg.ScanOutgoing,

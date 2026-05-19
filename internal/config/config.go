@@ -44,6 +44,7 @@ type SLMSection struct {
 	BaseURL        string   `toml:"base_url"`        // server URL; defaults per-backend
 	ModelURL       string   `toml:"model_url"`       // llamafile-only: where to download the binary from
 	DataDir        string   `toml:"data_dir"`        // llamafile-only: where to put it (empty = XDG default)
+	ExpectedSHA256 string   `toml:"expected_sha256"` // llamafile-only: verify hash if non-empty
 	StartupTimeout Duration `toml:"startup_timeout"` // llamafile-only: first-launch wait budget; 0 = default 5s
 }
 
@@ -116,7 +117,12 @@ type MCPServerConfig struct {
 	Args           []string          `toml:"args"`
 	Env            map[string]string `toml:"env"`
 	Timeout        string            `toml:"timeout"`
-	ReplaceDefault map[string]string `toml:"replace_default"` // MCP tool name → built-in name
+	ReplaceDefault map[string]string      `toml:"replace_default"` // MCP tool name → built-in name
+	ToolPolicy     map[string]MCPToolPolicy `toml:"tool_policy"`     // MCP tool name → policy
+}
+
+type MCPToolPolicy struct {
+	PathArgs []string `toml:"path_args"`
 }
 
 // PluginsSection controls plugin loading.
@@ -169,8 +175,9 @@ type SessionSection struct {
 //	regex = "mycompany_[a-zA-Z0-9]{32}"
 //	action = "redact"
 type SecuritySection struct {
-	EntropyThreshold float64         `toml:"entropy_threshold"`
-	Patterns         []PatternConfig `toml:"patterns"`
+	EntropyThreshold  float64         `toml:"entropy_threshold"`
+	RedactHighEntropy bool            `toml:"redact_high_entropy"`
+	Patterns          []PatternConfig `toml:"patterns"`
 }
 
 type PatternConfig struct {

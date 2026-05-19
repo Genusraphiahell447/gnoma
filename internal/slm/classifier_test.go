@@ -24,6 +24,7 @@ func (m *mockProvider) DefaultModel() string { return "default" }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, nil
 }
+func (m *mockProvider) IsSecure() bool { return true }
 func (m *mockProvider) Stream(ctx context.Context, _ provider.Request) (stream.Stream, error) {
 	if m.delay > 0 {
 		select {

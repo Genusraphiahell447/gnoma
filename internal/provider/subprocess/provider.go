@@ -7,6 +7,12 @@
 // Temperature, TopP, TopK, Thinking, ToolChoice, MaxTokens.
 // ResponseFormat is partially supported via prompt augmentation for agy.
 // Internal tool calls executed by the CLI are surfaced as EventTextDelta (opaque).
+//
+// SECURITY WARNING: These CLI agents are external trust boundaries. They run
+// their own agentic loops, execute their own tools (often with --yolo or --trust),
+// and may bypass gnoma's tool permissions, system prompts, and history controls.
+// gnoma's firewall only redacts the prompt passed to the CLI and the final text
+// response; internal agent cycles are invisible to gnoma.
 package subprocess
 
 import (

@@ -283,17 +283,17 @@ func (r *Router) Arms() []*Arm {
 }
 
 // RegisterProvider registers all models from a provider as arms.
-func (r *Router) RegisterProvider(ctx context.Context, prov provider.Provider, isLocal bool, costs map[string][2]float64) {
+func (r *Router) RegisterProvider(ctx context.Context, prov SecureProvider, isLocal bool, costs map[string][2]float64) {
 	models, err := prov.Models(ctx)
 	if err != nil {
 		r.logger.Debug("failed to list models", "provider", prov.Name(), "error", err)
 		// Register at least the default model
 		id := NewArmID(prov.Name(), prov.DefaultModel())
 		r.RegisterArm(&Arm{
-			ID:        id,
-			Provider:  prov,
-			ModelName: prov.DefaultModel(),
-			IsLocal:   isLocal,
+			ID:           id,
+			Provider:     prov,
+			ModelName:    prov.DefaultModel(),
+			IsLocal:      isLocal,
 			Capabilities: provider.Capabilities{ToolUse: true}, // optimistic
 		})
 		return

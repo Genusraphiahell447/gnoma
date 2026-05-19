@@ -142,7 +142,15 @@ func (t *GrepTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 			}
 
 			rel, _ := filepath.Rel(root, path)
-			fileMatches := grepFile(path, rel, re, maxResults-len(matches))
+			resolvedPath := path
+			if t.guard != nil {
+				resolved, err := t.guard.ResolveRead(path)
+				if err != nil {
+					return nil // Skip files outside workspace or unreadable
+				}
+				resolvedPath = resolved
+			}
+			fileMatches := grepFile(resolvedPath, rel, re, maxResults-len(matches))
 			matches = append(matches, fileMatches...)
 
 			if len(matches) >= maxResults {
