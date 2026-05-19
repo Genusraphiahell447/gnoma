@@ -25,7 +25,9 @@ func (c *CommandExecutor) Execute(ctx context.Context, payload []byte) (HookResu
 	defer cancel()
 
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, "sh", "-c", c.def.Exec)
+	// Exec is a resolved binary path (see plugin/loader.go). No shell wrapping —
+	// shell metacharacters in the path are treated as literal filename bytes.
+	cmd := exec.CommandContext(ctx, c.def.Exec)
 	cmd.Stdin = bytes.NewReader(payload)
 
 	var stdout bytes.Buffer
