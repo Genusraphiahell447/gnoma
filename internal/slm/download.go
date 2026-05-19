@@ -23,7 +23,7 @@ func download(ctx context.Context, url, dst string, progress func(downloaded, to
 	if err != nil {
 		return "", 0, fmt.Errorf("slm: download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", 0, fmt.Errorf("slm: download: unexpected status %s", resp.Status)
@@ -36,9 +36,14 @@ func download(ctx context.Context, url, dst string, progress func(downloaded, to
 
 	ok := false
 	defer func() {
-		f.Close()
+		closeErr := f.Close()
 		if !ok {
-			os.Remove(dst)
+			_ = os.Remove(dst)
+			return
+		}
+		// Success path: surface the close error by wiring it into the named return.
+		if closeErr != nil && err == nil {
+			err = fmt.Errorf("slm: download: close: %w", closeErr)
 		}
 	}()
 
@@ -59,7 +64,7 @@ func hashFile(path string) (sha256hex string, size int64, err error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	n, err := io.Copy(h, f)

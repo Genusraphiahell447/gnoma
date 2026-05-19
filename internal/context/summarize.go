@@ -110,7 +110,7 @@ func (s *SummarizeStrategy) callSummarize(conversationText string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("summarization stream: %w", err)
 	}
-	defer str.Close()
+	defer func() { _ = str.Close() }()
 
 	// Consume stream, collect text
 	var result strings.Builder

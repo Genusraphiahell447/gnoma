@@ -107,7 +107,7 @@ func main() {
 		if *verbose {
 			if f, err := os.CreateTemp("", "gnoma-*.log"); err == nil {
 				logOut = f
-				defer f.Close()
+				defer func() { _ = f.Close() }()
 				fmt.Fprintf(os.Stderr, "logging to %s\n", f.Name())
 			}
 		} else {
@@ -483,7 +483,8 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "⚠ Tool %s wants to execute. Allow? [y/N] ", toolName)
 		var response string
-		fmt.Scanln(&response)
+		// Scanln error → empty response → falls through to deny below.
+		_, _ = fmt.Scanln(&response)
 		return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes", nil
 	}
 	// Convert config rules to permission rules
@@ -587,7 +588,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "mcp startup error: %v\n", err)
 			os.Exit(1)
 		}
-		defer mcpMgr.Shutdown()
+		defer func() {
+			if err := mcpMgr.Shutdown(); err != nil {
+				logger.Warn("mcp shutdown error", "error", err)
+			}
+		}()
 	}
 
 	// Build skill registry: bundled → user → plugins → project (precedence order).
@@ -867,7 +872,11 @@ func main() {
 			Incognito: fw.Incognito(),
 			Logger:    logger,
 		})
-		defer sess.Close()
+		defer func() {
+			if err := sess.Close(); err != nil {
+				logger.Warn("session close error", "error", err)
+			}
+		}()
 		modelMu.Lock()
 		modelUpdater = sess.SetModel
 		modelMu.Unlock()

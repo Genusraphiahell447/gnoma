@@ -73,10 +73,16 @@ func setConfig(path, key, value string) error {
 	if err != nil {
 		return fmt.Errorf("create config file: %w", err)
 	}
-	defer f.Close()
-
 	enc := toml.NewEncoder(f)
-	return enc.Encode(cfg)
+	encErr := enc.Encode(cfg)
+	closeErr := f.Close()
+	if encErr != nil {
+		return encErr
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close config file: %w", closeErr)
+	}
+	return nil
 }
 
 func allowedKeys() []string {

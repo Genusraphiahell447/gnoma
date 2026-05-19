@@ -238,13 +238,17 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				"error", err,
 				"rounds", turn.Rounds,
 			)
-			s.Close()
+			if closeErr := s.Close(); closeErr != nil {
+				e.logger.Warn("stream close after error failed", "error", closeErr)
+			}
 			decision.Rollback()
 			streamErr := e.annotateStreamError(err, len(req.Tools))
 			reportOutcome(streamErr)
 			return nil, streamErr
 		}
-		s.Close()
+		if err := s.Close(); err != nil {
+			e.logger.Warn("stream close failed", "error", err)
+		}
 
 		// Build response
 		resp := acc.Response(stopReason, model)

@@ -20,7 +20,6 @@ var (
 	cSubtext = lipgloss.Color("#A6ADC8") // subtext0
 	cOverlay = lipgloss.Color("#6C7086") // overlay0
 	cSurface = lipgloss.Color("#313244") // surface0
-	cBase    = lipgloss.Color("#1E1E2E") // base
 	cMantle  = lipgloss.Color("#181825") // mantle
 )
 

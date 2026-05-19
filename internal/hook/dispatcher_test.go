@@ -23,12 +23,6 @@ func newSkip() *mockExecutor  { return &mockExecutor{result: HookResult{Action: 
 func newTransform(output []byte) *mockExecutor {
 	return &mockExecutor{result: HookResult{Action: Allow, Output: output}}
 }
-func newError(failOpen bool) *mockExecutor {
-	return &mockExecutor{
-		result: HookResult{},
-		err:    context.DeadlineExceeded,
-	}
-}
 
 func makeHandler(event EventType, ex Executor) Handler {
 	return Handler{

@@ -10,14 +10,6 @@ import (
 
 // --- gnoma → Mistral ---
 
-func translateMessages(msgs []message.Message) []chat.Message {
-	out := make([]chat.Message, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, translateMessage(m))
-	}
-	return out
-}
-
 func translateMessage(m message.Message) chat.Message {
 	switch m.Role {
 	case message.RoleSystem:

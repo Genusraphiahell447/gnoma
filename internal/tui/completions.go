@@ -114,10 +114,7 @@ func fuzzyMatchCommands(query string, commands []cmdEntry) []cmdEntry {
 	}
 	var matches []cmdEntry
 	for _, c := range commands {
-		name := c.name
-		if strings.HasPrefix(name, "/") {
-			name = name[1:]
-		}
+		name := strings.TrimPrefix(c.name, "/")
 		if fuzzyMatch(query, name) {
 			matches = append(matches, c)
 		}

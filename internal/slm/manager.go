@@ -263,7 +263,7 @@ func waitHealthy(ctx context.Context, baseURL string) error {
 
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}

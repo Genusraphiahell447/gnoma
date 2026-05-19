@@ -28,13 +28,19 @@ func (m *Manager) StartAll(ctx context.Context, servers []ServerConfig, registry
 	for _, srv := range servers {
 		client, err := m.startServer(ctx, srv)
 		if err != nil {
-			m.Shutdown() // clean up already-started servers
+			if shutdownErr := m.Shutdown(); shutdownErr != nil {
+				m.logger.Warn("partial shutdown after server-start failure",
+					"failed_server", srv.Name, "shutdown_error", shutdownErr)
+			}
 			return fmt.Errorf("mcp server %q: %w", srv.Name, err)
 		}
 
 		tools, err := client.ListTools(ctx)
 		if err != nil {
-			m.Shutdown()
+			if shutdownErr := m.Shutdown(); shutdownErr != nil {
+				m.logger.Warn("partial shutdown after list-tools failure",
+					"failed_server", srv.Name, "shutdown_error", shutdownErr)
+			}
 			return fmt.Errorf("mcp server %q: list tools: %w", srv.Name, err)
 		}
 
@@ -76,7 +82,9 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig) (*Client, e
 	defer cancel()
 
 	if err := client.Initialize(initCtx); err != nil {
-		tr.Close()
+		if closeErr := tr.Close(); closeErr != nil {
+			m.logger.Warn("transport close after init failure", "error", closeErr)
+		}
 		return nil, err
 	}
 

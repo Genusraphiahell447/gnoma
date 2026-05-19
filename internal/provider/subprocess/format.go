@@ -189,9 +189,7 @@ func (p *geminiParser) Done() []stream.Event { return nil }
 // role=system, role=user: ignored
 // No explicit "done" event — stream ends when process exits.
 
-type vibeParser struct {
-	lastAssistantMsgID string
-}
+type vibeParser struct{}
 
 func newVibeParser() FormatParser { return &vibeParser{} }
 

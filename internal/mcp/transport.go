@@ -124,7 +124,9 @@ func (t *Transport) Notify(ctx context.Context, method string, params any) error
 // Close gracefully shuts down the server process.
 func (t *Transport) Close() error {
 	if t.stdin != nil {
-		t.stdin.Close()
+		if err := t.stdin.Close(); err != nil {
+			t.logger.Debug("mcp: stdin close error", "command", t.command, "error", err)
+		}
 	}
 
 	if t.cmd == nil || t.cmd.Process == nil {
@@ -146,7 +148,10 @@ func (t *Transport) Close() error {
 
 	// Graceful didn't work — kill the entire process group.
 	t.logger.Warn("mcp: server did not exit, killing process group", "command", t.command)
-	syscall.Kill(-t.cmd.Process.Pid, syscall.SIGKILL)
+	if err := syscall.Kill(-t.cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		t.logger.Warn("mcp: SIGKILL to process group failed",
+			"command", t.command, "pid", t.cmd.Process.Pid, "error", err)
+	}
 	return <-done
 }
 

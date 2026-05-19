@@ -92,7 +92,7 @@ func (c *Classifier) callSLM(ctx context.Context, prompt string) (*classifyRespo
 	if err != nil {
 		return nil, fmt.Errorf("stream: %w", err)
 	}
-	defer strm.Close()
+	defer func() { _ = strm.Close() }()
 
 	var sb strings.Builder
 	for strm.Next() {

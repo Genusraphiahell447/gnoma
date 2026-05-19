@@ -152,13 +152,3 @@ func (s *anthropicStream) Err() error {
 func (s *anthropicStream) Close() error {
 	return s.raw.Close()
 }
-
-// toolCallDoneFromAccum creates a ToolCallDone event.
-// Called when ContentBlockStop arrives for a tool_use block.
-func toolCallDoneEvent(id string, args json.RawMessage) stream.Event {
-	return stream.Event{
-		Type:       stream.EventToolCallDone,
-		ToolCallID: id,
-		Args:       args,
-	}
-}

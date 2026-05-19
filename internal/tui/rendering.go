@@ -642,7 +642,6 @@ func (m Model) renderSuggestions() string {
 	start := 0
 	end := len(m.suggestions)
 	if end > maxVisible {
-		end = maxVisible
 		start = m.suggIdx - maxVisible/2
 		if start < 0 {
 			start = 0

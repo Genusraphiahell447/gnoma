@@ -81,7 +81,7 @@ func (p *PromptExecutor) Execute(ctx context.Context, payload []byte) (HookResul
 	if err != nil {
 		return HookResult{}, fmt.Errorf("hook %q: stream error: %w", p.def.Name, err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	acc := stream.NewAccumulator()
 	var stopReason message.StopReason

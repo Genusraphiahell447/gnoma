@@ -18,10 +18,7 @@ func TestSubprocessStream_EchoShell(t *testing.T) {
 
 	// Feed a vibe-format line through a printf subprocess.
 	// We use vibe format because it's the simplest (no "done" event needed).
-	line := `{"role":"assistant","content":"hello from subprocess","reasoning_content":null,"tool_calls":null,"message_id":"abc"}`
-	cmd := exec.Command("sh", "-c", "printf '%s\n'", line)
-	// Actually build the printf command with the correct argument
-	cmd = exec.CommandContext(context.Background(), "sh", "-c",
+	cmd := exec.CommandContext(context.Background(), "sh", "-c",
 		`printf '{"role":"assistant","content":"hello from subprocess","reasoning_content":null,"tool_calls":null,"message_id":"abc"}\n'`)
 
 	s, err := newSubprocessStream(context.Background(), cmd, newVibeParser())

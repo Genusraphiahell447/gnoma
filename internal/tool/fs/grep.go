@@ -124,7 +124,7 @@ func (t *GrepTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 	if !info.IsDir() {
 		matches = grepFile(root, "", re, maxResults)
 	} else {
-		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				if d != nil && d.IsDir() && d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
 					return filepath.SkipDir
@@ -149,6 +149,9 @@ func (t *GrepTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 			}
 			return nil
 		})
+		if walkErr != nil {
+			return tool.Result{Output: fmt.Sprintf("Error walking directory: %v", walkErr)}, nil
+		}
 	}
 
 	if len(matches) == 0 {
@@ -183,7 +186,7 @@ func grepFile(path, displayPath string, re *regexp.Regexp, limit int) []grepMatc
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var matches []grepMatch
 	scanner := bufio.NewScanner(f)
