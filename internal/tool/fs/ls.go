@@ -24,9 +24,13 @@ var lsParams = json.RawMessage(`{
 	}
 }`)
 
-type LSTool struct{}
+type LSTool struct {
+	guard *Guard
+}
 
 func NewLSTool() *LSTool { return &LSTool{} }
+
+func (t *LSTool) SetGuard(g *Guard) { t.guard = g }
 
 func (t *LSTool) Name() string               { return lsToolName }
 func (t *LSTool) Description() string         { return "List directory contents with file types and sizes" }
@@ -54,11 +58,22 @@ func (t *LSTool) Execute(_ context.Context, args json.RawMessage) (tool.Result, 
 
 	dir := a.Path
 	if dir == "" {
-		var err error
-		dir, err = os.Getwd()
-		if err != nil {
-			return tool.Result{}, fmt.Errorf("fs.ls: %w", err)
+		if t.guard != nil {
+			dir = t.guard.Roots()[0]
+		} else {
+			var err error
+			dir, err = os.Getwd()
+			if err != nil {
+				return tool.Result{}, fmt.Errorf("fs.ls: %w", err)
+			}
 		}
+	}
+	if t.guard != nil {
+		resolved, err := t.guard.ResolveRead(dir)
+		if err != nil {
+			return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
+		}
+		dir = resolved
 	}
 
 	entries, err := os.ReadDir(dir)

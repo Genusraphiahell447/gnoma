@@ -229,10 +229,23 @@ func main() {
 		}
 	}
 
+	cwd, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot resolve working directory: %v\n", cwdErr)
+		os.Exit(1)
+	}
+	fsGuard, err := fs.NewGuard(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: workspace guard: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Create tool registry
-	reg := buildToolRegistry()
+	reg := buildToolRegistry(fsGuard)
 	if cfg.Tools.MaxFileSize > 0 {
-		reg.Register(fs.NewWriteTool(fs.WithMaxFileSize(cfg.Tools.MaxFileSize)))
+		w := fs.NewWriteTool(fs.WithMaxFileSize(cfg.Tools.MaxFileSize))
+		w.SetGuard(fsGuard)
+		reg.Register(w)
 	}
 
 	// Harvest aliases, inventory, CLI agents, and local models in parallel.
@@ -991,15 +1004,34 @@ func createProvider(name, apiKey, model, baseURL string) (provider.Provider, err
 	}
 }
 
-func buildToolRegistry() *tool.Registry {
+func buildToolRegistry(guard *fs.Guard) *tool.Registry {
 	reg := tool.NewRegistry()
 	reg.Register(bash.New())
-	reg.Register(fs.NewReadTool())
-	reg.Register(fs.NewWriteTool())
-	reg.Register(fs.NewEditTool())
-	reg.Register(fs.NewGlobTool())
-	reg.Register(fs.NewGrepTool())
-	reg.Register(fs.NewLSTool())
+
+	read := fs.NewReadTool()
+	read.SetGuard(guard)
+	reg.Register(read)
+
+	write := fs.NewWriteTool()
+	write.SetGuard(guard)
+	reg.Register(write)
+
+	edit := fs.NewEditTool()
+	edit.SetGuard(guard)
+	reg.Register(edit)
+
+	glob := fs.NewGlobTool()
+	glob.SetGuard(guard)
+	reg.Register(glob)
+
+	grep := fs.NewGrepTool()
+	grep.SetGuard(guard)
+	reg.Register(grep)
+
+	ls := fs.NewLSTool()
+	ls.SetGuard(guard)
+	reg.Register(ls)
+
 	return reg
 }
 

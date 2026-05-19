@@ -41,9 +41,13 @@ var grepParams = json.RawMessage(`{
 	"required": ["pattern"]
 }`)
 
-type GrepTool struct{}
+type GrepTool struct {
+	guard *Guard
+}
 
 func NewGrepTool() *GrepTool { return &GrepTool{} }
+
+func (t *GrepTool) SetGuard(g *Guard) { t.guard = g }
 
 func (t *GrepTool) Name() string               { return grepToolName }
 func (t *GrepTool) Description() string         { return "Search file contents using a regular expression" }
@@ -93,10 +97,21 @@ func (t *GrepTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 
 	root := a.Path
 	if root == "" {
-		root, err = os.Getwd()
-		if err != nil {
-			return tool.Result{}, fmt.Errorf("fs.grep: %w", err)
+		if t.guard != nil {
+			root = t.guard.Roots()[0]
+		} else {
+			root, err = os.Getwd()
+			if err != nil {
+				return tool.Result{}, fmt.Errorf("fs.grep: %w", err)
+			}
 		}
+	}
+	if t.guard != nil {
+		resolved, err := t.guard.ResolveRead(root)
+		if err != nil {
+			return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
+		}
+		root = resolved
 	}
 
 	info, err := os.Stat(root)

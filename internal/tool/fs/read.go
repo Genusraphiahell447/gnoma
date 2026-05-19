@@ -36,7 +36,10 @@ var readParams = json.RawMessage(`{
 
 type ReadTool struct {
 	maxLines int
+	guard    *Guard
 }
+
+func (t *ReadTool) SetGuard(g *Guard) { t.guard = g }
 
 type ReadOption func(*ReadTool)
 
@@ -81,7 +84,16 @@ func (t *ReadTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 		return tool.Result{}, fmt.Errorf("fs.read: path required")
 	}
 
-	data, err := os.ReadFile(a.Path)
+	path := a.Path
+	if t.guard != nil {
+		resolved, err := t.guard.ResolveRead(path)
+		if err != nil {
+			return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
+		}
+		path = resolved
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
 	}

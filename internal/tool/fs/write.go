@@ -36,7 +36,10 @@ func WithMaxFileSize(n int64) WriteOption {
 
 type WriteTool struct {
 	maxFileSize int64
+	guard       *Guard
 }
+
+func (t *WriteTool) SetGuard(g *Guard) { t.guard = g }
 
 func NewWriteTool(opts ...WriteOption) *WriteTool {
 	t := &WriteTool{}
@@ -78,18 +81,27 @@ func (t *WriteTool) Execute(_ context.Context, args json.RawMessage) (tool.Resul
 		return tool.Result{Output: fmt.Sprintf("Error: content too large (%d bytes, limit %d bytes)", len(a.Content), t.maxFileSize)}, nil
 	}
 
+	path := a.Path
+	if t.guard != nil {
+		resolved, err := t.guard.ResolveWrite(path)
+		if err != nil {
+			return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
+		}
+		path = resolved
+	}
+
 	// Create parent directories
-	dir := filepath.Dir(a.Path)
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return tool.Result{Output: fmt.Sprintf("Error creating directory: %v", err)}, nil
 	}
 
-	if err := os.WriteFile(a.Path, []byte(a.Content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(a.Content), 0o644); err != nil {
 		return tool.Result{Output: fmt.Sprintf("Error writing file: %v", err)}, nil
 	}
 
 	return tool.Result{
-		Output:   fmt.Sprintf("Wrote %d bytes to %s", len(a.Content), a.Path),
-		Metadata: map[string]any{"bytes_written": len(a.Content), "path": a.Path},
+		Output:   fmt.Sprintf("Wrote %d bytes to %s", len(a.Content), path),
+		Metadata: map[string]any{"bytes_written": len(a.Content), "path": path},
 	}, nil
 }

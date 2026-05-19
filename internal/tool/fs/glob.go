@@ -30,9 +30,13 @@ var globParams = json.RawMessage(`{
 	"required": ["pattern"]
 }`)
 
-type GlobTool struct{}
+type GlobTool struct {
+	guard *Guard
+}
 
 func NewGlobTool() *GlobTool { return &GlobTool{} }
+
+func (t *GlobTool) SetGuard(g *Guard) { t.guard = g }
 
 func (t *GlobTool) Name() string               { return globToolName }
 func (t *GlobTool) Description() string         { return "Find files matching a glob pattern, sorted by modification time" }
@@ -64,11 +68,22 @@ func (t *GlobTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 
 	root := a.Path
 	if root == "" {
-		var err error
-		root, err = os.Getwd()
-		if err != nil {
-			return tool.Result{}, fmt.Errorf("fs.glob: %w", err)
+		if t.guard != nil {
+			root = t.guard.Roots()[0]
+		} else {
+			var err error
+			root, err = os.Getwd()
+			if err != nil {
+				return tool.Result{}, fmt.Errorf("fs.glob: %w", err)
+			}
 		}
+	}
+	if t.guard != nil {
+		resolved, err := t.guard.ResolveRead(root)
+		if err != nil {
+			return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
+		}
+		root = resolved
 	}
 
 	var matches []string

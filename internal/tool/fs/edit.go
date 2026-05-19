@@ -35,9 +35,13 @@ var editParams = json.RawMessage(`{
 	"required": ["path", "old_string", "new_string"]
 }`)
 
-type EditTool struct{}
+type EditTool struct {
+	guard *Guard
+}
 
 func NewEditTool() *EditTool { return &EditTool{} }
+
+func (t *EditTool) SetGuard(g *Guard) { t.guard = g }
 
 func (t *EditTool) Name() string               { return editToolName }
 func (t *EditTool) Description() string         { return "Perform exact string replacement in a file" }
@@ -72,7 +76,16 @@ func (t *EditTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 		return tool.Result{}, fmt.Errorf("fs.edit: old_string and new_string must differ")
 	}
 
-	data, err := os.ReadFile(a.Path)
+	path := a.Path
+	if t.guard != nil {
+		resolved, err := t.guard.ResolveRead(path)
+		if err != nil {
+			return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
+		}
+		path = resolved
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
 	}
@@ -101,7 +114,7 @@ func (t *EditTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 		newContent = strings.Replace(content, a.OldString, a.NewString, 1)
 	}
 
-	if err := os.WriteFile(a.Path, []byte(newContent), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(newContent), 0o644); err != nil {
 		return tool.Result{Output: fmt.Sprintf("Error writing file: %v", err)}, nil
 	}
 
@@ -111,11 +124,11 @@ func (t *EditTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 	}
 
 	// Generate diff-style output with context
-	diff := buildEditDiff(content, a.OldString, a.NewString, a.Path, replacements)
+	diff := buildEditDiff(content, a.OldString, a.NewString, path, replacements)
 
 	return tool.Result{
 		Output:   diff,
-		Metadata: map[string]any{"replacements": replacements, "path": a.Path},
+		Metadata: map[string]any{"replacements": replacements, "path": path},
 	}, nil
 }
 
