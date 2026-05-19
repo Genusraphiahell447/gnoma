@@ -202,6 +202,35 @@ func TestChecker_SafetyCheck(t *testing.T) {
 	})
 }
 
+func TestChecker_ElfInheritsSafetyPatterns(t *testing.T) {
+	// Audit H2: spawn_elfs/agent are exempt from safetyCheck at the orchestration
+	// layer, with the rationale that the spawned elf will be checked when it
+	// actually accesses files. That contract requires the elf checker (built via
+	// WithDenyPrompt) to inherit the parent's safetyDenyPatterns AND for those
+	// patterns to still fire even in ModeBypass.
+	parent := NewChecker(ModeBypass, nil, nil)
+	elfChecker := parent.WithDenyPrompt()
+
+	safetyCases := []struct {
+		name     string
+		toolName string
+		args     string
+	}{
+		{"env file", "fs.read", `{"path":".env"}`},
+		{"ssh key", "fs.read", `{"path":"id_rsa"}`},
+		{"aws creds", "fs.read", `{"path":".aws/credentials"}`},
+		{"bash on env", "bash", `{"command":"cat .env"}`},
+	}
+	for _, tt := range safetyCases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := elfChecker.Check(context.Background(), ToolInfo{Name: tt.toolName}, json.RawMessage(tt.args))
+			if !errors.Is(err, ErrDenied) {
+				t.Errorf("elf checker must still block %s on %s, got: %v", tt.args, tt.toolName, err)
+			}
+		})
+	}
+}
+
 func TestChecker_SafetyCheck_OrchestrationToolsExempt(t *testing.T) {
 	// spawn_elfs and agent carry elf PROMPT TEXT as args — arbitrary instruction
 	// text that may legitimately mention .env, credentials, etc.
