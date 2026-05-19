@@ -51,7 +51,9 @@ func (s *mockStream) Err() error             { return nil }
 func (s *mockStream) Close() error           { return nil }
 
 func TestClassifier_HappyPath(t *testing.T) {
-	p := &mockProvider{text: `{"task_type":"Debug","complexity":0.25,"requires_tools":false}`}
+	// SLM complexity 0.55 stays above the Debug floor (0.4), so the SLM
+	// value is preserved verbatim.
+	p := &mockProvider{text: `{"task_type":"Debug","complexity":0.55,"requires_tools":false}`}
 	cls := NewClassifier(p, "default", nil)
 
 	task, err := cls.Classify(context.Background(), "fix the failing test", nil)
@@ -61,11 +63,28 @@ func TestClassifier_HappyPath(t *testing.T) {
 	if task.Type != router.TaskDebug {
 		t.Errorf("Type = %s, want Debug", task.Type)
 	}
-	if task.ComplexityScore != 0.25 {
-		t.Errorf("ComplexityScore = %v, want 0.25", task.ComplexityScore)
+	if task.ComplexityScore != 0.55 {
+		t.Errorf("ComplexityScore = %v, want 0.55 (SLM value preserved above floor)", task.ComplexityScore)
 	}
 	if task.RequiresTools != false {
 		t.Errorf("RequiresTools = true, want false")
+	}
+}
+
+func TestClassifier_AppliesTaskTypeFloor(t *testing.T) {
+	// Debug floor is 0.4; SLM under-reports at 0.25. The classifier should
+	// bump ComplexityScore up to the floor so the SLM arm can't be picked
+	// for its own kind of misclassification.
+	p := &mockProvider{text: `{"task_type":"Debug","complexity":0.25,"requires_tools":false}`}
+	cls := NewClassifier(p, "default", nil)
+
+	task, err := cls.Classify(context.Background(), "fix the failing test", nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	floor := router.MinComplexityForType(router.TaskDebug)
+	if task.ComplexityScore != floor {
+		t.Errorf("ComplexityScore = %v, want floor %v", task.ComplexityScore, floor)
 	}
 }
 
