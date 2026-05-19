@@ -2,13 +2,13 @@
 
 Active plans, newest first:
 
-- **[`docs/superpowers/plans/2026-05-19-security-wave1-safeprovider.md`](docs/superpowers/plans/2026-05-19-security-wave1-safeprovider.md)**
-  — post-audit hardening, Wave 1. Closes the four firewall-bypass
-  call sites (SLM classifier, summarizer, prompt hook, routerStreamer)
-  by introducing `security.SafeProvider` at the provider boundary.
-  **In progress on `feat/security-wave1-safeprovider`** — implementation
-  complete; ADR and merge pending. Waves 2 (incognito coherence) and
-  3 (scanner + path hygiene) are scoped but not yet drafted.
+- **Post-audit security hardening** — **complete (2026-05-19)**. All 14
+  findings from the external review are closed across three waves +
+  one ADR:
+  - [Wave 1 — SafeProvider boundary](docs/superpowers/plans/2026-05-19-security-wave1-safeprovider.md)
+  - [Wave 2 — Incognito coherence](docs/superpowers/plans/2026-05-19-security-wave2-incognito.md)
+  - [Wave 3 — Scanner + path hygiene](docs/superpowers/plans/2026-05-19-security-wave3-scanner-paths.md)
+  - [ADR-004 — PostToolUse hook ordering](docs/essentials/decisions/004-posttooluse-hook-ordering.md)
 - **[`docs/superpowers/plans/2026-05-19-post-slm-unlock.md`](docs/superpowers/plans/2026-05-19-post-slm-unlock.md)**
   — outstanding work after the SLM unlock session. Phases A (two-stage
   tool routing), B (CLI agent binary override), C (user profiles), and
