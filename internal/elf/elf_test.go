@@ -3,6 +3,7 @@ package elf
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 
 type mockProvider struct {
 	name    string
-	calls   int
+	calls   atomic.Int64
 	streams []stream.Stream
 }
 
@@ -26,12 +27,11 @@ func (m *mockProvider) Name() string         { return m.name }
 func (m *mockProvider) DefaultModel() string  { return "mock" }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) { return nil, nil }
 func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
-	if m.calls >= len(m.streams) {
+	idx := m.calls.Add(1) - 1
+	if int(idx) >= len(m.streams) {
 		return nil, fmt.Errorf("no more streams")
 	}
-	s := m.streams[m.calls]
-	m.calls++
-	return s, nil
+	return m.streams[idx], nil
 }
 
 type eventStream struct {
