@@ -10,7 +10,7 @@ import (
 )
 
 func TestStore_SaveSkipsSmallContent(t *testing.T) {
-	s := persist.New("test-session-001")
+	s := persist.New("test-session-001", nil)
 	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	path, ok := s.Save("bash", "call-001", "small output")
@@ -23,7 +23,7 @@ func TestStore_SaveSkipsSmallContent(t *testing.T) {
 }
 
 func TestStore_SavePersistsLargeContent(t *testing.T) {
-	s := persist.New("test-session-002")
+	s := persist.New("test-session-002", nil)
 	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	content := strings.Repeat("x", 1024)
@@ -44,7 +44,7 @@ func TestStore_SavePersistsLargeContent(t *testing.T) {
 }
 
 func TestStore_ListFilters(t *testing.T) {
-	s := persist.New("test-session-003")
+	s := persist.New("test-session-003", nil)
 	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	bigContent := strings.Repeat("y", 1024)
@@ -70,7 +70,7 @@ func TestStore_ListFilters(t *testing.T) {
 }
 
 func TestStore_ReadValidatesPath(t *testing.T) {
-	s := persist.New("test-session-004")
+	s := persist.New("test-session-004", nil)
 	t.Cleanup(func() { _ = os.RemoveAll(s.Dir()) })
 
 	// Path outside session dir must be rejected

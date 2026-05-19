@@ -63,11 +63,22 @@ func (r *Router) Select(task Task) RoutingDecision {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// If an arm is forced, use it directly
+	// If an arm is forced, use it directly — except when local-only
+	// routing is on and the forced arm isn't local. The earlier
+	// short-circuit silently bypassed the local-only filter, which
+	// broke the incognito badge's "local-only routing" promise when
+	// a cloud arm was pinned via --provider. Reject explicitly so the
+	// TUI/CLI can surface an actionable error instead.
 	if r.forcedArm != "" {
 		arm, ok := r.arms[r.forcedArm]
 		if !ok {
 			return RoutingDecision{Error: fmt.Errorf("forced arm %q not found", r.forcedArm)}
+		}
+		if r.localOnly && !arm.IsLocal {
+			return RoutingDecision{Error: fmt.Errorf(
+				"forced arm %q is non-local but routing is local-only (incognito); clear the --provider pin or disable incognito",
+				r.forcedArm,
+			)}
 		}
 		return RoutingDecision{Strategy: StrategySingleArm, Arm: arm}
 	}

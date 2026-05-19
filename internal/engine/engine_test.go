@@ -11,6 +11,7 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/router"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
@@ -712,5 +713,50 @@ func TestSubmit_ReportsOutcomeToRouter(t *testing.T) {
 	}
 	if score < 0.9 {
 		t.Errorf("quality score = %f, want ≥0.9 for all successful turns", score)
+	}
+}
+
+func TestSubmit_SuppressesOutcomeWhenIncognito(t *testing.T) {
+	// Incognito sessions must not leave bandit signal behind.
+	rtr := router.New(router.Config{})
+	armID := router.NewArmID("test", "mock-model")
+
+	makeStream := func() stream.Stream {
+		return newEventStream(message.StopEndTurn, "mock-model",
+			stream.Event{Type: stream.EventTextDelta, Text: "hi"},
+			stream.Event{Type: stream.EventUsage, Usage: &message.Usage{InputTokens: 10, OutputTokens: 5}},
+		)
+	}
+	mp := &mockProvider{name: "test", streams: []stream.Stream{makeStream(), makeStream()}}
+	rtr.RegisterArm(&router.Arm{
+		ID:           armID,
+		Provider:     mp,
+		ModelName:    "mock-model",
+		Capabilities: provider.Capabilities{ToolUse: true},
+	})
+	rtr.ForceArm(armID)
+
+	fw := security.NewFirewall(security.FirewallConfig{ScanOutgoing: true})
+	fw.Incognito().Activate()
+
+	e, err := New(Config{
+		Provider: mp,
+		Router:   rtr,
+		Tools:    tool.NewRegistry(),
+		Firewall: fw,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, err := e.Submit(context.Background(), "hello", nil); err != nil {
+			t.Fatalf("Submit %d: %v", i, err)
+		}
+	}
+
+	taskType := router.ClassifyTask("hello").Type
+	if _, hasData := rtr.QualityTracker().Quality(armID, taskType); hasData {
+		t.Error("quality tracker received outcomes despite incognito — gating not effective")
 	}
 }

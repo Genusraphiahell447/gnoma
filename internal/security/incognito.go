@@ -4,12 +4,15 @@ import "sync"
 
 // IncognitoMode controls privacy-sensitive behavior.
 // When active: no persistence, no learning, no content logging.
+//
+// Routing constraint (local-only) is enforced by the router, not here —
+// see router.SetLocalOnly. The two states must agree, but they live on
+// different types because the router owns enforcement (mutex around arm
+// selection) and the firewall owns intent. TUI/CLI bootstrap is
+// responsible for keeping them in sync.
 type IncognitoMode struct {
 	mu     sync.RWMutex
 	active bool
-
-	// Options
-	LocalOnly bool // only route to local arms when incognito
 }
 
 func NewIncognitoMode() *IncognitoMode {

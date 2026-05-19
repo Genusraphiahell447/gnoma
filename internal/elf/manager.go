@@ -134,6 +134,12 @@ func (m *Manager) ReportResult(result Result) {
 	// safe — it just moves reserved tokens to used at rate 0.
 	meta.decision.Commit(int(result.Usage.TotalTokens()))
 
+	// Suppress quality feedback while incognito is active — bandit
+	// learning would otherwise persist signal about the session.
+	if m.firewall != nil && !m.firewall.Incognito().ShouldLearn() {
+		return
+	}
+
 	m.router.ReportOutcome(router.Outcome{
 		ArmID:           meta.armID,
 		TaskType:        meta.taskType,

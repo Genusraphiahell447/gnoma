@@ -198,10 +198,19 @@ func New(sess session.Session, cfg Config) Model {
 		glamour.WithWordWrap(74),
 	)
 
+	// Seed incognito state from the firewall so a launch with
+	// --incognito starts the TUI with the badge ON, and Ctrl+X first-
+	// press correctly toggles OFF (audit finding W2-3).
+	var initialIncognito bool
+	if cfg.Firewall != nil {
+		initialIncognito = cfg.Firewall.Incognito().Active()
+	}
+
 	return Model{
 		session:       sess,
 		config:        cfg,
 		input:         ti,
+		incognito:     initialIncognito,
 		completionSrc: completionSource(cfg.Skills),
 		mdRenderer:    mdRenderer,
 		elfStates:     make(map[string]*elf.Progress),
@@ -463,21 +472,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+x":
 			// Toggle incognito
-			if m.config.Firewall != nil {
-				m.incognito = m.config.Firewall.Incognito().Toggle()
-				if m.config.Router != nil {
-					m.config.Router.SetLocalOnly(m.incognito)
-				}
-				var msg string
-				if m.incognito {
-					msg = "🔒 incognito ON — no persistence, no learning, local-only routing"
-				} else {
-					msg = "🔓 incognito OFF"
-				}
-				m.messages = append(m.messages, chatMessage{role: "system", content: msg})
-				m.injectSystemContext(msg)
-				m.scrollOffset = 0
+			newM, statusMsg, refused := m.attemptIncognitoToggle()
+			m = newM
+			role := "system"
+			if refused {
+				role = "error"
 			}
+			m.messages = append(m.messages, chatMessage{role: role, content: statusMsg})
+			if !refused {
+				m.injectSystemContext(statusMsg)
+			}
+			m.scrollOffset = 0
 			return m, nil
 		case "shift+tab":
 			// Cycle permission mode: bypass → default → plan → bypass
@@ -1027,22 +1032,13 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/incognito":
-		if m.config.Firewall != nil {
-			m.incognito = m.config.Firewall.Incognito().Toggle()
-			if m.config.Router != nil {
-				m.config.Router.SetLocalOnly(m.incognito)
-			}
-			if m.incognito {
-				m.messages = append(m.messages, chatMessage{role: "system",
-					content: "🔒 incognito mode ON — no persistence, no learning, local-only routing"})
-			} else {
-				m.messages = append(m.messages, chatMessage{role: "system",
-					content: "🔓 incognito mode OFF"})
-			}
-		} else {
-			m.messages = append(m.messages, chatMessage{role: "error",
-				content: "firewall not configured"})
+		newM, statusMsg, refused := m.attemptIncognitoToggle()
+		m = newM
+		role := "system"
+		if refused {
+			role = "error"
 		}
+		m.messages = append(m.messages, chatMessage{role: role, content: statusMsg})
 		return m, nil
 
 	case "/model":
@@ -1602,6 +1598,42 @@ func (m Model) injectSystemContext(text string) {
 	m.config.Engine.InjectMessage(message.NewAssistantText("Understood."))
 }
 
+// attemptIncognitoToggle flips incognito state subject to the local-only
+// constraint: if a non-local arm is currently forced, turning incognito
+// ON is refused with an actionable message. Returns the new model, a
+// user-facing status string, and whether the toggle was refused.
+//
+// The firewall (intent) and the router's local-only flag (enforcement)
+// are toggled together — they must agree, otherwise the incognito badge
+// lies about routing. See plan W2-1.
+func (m Model) attemptIncognitoToggle() (Model, string, bool) {
+	if m.config.Firewall == nil {
+		return m, "firewall not configured", true
+	}
+	currentlyOn := m.config.Firewall.Incognito().Active()
+	if !currentlyOn && m.config.Router != nil {
+		if forced := m.config.Router.ForcedArm(); forced != "" {
+			if arm, ok := m.config.Router.LookupArm(forced); ok && !arm.IsLocal {
+				return m, fmt.Sprintf(
+					"⚠ cannot enable incognito: --provider %s is non-local; clear the pin first",
+					forced,
+				), true
+			}
+		}
+	}
+	m.incognito = m.config.Firewall.Incognito().Toggle()
+	if m.config.Router != nil {
+		m.config.Router.SetLocalOnly(m.incognito)
+	}
+	var status string
+	if m.incognito {
+		status = "🔒 incognito ON — no persistence, no learning, local-only routing"
+	} else {
+		status = "🔓 incognito OFF"
+	}
+	return m, status, false
+}
+
 // updateInputHeight recalculates and sets the textarea viewport height based on
 // isKnownModel returns true if modelName matches a ModelName in the provided arms slice.
 func isKnownModel(arms []*router.Arm, modelName string) bool {
@@ -1783,13 +1815,9 @@ func (m Model) applyConfigSetting() Model {
 		}
 		m.config.Permissions.SetMode(next)
 
-	case 2: // Incognito — toggle
-		if m.config.Firewall != nil {
-			m.incognito = m.config.Firewall.Incognito().Toggle()
-			if m.config.Router != nil {
-				m.config.Router.SetLocalOnly(m.incognito)
-			}
-		}
+	case 2: // Incognito — toggle (silent; config panel has no status line)
+		newM, _, _ := m.attemptIncognitoToggle()
+		m = newM
 	}
 	return m
 }
