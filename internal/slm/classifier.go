@@ -14,9 +14,13 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
-const defaultClassifyTimeout = 2 * time.Second
+// defaultClassifyTimeout — 5 s accommodates thinking-mode models like
+// Qwen3 distillations (Tiny3.5) that emit reasoning tokens before output.
+// Non-thinking models complete in well under 1 s.
+const defaultClassifyTimeout = 5 * time.Second
 
-const classifySystemPrompt = `Classify the following coding request. Respond with JSON only, no other text.
+const classifySystemPrompt = `Classify the following coding request. /no_think
+Respond with JSON only, no other text, no reasoning, no thinking tags.
 Format: {"task_type": "<type>", "complexity": <0.0-1.0>, "requires_tools": <true|false>}
 
 Task types: Debug, Explain, Generation, Refactor, UnitTest, Boilerplate, Planning, Orchestration, SecurityReview, Review

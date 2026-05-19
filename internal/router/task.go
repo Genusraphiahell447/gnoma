@@ -222,9 +222,62 @@ func ClassifyTask(prompt string) Task {
 	// Estimate complexity from prompt length and keywords
 	task.ComplexityScore = estimateComplexity(lower)
 
+	// Trivial-prompt override: short, knowledge-only prompts whose task
+	// type doesn't imply existing code to read or modify can run without
+	// tools — making the SLM arm (ToolUse=false) feasible for genuinely
+	// tiny questions like "what is 2+2?" or "explain a closure".
+	if isTrivialPrompt(lower, task.Type, task.ComplexityScore) {
+		task.RequiresTools = false
+	}
+
 	task.RequiredEffort = inferEffort(task)
 
 	return task
+}
+
+// trivialEligibleTypes are the task types where a "no tools needed" verdict
+// is plausible from a short prompt alone. Debug / Refactor / Review / Test /
+// SecurityReview / Orchestration all imply existing code or processes to
+// touch — keep RequiresTools=true even if the wording is brief.
+var trivialEligibleTypes = map[TaskType]bool{
+	TaskExplain:     true,
+	TaskGeneration:  true,
+	TaskBoilerplate: true,
+}
+
+// toolNeedingTokens name actions/objects that always require tool execution.
+// Matched as whole words (string-fields), not substrings — avoids treating
+// "tester" as "test".
+var toolNeedingTokens = map[string]bool{
+	"read": true, "write": true, "edit": true, "create": true,
+	"delete": true, "remove": true, "list": true, "find": true,
+	"search": true, "grep": true, "open": true, "save": true,
+	"run": true, "execute": true, "compile": true, "build": true,
+	"test": true, "tests": true, "install": true, "commit": true,
+	"push": true, "pull": true, "diff": true, "file": true, "files": true,
+}
+
+// isTrivialPrompt is true when the prompt is short, low-complexity, of a
+// type compatible with knowledge-only answers, and contains no token that
+// implies a file/shell action.
+func isTrivialPrompt(lower string, taskType TaskType, complexity float64) bool {
+	if !trivialEligibleTypes[taskType] {
+		return false
+	}
+	if complexity > 0.15 {
+		return false
+	}
+	fields := strings.Fields(lower)
+	if len(fields) > 12 {
+		return false
+	}
+	for _, w := range fields {
+		w = strings.Trim(w, ".,!?;:")
+		if toolNeedingTokens[w] {
+			return false
+		}
+	}
+	return true
 }
 
 func containsAny(s string, keywords ...string) bool {

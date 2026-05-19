@@ -19,5 +19,8 @@ func Defaults() Config {
 			MaxFileSize: 1 << 20, // 1MB
 		},
 		Session: SessionSection{MaxKeep: 20},
+		SLM: SLMSection{
+			StartupTimeout: Duration(5 * time.Second),
+		},
 	}
 }

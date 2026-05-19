@@ -261,15 +261,14 @@ func freePort() (int, error) {
 }
 
 // waitHealthy polls baseURL/health until it returns 200 or ctx is cancelled.
-// Ceiling: 15 seconds (cold model load can take 5–10 s).
+// The ctx deadline governs how long we'll wait — callers should pass a
+// context with a budget appropriate for first-launch cold start.
 func waitHealthy(ctx context.Context, baseURL string) error {
-	deadline := time.Now().Add(15 * time.Second)
 	client := &http.Client{Timeout: 2 * time.Second}
-
-	for time.Now().Before(deadline) {
+	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("slm: health check did not pass before context deadline: %w", ctx.Err())
 		default:
 		}
 
@@ -283,5 +282,4 @@ func waitHealthy(ctx context.Context, baseURL string) error {
 
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("slm: health check timed out after 15s")
 }

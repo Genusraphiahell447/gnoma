@@ -36,16 +36,24 @@ func (d RoutingDecision) Rollback() {
 	}
 }
 
-// armTier returns the routing tier for an arm.
-// Lower tier = higher preference: 0=CLI agent, 1=local model, 2=API provider.
-func armTier(arm *Arm) int {
-	if arm.IsCLIAgent {
+// armTier returns the routing tier for an arm in the context of a task.
+// Lower tier = higher preference.
+//   - 0: specialized small arm (MaxComplexity > 0) whose ceiling fits this
+//     task — picked first so "the SLM does small stuff" actually happens.
+//   - 1: CLI agent
+//   - 2: local model (general purpose, no complexity ceiling)
+//   - 3: API provider
+func armTier(arm *Arm, task Task) int {
+	if arm.MaxComplexity > 0 && task.ComplexityScore <= arm.MaxComplexity {
 		return 0
 	}
-	if arm.IsLocal {
+	if arm.IsCLIAgent {
 		return 1
 	}
-	return 2
+	if arm.IsLocal {
+		return 2
+	}
+	return 3
 }
 
 // selectBest picks the best arm, preferring lower-tier arms first.
@@ -55,10 +63,10 @@ func selectBest(qt *QualityTracker, arms []*Arm, task Task) *Arm {
 		return nil
 	}
 
-	for tier := 0; tier <= 2; tier++ {
+	for tier := 0; tier <= 3; tier++ {
 		var inTier []*Arm
 		for _, arm := range arms {
-			if armTier(arm) == tier {
+			if armTier(arm, task) == tier {
 				inTier = append(inTier, arm)
 			}
 		}

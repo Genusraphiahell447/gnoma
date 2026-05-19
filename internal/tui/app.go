@@ -20,7 +20,6 @@ import (
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/skill"
-	"somegit.dev/Owlibou/gnoma/internal/slm"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
@@ -63,7 +62,6 @@ type Config struct {
 	Permissions          *permission.Checker   // for mode switching
 	Router               *router.Router        // for model listing
 	ElfManager           *elf.Manager          // for CancelAll on escape/quit
-	SLMManager           *slm.Manager          // nil = SLM not configured
 	PermCh               chan bool             // TUI → engine: y/n response
 	PermReqCh            <-chan PermReqMsg    // engine → TUI: tool requesting approval
 	ElfProgress          <-chan elf.Progress   // elf → TUI: structured progress updates

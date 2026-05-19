@@ -16,20 +16,27 @@ type Config struct {
 	Plugins    PluginsSection    `toml:"plugins"`
 }
 
-// SLMSection configures the optional small language model for task classification
-// and low-complexity task execution.
+// SLMSection configures the optional small language model used for task
+// classification and low-complexity task execution.
 //
-// Example config:
+// Backend selects how the SLM is reached:
+//   - "auto" / "" — pick the best available local backend at startup
+//     (Ollama → llama.cpp → llamafile)
+//   - "ollama"       — talk to a local Ollama daemon
+//   - "llamacpp"     — talk to a local llama.cpp server
+//   - "llamafile"    — gnoma manages the llamafile process itself
+//   - "openaicompat" — any OpenAI-compatible URL (LM Studio, vLLM, etc.)
+//   - "disabled"     — skip the SLM entirely; classifier stays heuristic
 //
-//	[slm]
-//	enabled = true
-//	model_url = "https://huggingface.co/mozilla-ai/TinyLlama-1.1B-Chat-v1.0-llamafile/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q5_K_M.llamafile"
-//
-// Run `gnoma slm setup` to download and verify the model before enabling.
+// See docs/slm-backends.md for copy-paste presets.
 type SLMSection struct {
-	Enabled  bool   `toml:"enabled"`
-	ModelURL string `toml:"model_url"`
-	DataDir  string `toml:"data_dir"` // empty = XDG default (~/.local/share/gnoma/slm)
+	Enabled        bool     `toml:"enabled"`
+	Backend        string   `toml:"backend"`         // auto | ollama | llamacpp | llamafile | openaicompat | disabled (empty = auto)
+	Model          string   `toml:"model"`           // model name (ollama/llamacpp/openaicompat); ignored for llamafile
+	BaseURL        string   `toml:"base_url"`        // server URL; defaults per-backend
+	ModelURL       string   `toml:"model_url"`       // llamafile-only: where to download the binary from
+	DataDir        string   `toml:"data_dir"`        // llamafile-only: where to put it (empty = XDG default)
+	StartupTimeout Duration `toml:"startup_timeout"` // llamafile-only: first-launch wait budget; 0 = default 5s
 }
 
 // MCPServerConfig defines an MCP server to start and connect to.

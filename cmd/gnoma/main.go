@@ -664,46 +664,62 @@ func main() {
 		logger.Debug("prefix token baseline set", "tokens", prefixTokens)
 	}
 
-	// Wire SLM: start llamafile in background, register arm + classifier when ready.
-	// Uses a lazyClassifier so the engine starts immediately with heuristic fallback;
-	// the SLM swaps in once llamafile is healthy (typically 5-10s cold start).
-	var slmMgr *slm.Manager
+	// Wire SLM through the pluggable backend factory. The user picks a
+	// backend (ollama / llamacpp / llamafile / openaicompat / auto / disabled)
+	// in [slm].backend; the factory returns a ready provider or nil if the
+	// chosen backend isn't reachable. See docs/slm-backends.md.
 	lazy := &lazyClassifier{logger: logger}
 	var engineClassifier router.TaskClassifier = lazy
+	var slmCleanup func() error
 	if cfg.SLM.Enabled {
-		slmDataDir := cfg.SLM.DataDir
-		if slmDataDir == "" {
-			slmDataDir = slm.DefaultDataDir()
+		bcfg := slm.BackendConfig{
+			Backend:        slm.Backend(cfg.SLM.Backend),
+			Model:          cfg.SLM.Model,
+			BaseURL:        cfg.SLM.BaseURL,
+			ModelURL:       cfg.SLM.ModelURL,
+			DataDir:        cfg.SLM.DataDir,
+			StartupTimeout: cfg.SLM.StartupTimeout.Duration(),
 		}
-		slmMgr = slm.New(slm.Config{DataDir: slmDataDir, ModelURL: cfg.SLM.ModelURL}, logger)
-		if slmMgr.IsSetUp() {
-			go func() {
-				slmBaseURL, startErr := slmMgr.Start(context.Background())
-				if startErr != nil {
-					logger.Warn("failed to start SLM; using heuristic classifier", "error", startErr)
-					return
-				}
-				slmProv, provErr := openaicompat.NewLlamafile(provider.ProviderConfig{
-					BaseURL: slmBaseURL + "/v1",
-				})
-				if provErr != nil {
-					logger.Warn("failed to create SLM provider", "error", provErr)
-					return
-				}
-				lazy.set(slm.NewClassifier(slmProv, "default", logger))
-				rtr.RegisterArm(&router.Arm{
-					ID:            "slm/llamafile",
-					Provider:      slmProv,
-					ModelName:     "default",
-					IsLocal:       true,
-					MaxComplexity: 0.3,
-					Capabilities:  provider.Capabilities{ToolUse: false},
-				})
-				logger.Info("SLM ready", "url", slmBaseURL, "startup", slmMgr.StartupDuration())
-			}()
-		} else {
-			logger.Warn("SLM enabled but not set up; run: gnoma slm setup")
+		fmt.Fprintln(os.Stderr, "Starting SLM...")
+		boot, bootErr := slm.StartBackend(context.Background(), bcfg, logger)
+		switch {
+		case bootErr != nil:
+			fmt.Fprintf(os.Stderr, "SLM unavailable: %v — using heuristic classifier.\n", bootErr)
+		case boot == nil:
+			fmt.Fprintln(os.Stderr, "SLM unavailable: no backend reachable — using heuristic classifier.")
+		default:
+			lazy.set(slm.NewClassifier(boot.Provider, boot.Model, logger))
+			// ToolUse comes from the live probe of the actual model. For
+			// completion-only models (e.g. TinyLlama), the SLM arm only
+			// handles knowledge-only prompts where the trivial-prompt
+			// heuristic flipped RequiresTools=false. For tool-capable
+			// models, the SLM also covers simple file reads etc., gated
+			// by MaxComplexity=0.3.
+			rtr.RegisterArm(&router.Arm{
+				ID:            router.ArmID("slm/" + string(boot.Backend)),
+				Provider:      boot.Provider,
+				ModelName:     boot.Model,
+				IsLocal:       true,
+				MaxComplexity: 0.3,
+				Capabilities:  provider.Capabilities{ToolUse: boot.ToolSupport},
+			})
+			slmCleanup = boot.Close
+			toolNote := "no tools"
+			if boot.ToolSupport {
+				toolNote = "tools"
+			}
+			fmt.Fprintf(os.Stderr, "SLM ready (%s, model=%s, %s, boot=%s)\n",
+				boot.Backend, boot.Model, toolNote, boot.BootTime.Round(time.Millisecond))
+			logger.Info("SLM ready",
+				"backend", boot.Backend,
+				"model", boot.Model,
+				"tool_support", boot.ToolSupport,
+				"boot_time", boot.BootTime,
+			)
 		}
+	}
+	if slmCleanup != nil {
+		defer func() { _ = slmCleanup() }()
 	}
 
 	// Create engine
@@ -889,7 +905,6 @@ func main() {
 			Permissions:           permChecker,
 			Router:                rtr,
 			ElfManager:            elfMgr,
-			SLMManager:            slmMgr,
 			PermCh:                permCh,
 			PermReqCh:             permReqCh,
 			ElfProgress:           elfProgressCh,
@@ -1340,19 +1355,64 @@ func runSLMCommand(args []string, cfg *gnomacfg.Config, logger *slog.Logger) int
 		return 0
 
 	case "status":
-		status := mgr.Status()
-		fmt.Printf("slm status: %s\n", status)
-		if mf := mgr.Manifest(); mf != nil {
-			fmt.Printf("  file:    %s\n", mf.FilePath)
-			fmt.Printf("  size:    %s\n", humanBytes(mf.Size))
-			fmt.Printf("  sha256:  %s\n", mf.SHA256[:16]+"...")
-			fmt.Printf("  setup:   %s\n", mf.SetupAt.Format("2006-01-02 15:04 UTC"))
+		backend := cfg.SLM.Backend
+		if backend == "" {
+			backend = "auto"
 		}
-		switch status {
-		case slm.StatusNotSetUp:
-			fmt.Println("  run: gnoma slm setup")
-		case slm.StatusMissing:
-			fmt.Println("  file is missing; run: gnoma slm setup")
+		fmt.Printf("slm enabled: %v\n", cfg.SLM.Enabled)
+		fmt.Printf("slm backend: %s\n", backend)
+		if cfg.SLM.Model != "" {
+			fmt.Printf("  model:   %s\n", cfg.SLM.Model)
+		}
+		if cfg.SLM.BaseURL != "" {
+			fmt.Printf("  url:     %s\n", cfg.SLM.BaseURL)
+		}
+
+		// Backend-specific reachability / setup state.
+		switch slm.Backend(backend) {
+		case slm.BackendLlamafile, slm.BackendAuto:
+			status := mgr.Status()
+			fmt.Printf("\nllamafile status: %s\n", status)
+			if mf := mgr.Manifest(); mf != nil {
+				fmt.Printf("  file:    %s\n", mf.FilePath)
+				fmt.Printf("  size:    %s\n", humanBytes(mf.Size))
+				fmt.Printf("  sha256:  %s\n", mf.SHA256[:16]+"...")
+				fmt.Printf("  setup:   %s\n", mf.SetupAt.Format("2006-01-02 15:04 UTC"))
+			}
+			switch status {
+			case slm.StatusNotSetUp:
+				fmt.Println("  run: gnoma slm setup")
+			case slm.StatusMissing:
+				fmt.Println("  file is missing; run: gnoma slm setup")
+			}
+		}
+
+		// Live probe: try to actually boot the configured backend.
+		fmt.Println("\nlive probe:")
+		bcfg := slm.BackendConfig{
+			Backend:        slm.Backend(backend),
+			Model:          cfg.SLM.Model,
+			BaseURL:        cfg.SLM.BaseURL,
+			ModelURL:       cfg.SLM.ModelURL,
+			DataDir:        dataDir,
+			StartupTimeout: cfg.SLM.StartupTimeout.Duration(),
+		}
+		probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		boot, perr := slm.StartBackend(probeCtx, bcfg, logger)
+		switch {
+		case perr != nil:
+			fmt.Printf("  ✗ %v\n", perr)
+		case boot == nil:
+			fmt.Println("  - no backend available (heuristic classifier will be used)")
+		default:
+			tools := "no tools"
+			if boot.ToolSupport {
+				tools = "tools"
+			}
+			fmt.Printf("  ✓ %s ready (model=%s, %s, boot=%s)\n",
+				boot.Backend, boot.Model, tools, boot.BootTime.Round(time.Millisecond))
+			_ = boot.Close()
 		}
 		return 0
 

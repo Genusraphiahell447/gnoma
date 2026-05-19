@@ -546,19 +546,76 @@ func TestArmTier(t *testing.T) {
 	tests := []struct {
 		name string
 		arm  *Arm
+		task Task
 		want int
 	}{
-		{"CLI agent", &Arm{IsCLIAgent: true}, 0},
-		{"local model", &Arm{IsLocal: true}, 1},
-		{"API model", &Arm{}, 2},
-		{"IsCLIAgent overrides IsLocal", &Arm{IsCLIAgent: true, IsLocal: true}, 0},
+		{"CLI agent", &Arm{IsCLIAgent: true}, Task{}, 1},
+		{"local model", &Arm{IsLocal: true}, Task{}, 2},
+		{"API model", &Arm{}, Task{}, 3},
+		{"IsCLIAgent overrides IsLocal", &Arm{IsCLIAgent: true, IsLocal: true}, Task{}, 1},
+		{
+			name: "specialized small arm fitting task → tier 0",
+			arm:  &Arm{IsLocal: true, MaxComplexity: 0.3},
+			task: Task{ComplexityScore: 0.1},
+			want: 0,
+		},
+		{
+			name: "specialized small arm not fitting task falls back to local",
+			arm:  &Arm{IsLocal: true, MaxComplexity: 0.3},
+			task: Task{ComplexityScore: 0.5},
+			want: 2,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := armTier(tt.arm); got != tt.want {
+			if got := armTier(tt.arm, tt.task); got != tt.want {
 				t.Errorf("armTier = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSelectBest_SmallArmWinsTrivialTask verifies the SLM-style arm
+// (MaxComplexity > 0) beats a CLI agent for a trivial task, satisfying the
+// "small stuff stays on the small model" intent.
+func TestSelectBest_SmallArmWinsTrivialTask(t *testing.T) {
+	cliArm := &Arm{
+		ID:           "subprocess/claude",
+		IsCLIAgent:   true,
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 200000},
+	}
+	smallArm := &Arm{
+		ID:            "slm/llamafile",
+		IsLocal:       true,
+		MaxComplexity: 0.3,
+		Capabilities:  provider.Capabilities{ToolUse: false},
+	}
+	task := Task{Type: TaskExplain, ComplexityScore: 0.05, RequiresTools: false}
+	got := selectBest(nil, []*Arm{cliArm, smallArm}, task)
+	if got != smallArm {
+		t.Errorf("selectBest = %v, want smallArm", got)
+	}
+}
+
+// TestSelectBest_CLIAgentWinsComplexTask verifies a non-trivial task still
+// prefers the CLI agent over the small arm — the small arm's MaxComplexity
+// ceiling pushes it back below the CLI agent for harder work.
+func TestSelectBest_CLIAgentWinsComplexTask(t *testing.T) {
+	cliArm := &Arm{
+		ID:           "subprocess/claude",
+		IsCLIAgent:   true,
+		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 200000},
+	}
+	smallArm := &Arm{
+		ID:            "slm/llamafile",
+		IsLocal:       true,
+		MaxComplexity: 0.3,
+		Capabilities:  provider.Capabilities{ToolUse: false},
+	}
+	task := Task{Type: TaskRefactor, ComplexityScore: 0.7, RequiresTools: true}
+	got := selectBest(nil, []*Arm{cliArm, smallArm}, task)
+	if got != cliArm {
+		t.Errorf("selectBest = %v, want cliArm", got)
 	}
 }
 
