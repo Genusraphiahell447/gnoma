@@ -2,7 +2,11 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
@@ -213,3 +217,126 @@ func (s *stubProvider) Stream(_ context.Context, _ provider.Request) (stream.Str
 	return nil, nil
 }
 func (s *stubProvider) IsSecure() bool { return true }
+
+// --- DiscoverOllama / cache + default context size ---
+
+// ollamaStub serves a configurable /api/tags response and a no-op /api/show.
+// tagsBody is the JSON body returned for /api/tags. showFunc, if set, handles
+// /api/show; otherwise the default empty template / parameters response is
+// used (probe returns false, 0).
+type ollamaStub struct {
+	tagsBody string
+	showFunc func(model string) (template, parameters string)
+}
+
+func (s *ollamaStub) server() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			_, _ = w.Write([]byte(s.tagsBody))
+		case "/api/show":
+			body := make([]byte, 256)
+			n, _ := r.Body.Read(body)
+			req := string(body[:n])
+			modelName := ""
+			// crude parse: pull the value of "name" from {"name":"..."}
+			if i := strings.Index(req, `"name":"`); i >= 0 {
+				rest := req[i+len(`"name":"`):]
+				if j := strings.IndexByte(rest, '"'); j >= 0 {
+					modelName = rest[:j]
+				}
+			}
+			tmpl, params := "", ""
+			if s.showFunc != nil {
+				tmpl, params = s.showFunc(modelName)
+			}
+			fmt.Fprintf(w, `{"template":%q,"parameters":%q}`, tmpl, params)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// TestDiscoverOllama_AppliesDefaultContextSize verifies that a model whose
+// /api/show response contains no num_ctx still gets the conservative default
+// rather than ContextSize=0 (which the router treats as "tiny").
+func TestDiscoverOllama_AppliesDefaultContextSize(t *testing.T) {
+	stub := &ollamaStub{
+		tagsBody: `{"models":[{"name":"llama3:8b","size":1}]}`,
+		showFunc: func(_ string) (string, string) {
+			return ".Tool", "" // tool support yes, no num_ctx line
+		},
+	}
+	srv := stub.server()
+	defer srv.Close()
+
+	cache := map[string]bool{}
+	models, err := DiscoverOllama(context.Background(), srv.URL, cache)
+	if err != nil {
+		t.Fatalf("DiscoverOllama: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1", len(models))
+	}
+	if models[0].ContextSize != defaultOllamaContextSize {
+		t.Errorf("ContextSize = %d, want %d", models[0].ContextSize, defaultOllamaContextSize)
+	}
+	if !models[0].SupportsTools {
+		t.Error("SupportsTools should be true (template contained .Tool)")
+	}
+}
+
+// TestDiscoverOllama_PrunesCacheOnDisappearance verifies that toolCache entries
+// for models no longer present in /api/tags are pruned, preventing unbounded
+// cache growth and stale verdicts on reappearing models.
+func TestDiscoverOllama_PrunesCacheOnDisappearance(t *testing.T) {
+	stub := &ollamaStub{
+		tagsBody: `{"models":[{"name":"alive:latest","size":1}]}`,
+	}
+	srv := stub.server()
+	defer srv.Close()
+
+	cache := map[string]bool{
+		"alive:latest": true,
+		"ghost:latest": true, // not in tags response — must be pruned
+		"another-ghost": false,
+	}
+	if _, err := DiscoverOllama(context.Background(), srv.URL, cache); err != nil {
+		t.Fatalf("DiscoverOllama: %v", err)
+	}
+
+	if _, ok := cache["alive:latest"]; !ok {
+		t.Error("alive:latest should remain in cache")
+	}
+	if _, ok := cache["ghost:latest"]; ok {
+		t.Error("ghost:latest should have been pruned from cache")
+	}
+	if _, ok := cache["another-ghost"]; ok {
+		t.Error("another-ghost should have been pruned from cache")
+	}
+}
+
+// TestDiscoverLlamaCPP_AppliesDefaultContextSize verifies that a llama.cpp
+// /props response with n_ctx=0 (or missing) falls back to the documented
+// default rather than registering an arm with ContextWindow=0.
+func TestDiscoverLlamaCPP_AppliesDefaultContextSize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/props" {
+			_, _ = w.Write([]byte(`{"default_generation_settings":{}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	models, err := DiscoverLlamaCPP(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("DiscoverLlamaCPP: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1", len(models))
+	}
+	if models[0].ContextSize != defaultLlamaCppContextSize {
+		t.Errorf("ContextSize = %d, want %d", models[0].ContextSize, defaultLlamaCppContextSize)
+	}
+}

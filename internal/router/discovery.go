@@ -14,6 +14,15 @@ import (
 
 const discoveryTimeout = 5 * time.Second
 
+// Per-provider context-window fallbacks applied when a probe doesn't report a
+// concrete num_ctx / n_ctx. The router treats ContextWindow == 0 as "tiny"
+// (forcing two-stage tool routing), so leaving 0 in for unprobed models would
+// corrupt routing decisions for every local arm.
+const (
+	defaultOllamaContextSize   = 32768
+	defaultLlamaCppContextSize = 8192
+)
+
 // DiscoveredModel represents a model found via discovery.
 type DiscoveredModel struct {
 	ID            string
@@ -21,7 +30,7 @@ type DiscoveredModel struct {
 	Provider      string // "ollama" or "llamacpp"
 	Size          int64  // bytes, if available
 	SupportsTools bool   // whether the model supports function/tool calling
-	ContextSize   int    // context window in tokens (0 = unknown, use default)
+	ContextSize   int    // context window in tokens (always populated; provider-specific default if probe was inconclusive)
 }
 
 // DiscoverOllama polls the local Ollama instance for available models.
@@ -62,7 +71,9 @@ func DiscoverOllama(ctx context.Context, baseURL string, toolCache map[string]bo
 	}
 
 	discovered := make([]DiscoveredModel, 0, len(data.Models))
+	currentModels := make(map[string]bool, len(data.Models))
 	for _, m := range data.Models {
+		currentModels[m.Name] = true
 		dm := DiscoveredModel{
 			ID:       m.Name,
 			Name:     m.Name,
@@ -83,7 +94,20 @@ func DiscoverOllama(ctx context.Context, baseURL string, toolCache map[string]bo
 			}
 		}
 
+		if dm.ContextSize == 0 {
+			dm.ContextSize = defaultOllamaContextSize
+		}
+
 		discovered = append(discovered, dm)
+	}
+
+	// Prune cache entries for models that have disappeared since the last
+	// poll. Without this, the cache grows unbounded and stale entries linger
+	// (a reappearing model would replay an out-of-date tool-support verdict).
+	for name := range toolCache {
+		if !currentModels[name] {
+			delete(toolCache, name)
+		}
 	}
 	return discovered, nil
 }
@@ -164,11 +188,15 @@ func DiscoverLlamaCPP(ctx context.Context, baseURL string) ([]DiscoveredModel, e
 		return nil, err
 	}
 
+	ctxSize := data.DefaultGenerationSettings.N_Ctx
+	if ctxSize == 0 {
+		ctxSize = defaultLlamaCppContextSize
+	}
 	return []DiscoveredModel{{
 		ID:            "default",
 		Name:          "llama.cpp",
 		Provider:      "llamacpp",
-		ContextSize:   data.DefaultGenerationSettings.N_Ctx,
+		ContextSize:   ctxSize,
 		SupportsTools: true, // assume true for modern llama.cpp
 	}}, nil
 }
