@@ -1,5 +1,5 @@
 // Package subprocess provides a provider.Provider that delegates to CLI agents
-// (claude, gemini, vibe) by spawning them as subprocesses.
+// (claude, gemini, vibe, agy) by spawning them as subprocesses.
 //
 // Impedance mismatch: these CLI agents are full agentic loops, not LLM endpoints.
 // Only the latest user message is passed as a prompt. The following provider.Request
@@ -38,7 +38,7 @@ func New(agent DiscoveredAgent) *Provider {
 // Name returns "subprocess" — all CLI agents share this provider namespace.
 func (p *Provider) Name() string { return "subprocess" }
 
-// DefaultModel returns the CLI binary name (e.g., "claude", "gemini", "vibe").
+// DefaultModel returns the CLI binary name (e.g., "claude", "gemini", "vibe", "agy").
 func (p *Provider) DefaultModel() string { return p.agent.Name }
 
 // Models returns a single ModelInfo describing this CLI agent.
@@ -74,16 +74,28 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (stream.Str
 	return s, nil
 }
 
+// buildPrompt extracts the latest user message and, for agents flagged
+// PromptResponseFormat, augments it with JSON-schema instructions when the
+// caller asked for ResponseJSON. The augmentation is a best-effort fallback;
+// compliance depends on the underlying model.
 func (p *Provider) buildPrompt(req provider.Request) string {
 	prompt := extractLastUserMessage(req.Messages)
 
-	// Support ResponseJSON via prompt augmentation for agy (plain text agent)
-	if req.ResponseFormat != nil && req.ResponseFormat.Type == provider.ResponseJSON && p.agent.Name == "agy" {
-		prompt += "\n\nIMPORTANT: You MUST respond with a valid JSON object matching this schema:\n"
-		prompt += string(req.ResponseFormat.JSONSchema.Schema)
-		prompt += "\nRespond with JSON only."
+	if !p.agent.PromptResponseFormat {
+		return prompt
+	}
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != provider.ResponseJSON {
+		return prompt
 	}
 
+	prompt += "\n\nIMPORTANT: You MUST respond with a valid JSON object"
+	if req.ResponseFormat.JSONSchema != nil && len(req.ResponseFormat.JSONSchema.Schema) > 0 {
+		prompt += " matching this schema:\n"
+		prompt += string(req.ResponseFormat.JSONSchema.Schema)
+	} else {
+		prompt += "."
+	}
+	prompt += "\nRespond with JSON only."
 	return prompt
 }
 

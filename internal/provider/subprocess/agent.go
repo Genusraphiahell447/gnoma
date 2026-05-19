@@ -23,18 +23,23 @@ type StreamFormat string
 const (
 	FormatClaudeStreamJSON StreamFormat = "claude-stream-json"
 	FormatGeminiStreamJSON StreamFormat = "gemini-stream-json"
-	FormatVibeStreaming     StreamFormat = "vibe-streaming"
-	FormatAgyText           StreamFormat = "agy-text"
+	FormatVibeStreaming    StreamFormat = "vibe-streaming"
+	FormatAgyText          StreamFormat = "agy-text"
 )
 
 // CLIAgent describes a known CLI agent binary.
 type CLIAgent struct {
 	Name        string
 	DisplayName string
-	ProbeArgs   []string           // args to fetch version (e.g. ["--version"])
+	ProbeArgs   []string              // args to fetch version (e.g. ["--version"])
 	PromptArgs  func(string) []string // build argv for a non-interactive prompt run
 	Format      StreamFormat
 	Capabilities provider.Capabilities
+	// PromptResponseFormat indicates the agent has no native structured-output
+	// mode and must rely on prompt-augmented JSON schema instructions. Treated
+	// as a best-effort fallback by buildPrompt — model compliance is not
+	// guaranteed.
+	PromptResponseFormat bool
 }
 
 // DiscoveredAgent is a CLIAgent confirmed present on PATH with its resolved path.
@@ -96,16 +101,21 @@ var knownAgents = []CLIAgent{
 		DisplayName: "Antigravity",
 		ProbeArgs:   []string{"--version"},
 		PromptArgs: func(p string) []string {
-			return []string{"-p", p}
+			// --dangerously-skip-permissions parallels gemini's --yolo and
+			// vibe's --trust: required for non-interactive runs since stdin
+			// is closed and we cannot answer permission prompts.
+			return []string{"--print", p, "--dangerously-skip-permissions"}
 		},
 		Format: FormatAgyText,
+		// JSONOutput / Vision left false: agy v1.0.0 has no native
+		// structured-output flag and no image-input mechanism. JSON support
+		// is faked via PromptResponseFormat (best-effort, model-dependent);
+		// see TODO.md for tracking native stream-json support.
 		Capabilities: provider.Capabilities{
-			ToolUse:    true,
-			JSONOutput: true,
-			Vision:     true,
-			// Agy is a full agent, context window is effectively huge
+			ToolUse:       true,
 			ContextWindow: 200000,
 		},
+		PromptResponseFormat: true,
 	},
 }
 
