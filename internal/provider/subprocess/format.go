@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
+	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
@@ -224,3 +225,27 @@ func (p *vibeParser) ParseLine(line []byte) ([]stream.Event, error) {
 }
 
 func (p *vibeParser) Done() []stream.Event { return nil }
+
+// --- agy-text ---
+// Format emitted by: agy -p "..."
+//
+// agy emits plain text to stdout. Each line is emitted as an EventTextDelta.
+// If ResponseFormat is JSON, the prompt was augmented to request JSON;
+// we still emit everything as text so the user sees progress.
+
+type agyParser struct {
+	rf *provider.ResponseFormat
+}
+
+func newAgyParser(rf *provider.ResponseFormat) FormatParser {
+	return &agyParser{rf: rf}
+}
+
+func (p *agyParser) ParseLine(line []byte) ([]stream.Event, error) {
+	return []stream.Event{{
+		Type: stream.EventTextDelta,
+		Text: string(line) + "\n",
+	}}, nil
+}
+
+func (p *agyParser) Done() []stream.Event { return nil }

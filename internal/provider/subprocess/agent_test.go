@@ -53,6 +53,7 @@ func TestKnownAgents_ValidFormats(t *testing.T) {
 		FormatClaudeStreamJSON: true,
 		FormatGeminiStreamJSON: true,
 		FormatVibeStreaming:    true,
+		FormatAgyText:           true,
 	}
 	for _, a := range knownAgents {
 		if !valid[a.Format] {
@@ -79,8 +80,14 @@ func TestKnownAgents_PromptArgsIncludePrompt(t *testing.T) {
 }
 
 func TestNewParser_ReturnsParserForKnownFormats(t *testing.T) {
-	for _, f := range []StreamFormat{FormatClaudeStreamJSON, FormatGeminiStreamJSON, FormatVibeStreaming} {
-		p := newParser(f)
+	formats := []StreamFormat{
+		FormatClaudeStreamJSON,
+		FormatGeminiStreamJSON,
+		FormatVibeStreaming,
+		FormatAgyText,
+	}
+	for _, f := range formats {
+		p := newParser(f, nil)
 		if p == nil {
 			t.Errorf("newParser(%q) returned nil", f)
 		}

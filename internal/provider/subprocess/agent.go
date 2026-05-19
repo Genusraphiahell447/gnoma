@@ -24,6 +24,7 @@ const (
 	FormatClaudeStreamJSON StreamFormat = "claude-stream-json"
 	FormatGeminiStreamJSON StreamFormat = "gemini-stream-json"
 	FormatVibeStreaming     StreamFormat = "vibe-streaming"
+	FormatAgyText           StreamFormat = "agy-text"
 )
 
 // CLIAgent describes a known CLI agent binary.
@@ -90,10 +91,26 @@ var knownAgents = []CLIAgent{
 			ContextWindow: 128000,
 		},
 	},
+	{
+		Name:        "agy",
+		DisplayName: "Antigravity",
+		ProbeArgs:   []string{"--version"},
+		PromptArgs: func(p string) []string {
+			return []string{"-p", p}
+		},
+		Format: FormatAgyText,
+		Capabilities: provider.Capabilities{
+			ToolUse:    true,
+			JSONOutput: true,
+			Vision:     true,
+			// Agy is a full agent, context window is effectively huge
+			ContextWindow: 200000,
+		},
+	},
 }
 
 // newParser returns a FormatParser for the given format.
-func newParser(f StreamFormat) FormatParser {
+func newParser(f StreamFormat, rf *provider.ResponseFormat) FormatParser {
 	switch f {
 	case FormatClaudeStreamJSON:
 		return newClaudeParser()
@@ -101,6 +118,8 @@ func newParser(f StreamFormat) FormatParser {
 		return newGeminiParser()
 	case FormatVibeStreaming:
 		return newVibeParser()
+	case FormatAgyText:
+		return newAgyParser(rf)
 	default:
 		return nil
 	}

@@ -4,7 +4,8 @@
 // Impedance mismatch: these CLI agents are full agentic loops, not LLM endpoints.
 // Only the latest user message is passed as a prompt. The following provider.Request
 // fields are intentionally ignored: Tools, SystemPrompt, Messages (history),
-// Temperature, TopP, TopK, Thinking, ResponseFormat, ToolChoice, MaxTokens.
+// Temperature, TopP, TopK, Thinking, ToolChoice, MaxTokens.
+// ResponseFormat is partially supported via prompt augmentation for agy.
 // Internal tool calls executed by the CLI are surfaced as EventTextDelta (opaque).
 package subprocess
 
@@ -50,12 +51,12 @@ func (p *Provider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 // returns an event stream. All fields in req except the last user message are
 // ignored — see package doc for rationale.
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (stream.Stream, error) {
-	prompt := extractLastUserMessage(req.Messages)
+	prompt := p.buildPrompt(req)
 
 	args := p.agent.PromptArgs(prompt)
 	cmd := exec.CommandContext(ctx, p.agent.Path, args...)
 
-	parser := newParser(p.agent.Format)
+	parser := newParser(p.agent.Format, req.ResponseFormat)
 	if parser == nil {
 		return nil, fmt.Errorf("subprocess: unknown format %q for agent %q", p.agent.Format, p.agent.Name)
 	}
@@ -65,6 +66,19 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (stream.Str
 		return nil, fmt.Errorf("subprocess %q: %w", p.agent.Name, err)
 	}
 	return s, nil
+}
+
+func (p *Provider) buildPrompt(req provider.Request) string {
+	prompt := extractLastUserMessage(req.Messages)
+
+	// Support ResponseJSON via prompt augmentation for agy (plain text agent)
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == provider.ResponseJSON && p.agent.Name == "agy" {
+		prompt += "\n\nIMPORTANT: You MUST respond with a valid JSON object matching this schema:\n"
+		prompt += string(req.ResponseFormat.JSONSchema.Schema)
+		prompt += "\nRespond with JSON only."
+	}
+
+	return prompt
 }
 
 // extractLastUserMessage returns the content of the last user-role message in msgs.
