@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -49,8 +48,9 @@ func NewTransport(command string, args []string, env map[string]string, logger *
 func (t *Transport) Start(ctx context.Context) error {
 	t.cmd = exec.CommandContext(ctx, t.command, t.args...)
 	t.cmd.Env = t.buildEnv()
-	// Create a new process group so Close can kill the entire tree.
-	t.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Platform-specific: on Unix, isolate the child in a new process group
+	// so Close can kill the entire tree.
+	setProcessGroup(t.cmd)
 	t.stderr = limitedWriter{max: maxStderrCapture}
 	t.cmd.Stderr = &t.stderr
 
@@ -146,10 +146,10 @@ func (t *Transport) Close() error {
 	case <-time.After(2 * time.Second):
 	}
 
-	// Graceful didn't work — kill the entire process group.
-	t.logger.Warn("mcp: server did not exit, killing process group", "command", t.command)
-	if err := syscall.Kill(-t.cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		t.logger.Warn("mcp: SIGKILL to process group failed",
+	// Graceful didn't work — kill the process (Unix: whole group; Windows: just the process).
+	t.logger.Warn("mcp: server did not exit, killing", "command", t.command)
+	if err := killProcessTree(t.cmd.Process); err != nil {
+		t.logger.Warn("mcp: kill failed",
 			"command", t.command, "pid", t.cmd.Process.Pid, "error", err)
 	}
 	return <-done
