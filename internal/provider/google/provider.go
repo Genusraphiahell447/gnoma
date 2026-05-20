@@ -10,7 +10,7 @@ import (
 	"google.golang.org/genai"
 )
 
-const defaultModel = "gemini-2.5-flash"
+const defaultModel = "gemini-3.5-flash"
 
 // Provider implements provider.Provider for Google's Gemini API.
 type Provider struct {
@@ -74,7 +74,7 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 			// Fallback to hardcoded list if API call fails
 			return p.fallbackModels(), nil
 		}
-		
+
 		caps := inferGoogleModelCapabilities(model)
 		models = append(models, provider.ModelInfo{
 			ID:           model.Name,
@@ -96,7 +96,7 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 func (p *Provider) fallbackModels() []provider.ModelInfo {
 	return []provider.ModelInfo{
 		{
-			ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: p.name,
+			ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro", Provider: p.name,
 			Capabilities: provider.Capabilities{
 				ToolUse:       true,
 				JSONOutput:    true,
@@ -107,7 +107,7 @@ func (p *Provider) fallbackModels() []provider.ModelInfo {
 			},
 		},
 		{
-			ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Provider: p.name,
+			ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", Provider: p.name,
 			Capabilities: provider.Capabilities{
 				ToolUse:       true,
 				JSONOutput:    true,
@@ -118,7 +118,37 @@ func (p *Provider) fallbackModels() []provider.ModelInfo {
 			},
 		},
 		{
-			ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", Provider: p.name,
+			ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash Lite", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse: true, JSONOutput: true, Vision: true,
+				ContextWindow: 1048576, MaxOutput: 65536,
+			},
+		},
+		// Legacy IDs retained for users pinned to older models.
+		{
+			ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro (legacy)", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				Vision:        true,
+				ContextWindow: 1048576,
+				MaxOutput:     65536,
+			},
+		},
+		{
+			ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash (legacy)", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse:       true,
+				JSONOutput:    true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				Vision:        true,
+				ContextWindow: 1048576,
+				MaxOutput:     65536,
+			},
+		},
+		{
+			ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash (legacy)", Provider: p.name,
 			Capabilities: provider.Capabilities{
 				ToolUse: true, JSONOutput: true, Vision: true,
 				ContextWindow: 1048576, MaxOutput: 8192,
@@ -141,6 +171,9 @@ func inferGoogleModelCapabilities(m *genai.Model) provider.Capabilities {
 
 	// Model-specific overrides based on model name
 	switch m.Name {
+	case "gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-3.1-flash-lite":
+		caps.ContextWindow = 1048576
+		caps.MaxOutput = 65536
 	case "gemini-2.5-pro", "gemini-2.5-flash":
 		caps.ContextWindow = 1048576
 		caps.MaxOutput = 65536

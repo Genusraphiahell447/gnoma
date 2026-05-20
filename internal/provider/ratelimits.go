@@ -84,12 +84,17 @@ func mistralDefaults() ProviderDefaults {
 		Tier:     "starter",
 		Models: map[string]RateLimits{
 			"*": base,
+			// Mistral 3 (released Dec 2025) — flagship.
+			"mistral-large-3":      {RPS: 1, TPM: 600_000, TokensMonth: 200_000_000_000},
+			"mistral-large-2512":   {RPS: 1, TPM: 600_000, TokensMonth: 200_000_000_000},
+			"mistral-large-latest": {RPS: 1, TPM: 50_000, TokensMonth: 4_000_000},
+			"mistral-medium-3.5":   {RPS: 1, TPM: 375_000},
+			"mistral-medium-2511":  {RPS: 1, TPM: 375_000},
 			// Magistral models get higher limits
 			"magistral-medium-2509": {RPS: 1, TPM: 75_000, TokensMonth: 1_000_000_000},
 			"magistral-small-2509":  {RPS: 1, TPM: 75_000, TokensMonth: 1_000_000_000},
-			// Large/medium get higher TPM
+			// Older Large/medium
 			"mistral-large-2411":  {RPS: 1, TPM: 600_000, TokensMonth: 200_000_000_000},
-			"mistral-large-latest": {RPS: 1, TPM: 50_000, TokensMonth: 4_000_000},
 			"mistral-medium-2505": {RPS: 1, TPM: 375_000},
 			"mistral-medium-2508": {RPS: 1, TPM: 375_000},
 			"mistral-small-2603":  {RPS: 1, TPM: 375_000},
@@ -108,15 +113,18 @@ func anthropicDefaults() ProviderDefaults {
 		Tier:     "tier1",
 		Models: map[string]RateLimits{
 			"*": {RPM: 50, ITPM: 30_000, OTPM: 8_000},
-			// Claude 4.x Opus (shared across 4, 4.1, 4.5, 4.6)
-			"claude-opus-4-20250514":     {RPM: 50, ITPM: 30_000, OTPM: 8_000},
-			"claude-opus-4-0":            {RPM: 50, ITPM: 30_000, OTPM: 8_000},
-			// Claude 4.x Sonnet (shared across 4, 4.5, 4.6)
-			"claude-sonnet-4-20250514":   {RPM: 50, ITPM: 30_000, OTPM: 8_000},
-			"claude-sonnet-4-0":          {RPM: 50, ITPM: 30_000, OTPM: 8_000},
-			// Haiku
-			"claude-haiku-4-5-20251001":  {RPM: 50, ITPM: 50_000, OTPM: 10_000},
-			"claude-3-5-haiku-20241022":  {RPM: 50, ITPM: 50_000, OTPM: 10_000},
+			// Claude 4.6 / 4.7 generation — dateless IDs.
+			"claude-opus-4-7":           {RPM: 50, ITPM: 30_000, OTPM: 8_000},
+			"claude-opus-4-6":           {RPM: 50, ITPM: 30_000, OTPM: 8_000},
+			"claude-sonnet-4-6":         {RPM: 50, ITPM: 30_000, OTPM: 8_000},
+			"claude-haiku-4-5":          {RPM: 50, ITPM: 50_000, OTPM: 10_000},
+			"claude-haiku-4-5-20251001": {RPM: 50, ITPM: 50_000, OTPM: 10_000},
+			// Legacy dated 4.0 IDs.
+			"claude-opus-4-20250514":    {RPM: 50, ITPM: 30_000, OTPM: 8_000},
+			"claude-opus-4-0":           {RPM: 50, ITPM: 30_000, OTPM: 8_000},
+			"claude-sonnet-4-20250514":  {RPM: 50, ITPM: 30_000, OTPM: 8_000},
+			"claude-sonnet-4-0":         {RPM: 50, ITPM: 30_000, OTPM: 8_000},
+			"claude-3-5-haiku-20241022": {RPM: 50, ITPM: 50_000, OTPM: 10_000},
 		},
 	}
 }
@@ -127,13 +135,21 @@ func openaiDefaults() ProviderDefaults {
 		Provider: "openai",
 		Tier:     "tier1",
 		Models: map[string]RateLimits{
-			"*":              {RPM: 500, TPM: 30_000, RPD: 10_000},
-			"gpt-4o":         {RPM: 500, TPM: 30_000, RPD: 10_000},
-			"gpt-4o-mini":    {RPM: 500, TPM: 200_000, RPD: 10_000},
-			"o1":             {RPM: 500, TPM: 30_000},
-			"o3":             {RPM: 500, TPM: 30_000},
-			"o3-mini":        {RPM: 500, TPM: 200_000},
-			"o4-mini":        {RPM: 500, TPM: 200_000},
+			"*": {RPM: 500, TPM: 30_000, RPD: 10_000},
+			// GPT-5.5 generation.
+			"gpt-5.5":            {RPM: 500, TPM: 30_000, RPD: 10_000},
+			"gpt-5.5-pro":        {RPM: 500, TPM: 30_000, RPD: 10_000},
+			"gpt-5.5-2026-04-23": {RPM: 500, TPM: 30_000, RPD: 10_000},
+			// GPT-5.2 generation.
+			"gpt-5.2":             {RPM: 500, TPM: 200_000, RPD: 10_000},
+			"gpt-5.2-chat-latest": {RPM: 500, TPM: 200_000, RPD: 10_000},
+			// Legacy.
+			"gpt-4o":      {RPM: 500, TPM: 30_000, RPD: 10_000},
+			"gpt-4o-mini": {RPM: 500, TPM: 200_000, RPD: 10_000},
+			"o1":          {RPM: 500, TPM: 30_000},
+			"o3":          {RPM: 500, TPM: 30_000},
+			"o3-mini":     {RPM: 500, TPM: 200_000},
+			"o4-mini":     {RPM: 500, TPM: 200_000},
 		},
 	}
 }
@@ -144,12 +160,18 @@ func googleDefaults() ProviderDefaults {
 		Provider: "google",
 		Tier:     "free",
 		Models: map[string]RateLimits{
-			"*":                       {RPM: 15, TPM: 250_000, RPD: 250},
-			"gemini-2.5-pro":          {RPM: 5, TPM: 250_000, RPD: 100},
-			"gemini-2.5-pro-preview-05-06": {RPM: 5, TPM: 250_000, RPD: 100},
-			"gemini-2.5-flash":        {RPM: 15, TPM: 250_000, RPD: 250},
+			"*": {RPM: 15, TPM: 250_000, RPD: 250},
+			// Gemini 3.x generation.
+			"gemini-3.1-pro-preview":         {RPM: 5, TPM: 250_000, RPD: 100},
+			"gemini-3.5-flash":               {RPM: 15, TPM: 250_000, RPD: 250},
+			"gemini-3.1-flash-lite":          {RPM: 15, TPM: 250_000, RPD: 250},
+			"gemini-3.1-flash-image-preview": {RPM: 15, TPM: 250_000, RPD: 250},
+			// Legacy.
+			"gemini-2.5-pro":                 {RPM: 5, TPM: 250_000, RPD: 100},
+			"gemini-2.5-pro-preview-05-06":   {RPM: 5, TPM: 250_000, RPD: 100},
+			"gemini-2.5-flash":               {RPM: 15, TPM: 250_000, RPD: 250},
 			"gemini-2.5-flash-preview-04-17": {RPM: 15, TPM: 250_000, RPD: 250},
-			"gemini-2.0-flash":        {RPM: 10, RPD: 1_500},
+			"gemini-2.0-flash":               {RPM: 10, RPD: 1_500},
 		},
 	}
 }

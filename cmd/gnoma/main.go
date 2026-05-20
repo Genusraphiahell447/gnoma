@@ -16,28 +16,28 @@ import (
 	"sync"
 	"time"
 
-	"somegit.dev/Owlibou/gnoma/internal/engine"
-	"somegit.dev/Owlibou/gnoma/internal/hook"
-	"somegit.dev/Owlibou/gnoma/internal/skill"
-	"somegit.dev/Owlibou/gnoma/internal/slm"
-	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	gnomactx "somegit.dev/Owlibou/gnoma/internal/context"
+	"somegit.dev/Owlibou/gnoma/internal/engine"
+	"somegit.dev/Owlibou/gnoma/internal/hook"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
-	"somegit.dev/Owlibou/gnoma/internal/router"
-	"somegit.dev/Owlibou/gnoma/internal/security"
-	"somegit.dev/Owlibou/gnoma/internal/tokenizer"
 	anthropicprov "somegit.dev/Owlibou/gnoma/internal/provider/anthropic"
-	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
 	googleprov "somegit.dev/Owlibou/gnoma/internal/provider/google"
+	"somegit.dev/Owlibou/gnoma/internal/provider/mistral"
 	oaiprov "somegit.dev/Owlibou/gnoma/internal/provider/openai"
 	"somegit.dev/Owlibou/gnoma/internal/provider/openaicompat"
 	subprocprov "somegit.dev/Owlibou/gnoma/internal/provider/subprocess"
+	"somegit.dev/Owlibou/gnoma/internal/router"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
+	"somegit.dev/Owlibou/gnoma/internal/skill"
+	"somegit.dev/Owlibou/gnoma/internal/slm"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
+	"somegit.dev/Owlibou/gnoma/internal/tokenizer"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
+	"somegit.dev/Owlibou/gnoma/internal/tool/persist"
 	"somegit.dev/Owlibou/gnoma/internal/tui"
 
 	tea "charm.land/bubbletea/v2"
@@ -413,10 +413,10 @@ func main() {
 		armID = router.NewArmID(*providerName, armModel)
 		armProvider := security.WrapProvider(limitedProvider(prov, *providerName, armModel, cfg), fwRef)
 		arm := &router.Arm{
-			ID:        armID,
-			Provider:  armProvider,
-			ModelName: armModel,
-			IsLocal:   localProviders[*providerName],
+			ID:           armID,
+			Provider:     armProvider,
+			ModelName:    armModel,
+			IsLocal:      localProviders[*providerName],
 			Capabilities: provider.Capabilities{ToolUse: true},
 		}
 		arm.Pools = resolveRateLimitPools(armID, *providerName, armModel, cfg)
@@ -698,10 +698,10 @@ func main() {
 
 	// Build skill registry: bundled → user → plugins → project (precedence order).
 	skillReg := skill.NewRegistry()
-	skillReg.LoadBundled()                                                                 //nolint:errcheck
-	skillReg.LoadDir(filepath.Join(gnomacfg.GlobalConfigDir(), "skills"), "user")          //nolint:errcheck
+	skillReg.LoadBundled()                                                        //nolint:errcheck
+	skillReg.LoadDir(filepath.Join(gnomacfg.GlobalConfigDir(), "skills"), "user") //nolint:errcheck
 	for _, ps := range pluginResult.Skills {
-		skillReg.LoadDir(ps.Dir, ps.Source)                                                //nolint:errcheck
+		skillReg.LoadDir(ps.Dir, ps.Source) //nolint:errcheck
 	}
 	skillReg.LoadDir(filepath.Join(gnomacfg.ProjectRoot(), ".gnoma", "skills"), "project") //nolint:errcheck
 
@@ -838,17 +838,17 @@ func main() {
 		// Wrap even though the engine's own buildRequest scans inline —
 		// belt-and-suspenders so a future engine path that bypasses
 		// buildRequest still routes through the firewall.
-		Provider:    security.WrapProvider(prov, fwRef),
-		Router:      rtr,
-		Classifier:  engineClassifier,
-		Tools:       reg,
-		Firewall:    fw,
-		Permissions: permChecker,
-		Context:     ctxWindow,
-		System:      systemPrompt,
-		Model:       *model,
-		Temperature: cfg.Provider.Temperature,
-		MaxTurns:    *maxTurns,
+		Provider:           security.WrapProvider(prov, fwRef),
+		Router:             rtr,
+		Classifier:         engineClassifier,
+		Tools:              reg,
+		Firewall:           fw,
+		Permissions:        permChecker,
+		Context:            ctxWindow,
+		System:             systemPrompt,
+		Model:              *model,
+		Temperature:        cfg.Provider.Temperature,
+		MaxTurns:           *maxTurns,
 		Store:              store,
 		Hooks:              dispatcher,
 		Logger:             logger,
@@ -916,7 +916,7 @@ func main() {
 		mode = "pipe"
 	}
 	dispatcher.Fire(hook.SessionStart, hook.MarshalSessionStartPayload(sessionID, mode)) //nolint:errcheck
-	defer dispatcher.Fire(hook.SessionEnd, hook.MarshalSessionEndPayload(sessionID, 0)) //nolint:errcheck
+	defer dispatcher.Fire(hook.SessionEnd, hook.MarshalSessionEndPayload(sessionID, 0))  //nolint:errcheck
 
 	if input != "" {
 		// Pipe mode: single input → stream to stdout
@@ -974,8 +974,8 @@ func main() {
 		}
 	} else {
 		// TUI mode: permission prompts via channels
-		permCh := make(chan bool)                               // TUI → engine: y/n response
-		permReqCh := make(chan tui.PermReqMsg, 1)              // engine → TUI: tool requesting permission
+		permCh := make(chan bool)                 // TUI → engine: y/n response
+		permReqCh := make(chan tui.PermReqMsg, 1) // engine → TUI: tool requesting permission
 		permChecker.SetPromptFunc(func(ctx context.Context, toolName string, args json.RawMessage) (bool, error) {
 			// Notify TUI that a permission prompt is needed
 			select {
@@ -1312,10 +1312,10 @@ func buildPluginInfos(plugins []plugin.Plugin, enabledSet map[string]bool) []tui
 // Logs the first deferred-fallback at INFO so operators can tell when the
 // SLM was not yet ready vs. unconfigured.
 type lazyClassifier struct {
-	mu              sync.Mutex
-	inner           router.TaskClassifier
-	deferredLogged  bool
-	logger          *slog.Logger
+	mu             sync.Mutex
+	inner          router.TaskClassifier
+	deferredLogged bool
+	logger         *slog.Logger
 }
 
 func (l *lazyClassifier) set(c router.TaskClassifier) {
@@ -1349,7 +1349,7 @@ type stubProvider struct{ reason string }
 
 func newStubProvider(reason string) provider.Provider { return &stubProvider{reason: reason} }
 
-func (s *stubProvider) Name() string { return "none" }
+func (s *stubProvider) Name() string         { return "none" }
 func (s *stubProvider) DefaultModel() string { return "none" }
 func (s *stubProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, fmt.Errorf("%s", s.reason)
@@ -1430,7 +1430,7 @@ func runProvidersCommand(cfg *gnomacfg.Config, logger *slog.Logger) int {
 	}
 
 	fmt.Println("\nTo set a provider:")
-	fmt.Println("  gnoma --provider anthropic --model claude-opus-4-5  (one-off)")
+	fmt.Println("  gnoma --provider anthropic --model claude-opus-4-7   (one-off)")
 	fmt.Println("  gnoma config set provider.default anthropic          (permanent)")
 
 	return 0

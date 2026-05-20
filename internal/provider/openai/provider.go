@@ -11,7 +11,7 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-const defaultModel = "gpt-4o"
+const defaultModel = "gpt-5.5"
 
 // Provider implements provider.Provider for the OpenAI API.
 type Provider struct {
@@ -82,7 +82,7 @@ func (p *Provider) DefaultModel() string { return p.model }
 // Models returns available OpenAI models with capabilities by querying the API.
 func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 	pager := p.client.Models.ListAutoPaging(ctx)
-	
+
 	var models []provider.ModelInfo
 	for pager.Next() {
 		m := pager.Current()
@@ -111,14 +111,55 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 func (p *Provider) fallbackModels() []provider.ModelInfo {
 	return []provider.ModelInfo{
 		{
-			ID: "gpt-4o", Name: "GPT-4o", Provider: p.name,
+			ID: "gpt-5.5", Name: "GPT-5.5", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse:       true,
+				JSONOutput:    true,
+				Vision:        true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				ContextWindow: 1_000_000,
+				MaxOutput:     32000,
+			},
+		},
+		{
+			ID: "gpt-5.5-pro", Name: "GPT-5.5 Pro", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse:       true,
+				JSONOutput:    true,
+				Vision:        true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				ContextWindow: 1_000_000,
+				MaxOutput:     32000,
+			},
+		},
+		{
+			ID: "gpt-5.2", Name: "GPT-5.2 Thinking", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse:       true,
+				JSONOutput:    true,
+				Vision:        true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				ContextWindow: 400000,
+				MaxOutput:     32000,
+			},
+		},
+		{
+			ID: "gpt-5.2-chat-latest", Name: "GPT-5.2 Instant", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse: true, JSONOutput: true, Vision: true,
+				ContextWindow: 400000, MaxOutput: 32000,
+			},
+		},
+		// Legacy IDs retained for users pinned to older models.
+		{
+			ID: "gpt-4o", Name: "GPT-4o (legacy)", Provider: p.name,
 			Capabilities: provider.Capabilities{
 				ToolUse: true, JSONOutput: true, Vision: true,
 				ContextWindow: 128000, MaxOutput: 16384,
 			},
 		},
 		{
-			ID: "gpt-4o-mini", Name: "GPT-4o Mini", Provider: p.name,
+			ID: "gpt-4o-mini", Name: "GPT-4o Mini (legacy)", Provider: p.name,
 			Capabilities: provider.Capabilities{
 				ToolUse: true, JSONOutput: true, Vision: true,
 				ContextWindow: 128000, MaxOutput: 16384,
@@ -149,29 +190,38 @@ func (p *Provider) fallbackModels() []provider.ModelInfo {
 
 // inferOpenAIModelCapabilities infers capabilities from model ID.
 func inferOpenAIModelCapabilities(modelID string) provider.Capabilities {
-	// Default capabilities for most modern OpenAI models
+	// Default capabilities for most modern OpenAI models (GPT-5.x baseline).
 	caps := provider.Capabilities{
 		ToolUse:       true,
 		JSONOutput:    true,
 		Vision:        true,
-		ContextWindow: 128000,
-		MaxOutput:     16384,
+		ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+		ContextWindow: 400000,
+		MaxOutput:     32000,
 	}
 
 	// Model-specific overrides
 	switch modelID {
+	case "gpt-5.5", "gpt-5.5-pro":
+		caps.ContextWindow = 1_000_000
+		caps.MaxOutput = 32000
+	case "gpt-5.2", "gpt-5.2-chat-latest":
+		caps.ContextWindow = 400000
+		caps.MaxOutput = 32000
 	case "gpt-4o", "gpt-4o-mini":
+		caps.ThinkingModes = nil
 		caps.ContextWindow = 128000
 		caps.MaxOutput = 16384
 	case "o3", "o3-mini":
-		caps.ThinkingModes = []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}
 		caps.ContextWindow = 200000
 		caps.MaxOutput = 100000
 	case "gpt-4", "gpt-4-0613", "gpt-4-32k", "gpt-4-32k-0613":
+		caps.ThinkingModes = nil
 		caps.Vision = false
 		caps.ContextWindow = 8192
 		caps.MaxOutput = 8192
 	case "gpt-3.5-turbo", "gpt-3.5-turbo-0613", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-16k-0613":
+		caps.ThinkingModes = nil
 		caps.Vision = false
 		caps.ToolUse = false
 		caps.ContextWindow = 16384

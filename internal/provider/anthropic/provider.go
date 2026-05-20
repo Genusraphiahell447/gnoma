@@ -11,7 +11,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-const defaultModel = "claude-sonnet-4-20250514"
+const defaultModel = "claude-sonnet-4-6"
 
 // Provider implements provider.Provider for the Anthropic API.
 type Provider struct {
@@ -79,7 +79,7 @@ func (p *Provider) DefaultModel() string {
 // Models returns available Anthropic models with capabilities by querying the API.
 func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 	pager := p.client.Models.ListAutoPaging(ctx, anthropic.ModelListParams{})
-	
+
 	var models []provider.ModelInfo
 	for pager.Next() {
 		m := pager.Current()
@@ -108,24 +108,24 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 func (p *Provider) fallbackModels() []provider.ModelInfo {
 	return []provider.ModelInfo{
 		{
-			ID: "claude-opus-4-20250514", Name: "Claude Opus 4", Provider: p.name,
+			ID: "claude-opus-4-7", Name: "Claude Opus 4.7", Provider: p.name,
 			Capabilities: provider.Capabilities{
 				ToolUse:       true,
 				JSONOutput:    true,
 				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
 				Vision:        true,
-				ContextWindow: 200000,
+				ContextWindow: 1_000_000,
 				MaxOutput:     32000,
 			},
 		},
 		{
-			ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Provider: p.name,
+			ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", Provider: p.name,
 			Capabilities: provider.Capabilities{
 				ToolUse:       true,
 				JSONOutput:    true,
 				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
 				Vision:        true,
-				ContextWindow: 200000,
+				ContextWindow: 1_000_000,
 				MaxOutput:     16000,
 			},
 		},
@@ -136,31 +136,57 @@ func (p *Provider) fallbackModels() []provider.ModelInfo {
 				ContextWindow: 200000, MaxOutput: 8192,
 			},
 		},
+		// Legacy 4.0 IDs retained so user-pinned models continue to surface.
+		{
+			ID: "claude-opus-4-20250514", Name: "Claude Opus 4 (legacy)", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse: true, JSONOutput: true, Vision: true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				ContextWindow: 200000, MaxOutput: 32000,
+			},
+		},
+		{
+			ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4 (legacy)", Provider: p.name,
+			Capabilities: provider.Capabilities{
+				ToolUse: true, JSONOutput: true, Vision: true,
+				ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
+				ContextWindow: 200000, MaxOutput: 16000,
+			},
+		},
 	}
 }
 
 // inferAnthropicModelCapabilities infers capabilities from model ID.
 func inferAnthropicModelCapabilities(modelID string) provider.Capabilities {
-	// Default capabilities for most modern Claude models
+	// Default capabilities for most modern Claude models (4.6/4.7 baseline).
 	caps := provider.Capabilities{
 		ToolUse:       true,
 		JSONOutput:    true,
 		Vision:        true,
 		ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh},
-		ContextWindow: 200000,
+		ContextWindow: 1_000_000,
 		MaxOutput:     16000,
 	}
 
 	// Model-specific overrides
 	switch modelID {
-	case "claude-opus-4-20250514", "claude-opus-4-20250612":
+	case "claude-opus-4-7", "claude-opus-4-6":
 		caps.MaxOutput = 32000
+	case "claude-sonnet-4-6":
+		caps.MaxOutput = 16000
+	case "claude-haiku-4-5-20251001", "claude-haiku-4-5":
+		caps.ContextWindow = 200000
+		caps.MaxOutput = 8192
+	case "claude-opus-4-20250514", "claude-opus-4-20250612":
+		caps.ContextWindow = 200000
+		caps.MaxOutput = 32000
+	case "claude-sonnet-4-20250514":
+		caps.ContextWindow = 200000
+		caps.MaxOutput = 16000
 	case "claude-3-opus-20240229", "claude-3-sonnet-20240229":
-		caps.ThinkingModes = []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}
 		caps.ContextWindow = 200000
 		caps.MaxOutput = 4096
 	case "claude-3-haiku-20240307":
-		caps.ThinkingModes = []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}
 		caps.ContextWindow = 200000
 		caps.MaxOutput = 4096
 	case "claude-2", "claude-2:1", "claude-instant-1":
