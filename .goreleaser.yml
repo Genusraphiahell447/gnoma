@@ -41,6 +41,53 @@ changelog:
       - "^test:"
       - "^chore:"
 
+# Multi-arch Docker images published to GitHub Container Registry.
+# Build host needs Docker buildx and a `docker login ghcr.io` for the
+# org/user that owns ghcr.io/vikingowl91 (use a PAT with `write:packages`).
+dockers:
+  - image_templates:
+      - "ghcr.io/vikingowl91/gnoma:{{ .Version }}-amd64"
+      - "ghcr.io/vikingowl91/gnoma:latest-amd64"
+    use: buildx
+    dockerfile: Dockerfile
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title=gnoma"
+      - "--label=org.opencontainers.image.source=https://somegit.dev/Owlibou/gnoma"
+      - "--label=org.opencontainers.image.url=https://github.com/VikingOwl91/gnoma"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+  - image_templates:
+      - "ghcr.io/vikingowl91/gnoma:{{ .Version }}-arm64"
+      - "ghcr.io/vikingowl91/gnoma:latest-arm64"
+    use: buildx
+    dockerfile: Dockerfile
+    goos: linux
+    goarch: arm64
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title=gnoma"
+      - "--label=org.opencontainers.image.source=https://somegit.dev/Owlibou/gnoma"
+      - "--label=org.opencontainers.image.url=https://github.com/VikingOwl91/gnoma"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+
+docker_manifests:
+  - name_template: "ghcr.io/vikingowl91/gnoma:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/vikingowl91/gnoma:{{ .Version }}-amd64"
+      - "ghcr.io/vikingowl91/gnoma:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/vikingowl91/gnoma:latest"
+    image_templates:
+      - "ghcr.io/vikingowl91/gnoma:latest-amd64"
+      - "ghcr.io/vikingowl91/gnoma:latest-arm64"
+
 release:
   gitea:
     owner: Owlibou
