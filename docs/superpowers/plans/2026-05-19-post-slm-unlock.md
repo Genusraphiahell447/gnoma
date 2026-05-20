@@ -417,6 +417,19 @@ Public commitment: see the OP reply on r/ollama (2026-05-20). The
 sequencing committed there is F-1 first (deterministic), F-2 second
 (SLM-assisted, design work needed on prompt-injection).
 
+**External validation (2026-05-20).** `SharpRule4025` followed up
+with production experience from alterlab.io running a similar
+tiered approach on web-page extraction: deterministic parsers first
+to strip envelope structure, then targeted smaller models for the
+residual unstructured text. Reported token-usage reduction in their
+pipeline: **80–95%**. This isn't a benchmark on gnoma's specific
+entropy path, but it corroborates the F-1 → F-2 architecture
+(deterministic first, classifier second) at scale outside this
+project. Their framing of the SLM step —
+*"a smart regex that handles the ambiguity without risking a leak
+to the upstream provider"* — captures the design intent concisely;
+worth preserving for downstream docs and release notes.
+
 ### F-1: Format-aware pre-extractor (deterministic, low risk)
 
 **Problem.** `Scanner.scanEntropy()` tokenises by character class

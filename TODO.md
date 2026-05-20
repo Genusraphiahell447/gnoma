@@ -4,6 +4,14 @@ Active work, newest first.
 
 ## In flight
 
+- **Entropy FP reduction (post-SLM Phase F)** — F-1 (format-aware
+  pre-extractor, deterministic, ~150 LOC, no new trust boundary) is
+  the concrete next-up item; F-2 (SLM-assisted classifier for
+  ambiguous entropy hits) is gated on F-1 telemetry + ≥50 SLM
+  observations. Surfaced from the r/ollama launch thread (2026-05-20);
+  external validation from alterlab.io on the same tiered approach.
+  See
+  [`docs/superpowers/plans/2026-05-19-post-slm-unlock.md`](docs/superpowers/plans/2026-05-19-post-slm-unlock.md).
 - **Compound tools (post-SLM Phase E)** — held until ≥50 SLM
   observations inform which primitives are worth adding. See
   [`docs/superpowers/plans/2026-05-19-post-slm-unlock.md`](docs/superpowers/plans/2026-05-19-post-slm-unlock.md).
