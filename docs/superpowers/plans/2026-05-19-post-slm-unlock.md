@@ -399,6 +399,114 @@ No tasks scoped until that trigger fires.
 
 ---
 
+## Phase F: Entropy False-Positive Reduction
+
+Surfaced from the r/ollama launch thread (2026-05-20). Commenter
+`SharpRule4025` suggested two layered improvements to the firewall's
+entropy detector; both compose with the existing scanner in
+`internal/security/scanner.go` without changing its model.
+
+Empirically the current default already keeps known safe formats well
+under the 4.5 threshold (UUID4 measured at 3.54–3.72, SHA-256 hex at
+3.94, SHA-1 at 3.57–3.79), so this is FP-rate *refinement* rather
+than a correctness fix. The wins are for strict configs that lower
+the threshold, log-noise reduction in normal use, and a credible
+story for "we thought about the long tail."
+
+Public commitment: see the OP reply on r/ollama (2026-05-20). The
+sequencing committed there is F-1 first (deterministic), F-2 second
+(SLM-assisted, design work needed on prompt-injection).
+
+### F-1: Format-aware pre-extractor (deterministic, low risk)
+
+**Problem.** `Scanner.scanEntropy()` tokenises by character class
+(`entropyTokenize`, alphabet `[a-zA-Z0-9_-/]`) but doesn't recognise
+specific known-safe shapes. Under default thresholds this is fine;
+under `redactHighEntropy = true` or a lowered threshold it can produce
+noise on payloads that are mostly structured data.
+
+**Approach.** Before entropy calculation, extract tokens matching a
+small allow-list of known-safe patterns (UUID4/5, SHA-1/256 hex,
+ISO-8601 timestamps, RFC-3986 URLs). Entropy is then computed only
+on the remaining unstructured residue.
+
+#### Tasks (F-1)
+
+- [ ] `internal/security/safelist.go` — compiled regex list for the
+  known-safe shapes, with per-pattern naming so the trace path matches
+  the existing `pattern` log field.
+- [ ] `Scanner.scanEntropy()` consults the safelist first; matching
+  tokens are skipped (not scored).
+- [ ] Config knob `[firewall.entropy].safelist = ["uuid", "sha_hex",
+  "iso8601"]` so users can curate which formats are auto-skipped.
+  Empty / unset preserves current behaviour exactly.
+- [ ] Tests: UUID skipped, SHA-256 skipped, mixed payload (structured
+  + unstructured), config-disabled-safelist preserves current behaviour,
+  measurement of FP-rate delta on a synthetic corpus.
+
+**Effort estimate:** ~150 LOC + tests.
+
+**Status:** scoped, not started.
+
+### F-2: SLM-assisted classifier for ambiguous entropy hits
+
+**Problem.** After the F-1 deterministic layer, the remaining
+entropy-flagged tokens are genuinely ambiguous — secrets and
+application-specific structured strings both look similar to a
+regex + entropy scorer.
+
+**Approach.** When the SLM tier is enabled (`[slm] enabled = true`),
+optionally feed each entropy-flagged token to the existing SLM arm
+for a binary classification ("credential" / "benign") before
+deciding whether to redact. The same model that already handles
+prompt routing in `internal/slm/classifier.go` does double duty as
+a security-judge.
+
+**Trust-boundary caveat.** Putting an LLM inside the security
+decision path adds a prompt-injection surface that doesn't exist
+today: an entropy-flagged token may contain attacker-controlled bytes
+(from a tool result), and a sufficiently crafted payload could
+manipulate the classifier's verdict. Two modes shake out:
+
+- **Strict** — SLM disabled, or SLM enabled with
+  `block_ambiguous = true`. Treat ambiguous entropy hits as redacts;
+  no model consultation. This must remain the default.
+- **Assisted** — SLM enabled with `ask_slm = true`. Feed the flagged
+  token (plus minimal anchoring context) to the SLM, accept its
+  verdict above a confidence floor, log every classification for
+  audit.
+
+#### Tasks (F-2)
+
+- [ ] `internal/slm/security_classifier.go` — wraps the existing SLM
+  Provider with a credential-classification prompt. Output:
+  `{verdict: "credential" | "benign", confidence: 0..1}`.
+- [ ] `Firewall.ScanWithSLM()` consults the classifier on ambiguous
+  hits; falls back to the strict path if SLM is disabled, errors,
+  or returns below the confidence floor.
+- [ ] Audit log for every classifier call — input token *hashed*,
+  not raw; verdict; confidence; source boundary.
+- [ ] Config: `[firewall.entropy].slm_assist = false` (default),
+  `slm_confidence_floor = 0.7`.
+- [ ] Adversarial test: prompt-injection payload crafted to flip
+  the verdict must still be redacted at strict / floor settings.
+
+**Hold this until:**
+
+- F-1 has shipped and produced FP-rate measurements that quantify
+  how large the residual ambiguous set actually is. If F-1 already
+  closes the gap on real workloads, F-2 may not be worth the new
+  trust boundary.
+- The SLM arm has ≥50 observations (same telemetry bar as Phase E)
+  so its behaviour under arbitrary input is understood.
+
+**Effort estimate:** ~300 LOC + tests + adversarial suite. Revise
+after F-1 telemetry lands.
+
+**Status:** scoped, blocked on F-1 and SLM telemetry.
+
+---
+
 ## Out of scope
 
 Items previously considered and explicitly dropped:
@@ -432,6 +540,12 @@ Items previously considered and explicitly dropped:
    profiles can express per-task arm preferences).
 5. **Phase E (compound tools)** — re-evaluate once the SLM arm has
    produced enough telemetry to justify specific primitives.
+6. **Phase F-1 (format-aware entropy pre-extractor)** — deterministic,
+   no new trust boundary, can ship independently of the SLM-telemetry
+   gating that holds E and F-2. Concrete next-up item if a small
+   self-contained piece of work is needed.
+7. **Phase F-2 (SLM-assisted entropy classifier)** — blocked on F-1
+   shipping plus the same ≥50-SLM-observation bar as E.
 
 Or pause and let SLM data accumulate before committing to any of the
 larger phases (D, C).
@@ -442,3 +556,9 @@ larger phases (D, C).
 
 - 2026-05-19: Initial. Captures outstanding work after the SLM
   unlock session.
+- 2026-05-20: Added Phase F (entropy false-positive reduction).
+  Surfaced from the r/ollama launch thread — `SharpRule4025`
+  proposed a format-aware pre-extractor (F-1, deterministic,
+  shippable) and an SLM-assisted classifier for ambiguous hits
+  (F-2, blocked on F-1 + SLM telemetry). Sequencing matches the
+  public OP reply.
