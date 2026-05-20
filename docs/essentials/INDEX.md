@@ -39,3 +39,4 @@ essentials:
 - [ADR-001 — Initial Decisions](decisions/001-initial-decisions.md)
 - [ADR-002 — SLM Routing](decisions/002-slm-routing.md)
 - [ADR-003 — Plugin Trust via TOFU Manifest Pinning](decisions/003-plugin-trust.md)
+- [ADR-004 — PostToolUse Hook Ordering](decisions/004-posttooluse-hook-ordering.md)
