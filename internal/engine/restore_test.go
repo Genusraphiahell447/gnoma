@@ -28,7 +28,7 @@ func (d *deferredMockTool) Execute(_ context.Context, _ json.RawMessage) (tool.R
 
 func TestSetHistory_ReplacesHistory(t *testing.T) {
 	e, _ := New(Config{
-		Provider: &mockProvider{name: "test"},
+		Provider: secureMock(&mockProvider{name: "test"}),
 		Tools:    tool.NewRegistry(),
 	})
 
@@ -59,7 +59,7 @@ func TestSetHistory_OverwritesPreviousHistory(t *testing.T) {
 			),
 		},
 	}
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	_, _ = e.Submit(context.Background(), "first message", nil)
 
 	if len(e.History()) == 0 {
@@ -83,7 +83,7 @@ func TestSetHistory_OverwritesPreviousHistory(t *testing.T) {
 func TestSetHistory_SyncsContextWindow(t *testing.T) {
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{MaxTokens: 200_000})
 	e, _ := New(Config{
-		Provider: &mockProvider{name: "test"},
+		Provider: secureMock(&mockProvider{name: "test"}),
 		Tools:    tool.NewRegistry(),
 		Context:  ctxWindow,
 	})
@@ -106,7 +106,7 @@ func TestSetHistory_SyncsContextWindow(t *testing.T) {
 func TestSetHistory_SyncsTrackerTokenCount(t *testing.T) {
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{MaxTokens: 200_000})
 	e, _ := New(Config{
-		Provider: &mockProvider{name: "test"},
+		Provider: secureMock(&mockProvider{name: "test"}),
 		Tools:    tool.NewRegistry(),
 		Context:  ctxWindow,
 	})
@@ -130,7 +130,7 @@ func TestSetHistory_SyncsTrackerTokenCount(t *testing.T) {
 
 func TestSetHistory_NilContextWindow_NoPanic(t *testing.T) {
 	e, _ := New(Config{
-		Provider: &mockProvider{name: "test"},
+		Provider: secureMock(&mockProvider{name: "test"}),
 		Tools:    tool.NewRegistry(),
 		// Context intentionally nil
 	})
@@ -147,7 +147,7 @@ func TestSetHistory_NilContextWindow_NoPanic(t *testing.T) {
 
 func TestSetUsage_ReplacesUsage(t *testing.T) {
 	e, _ := New(Config{
-		Provider: &mockProvider{name: "test"},
+		Provider: secureMock(&mockProvider{name: "test"}),
 		Tools:    tool.NewRegistry(),
 	})
 
@@ -173,7 +173,7 @@ func TestSetUsage_OverwritesPreviousUsage(t *testing.T) {
 			),
 		},
 	}
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	_, _ = e.Submit(context.Background(), "hello", nil)
 
 	if e.Usage().InputTokens == 0 {
@@ -205,7 +205,7 @@ func TestSetActivatedTools_DeferredToolIncludedInRequest(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	// Before activation: buildRequest should omit "bash" (deferred).
 	reqBefore := e.buildRequest(context.Background())
@@ -237,7 +237,7 @@ func TestSetActivatedTools_EmptyMap_DeactivatesAll(t *testing.T) {
 	reg.Register(&deferredMockTool{name: "bash"})
 
 	mp := &mockProvider{name: "test"}
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	// Manually activate, then restore to empty.
 	e.activatedTools["bash"] = true

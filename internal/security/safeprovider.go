@@ -40,10 +40,20 @@ func (p *SafeProvider) Inner() provider.Provider {
 	return p.inner
 }
 
-// IsSecure returns true. Satisfies the router's SecureProvider interface.
-func (p *SafeProvider) IsSecure() bool {
-	return true
+// Marker is a sealed-trait interface only types defined in this package
+// can satisfy. Higher layers (e.g. router.SecureProvider) embed Marker so
+// the compiler — not convention — enforces that any provider flowing
+// through them has been wrapped here. Adding `func (x *Foo) secured() {}`
+// to a non-wrapped type in another package would not satisfy this
+// interface, because Go method sets distinguish unexported methods by
+// their defining package.
+type Marker interface {
+	secured()
 }
+
+// secured is the marker method that seals SecureProvider's embedded
+// Marker interface. Intentionally no-op.
+func (p *SafeProvider) secured() {}
 
 func (p *SafeProvider) Stream(ctx context.Context, req provider.Request) (stream.Stream, error) {
 	if p.fwRef != nil {

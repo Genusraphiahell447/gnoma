@@ -12,6 +12,8 @@ import (
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/router"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 	"somegit.dev/Owlibou/gnoma/internal/tool"
 )
@@ -26,7 +28,6 @@ type mockProvider struct {
 
 func (m *mockProvider) Name() string         { return m.name }
 func (m *mockProvider) DefaultModel() string  { return "mock-model" }
-func (m *mockProvider) IsSecure() bool       { return true }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, nil
 }
@@ -37,6 +38,12 @@ func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Str
 	s := m.streams[m.calls]
 	m.calls++
 	return s, nil
+}
+
+// secureMock wraps a test provider in *security.SafeProvider so it
+// satisfies router.SecureProvider's sealed Marker.
+func secureMock(p provider.Provider) router.SecureProvider {
+	return security.WrapProvider(p, nil)
 }
 
 type eventStream struct {
@@ -67,7 +74,7 @@ func TestLocal_SendAndReceive(t *testing.T) {
 		},
 	}
 
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "mock-model"})
 
 	// Initial state
@@ -122,7 +129,7 @@ func TestLocal_SendWhileBusy(t *testing.T) {
 		},
 	}
 
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
 	_ = sess.Send("first")
@@ -149,7 +156,7 @@ func TestLocal_Cancel(t *testing.T) {
 		streams: []stream.Stream{&slowStream{events: events}},
 	}
 
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
 	_ = sess.Send("slow task")
@@ -172,7 +179,7 @@ func TestLocal_Cancel(t *testing.T) {
 
 func TestLocal_Close(t *testing.T) {
 	mp := &mockProvider{name: "test"}
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "model"})
 
 	if err := sess.Close(); err != nil {
@@ -200,7 +207,7 @@ func TestLocal_StatusTracking(t *testing.T) {
 		},
 	}
 
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "mock-model"})
 
 	// Turn 1
@@ -259,7 +266,7 @@ func TestLocal_AutoSave(t *testing.T) {
 		},
 	}
 
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	store := NewSessionStore(t.TempDir(), 10, slog.Default())
 	sess := NewLocal(LocalConfig{
 		Engine:    eng,
@@ -303,7 +310,7 @@ func TestLocal_AutoSave_SkipsWhenNoStore(t *testing.T) {
 		},
 	}
 
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	// No store — must not panic
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "mock-model"})
 
@@ -321,7 +328,7 @@ func TestLocal_AutoSave_SkipsWhenNoStore(t *testing.T) {
 
 func TestLocal_SessionID(t *testing.T) {
 	mp := &mockProvider{name: "test"}
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	sess := NewLocal(LocalConfig{Engine: eng, Provider: "test", Model: "m", SessionID: "my-id"})
 	if sess.SessionID() != "my-id" {
 		t.Errorf("SessionID() = %q, want %q", sess.SessionID(), "my-id")

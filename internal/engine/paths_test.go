@@ -72,7 +72,7 @@ func TestSubmitWithOptions_AllowedPaths_DeniesBash(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	_, err := e.SubmitWithOptions(context.Background(), "run bash",
 		TurnOptions{AllowedPaths: []string{"/tmp"}}, nil)
@@ -111,7 +111,7 @@ func TestSubmitWithOptions_AllowedPaths_DeniesOutsidePath(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	_, err := e.SubmitWithOptions(context.Background(), "read file",
 		TurnOptions{AllowedPaths: []string{"/tmp"}}, nil)
@@ -150,7 +150,7 @@ func TestSubmitWithOptions_AllowedPaths_AllowsInsidePath(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	_, err := e.SubmitWithOptions(context.Background(), "read file",
 		TurnOptions{AllowedPaths: []string{"/tmp/allowed"}}, nil)
@@ -189,7 +189,7 @@ func TestSubmitWithOptions_NilAllowedPaths_NoRestriction(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	// No AllowedPaths → no restriction
 	_, err := e.SubmitWithOptions(context.Background(), "read file", TurnOptions{}, nil)
@@ -230,7 +230,7 @@ func TestSubmitWithOptions_AllowedPaths_NonPathSensitiveToolAllowed(t *testing.T
 	// Register arm with tool support
 	from := provider.Capabilities{ToolUse: true}
 	_ = from
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	_, err := e.SubmitWithOptions(context.Background(), "get info",
 		TurnOptions{AllowedPaths: []string{"/tmp"}}, nil)

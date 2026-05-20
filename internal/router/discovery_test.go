@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
@@ -144,7 +145,7 @@ func TestReconcileArms_NoForcedArm(t *testing.T) {
 	}
 
 	factory := func(name, model string) SecureProvider {
-		return &stubProvider{name: name, model: model}
+		return security.WrapProvider(&stubProvider{name: name, model: model}, nil)
 	}
 
 	reconcileArms(r, discovered, factory, slog.Default(), nil)
@@ -216,7 +217,6 @@ func (s *stubProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 func (s *stubProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	return nil, nil
 }
-func (s *stubProvider) IsSecure() bool { return true }
 
 // --- DiscoverOllama / cache + default context size ---
 

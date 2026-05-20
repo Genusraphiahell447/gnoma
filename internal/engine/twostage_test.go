@@ -29,14 +29,14 @@ func twoStageEngine(t *testing.T, reg *tool.Registry) *Engine {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:           "llamacpp/qwen3-1b",
-		Provider:     &mockProvider{name: "llamacpp"},
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName:    "qwen3-1b",
 		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 8192},
 	})
 	rtr.ForceArm("llamacpp/qwen3-1b")
 	e, err := New(Config{
-		Provider: &mockProvider{name: "llamacpp"},
+		Provider: secureMock(&mockProvider{name: "llamacpp"}),
 		Router:   rtr,
 		Tools:    reg,
 	})
@@ -49,28 +49,28 @@ func twoStageEngine(t *testing.T, reg *tool.Registry) *Engine {
 func TestUseTwoStageTools(t *testing.T) {
 	smallLocal := &router.Arm{
 		ID:           "llamacpp/qwen3-1b",
-		Provider:     &mockProvider{name: "llamacpp"},
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName:    "qwen3-1b",
 		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 8192},
 	}
 	bigLocal := &router.Arm{
 		ID:           "llamacpp/qwen3-30b",
-		Provider:     &mockProvider{name: "llamacpp"},
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName:    "qwen3-30b",
 		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 32768},
 	}
 	cloud := &router.Arm{
 		ID:           "anthropic/sonnet",
-		Provider:     &mockProvider{name: "anthropic"},
+		Provider:     secureMock(&mockProvider{name: "anthropic"}),
 		ModelName:    "sonnet",
 		IsLocal:      false,
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 200000},
 	}
 	localUnknownCtx := &router.Arm{
 		ID:           "ollama/mystery",
-		Provider:     &mockProvider{name: "ollama"},
+		Provider:     secureMock(&mockProvider{name: "ollama"}),
 		ModelName:    "mystery",
 		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 0},
@@ -118,7 +118,7 @@ func TestUseTwoStageTools(t *testing.T) {
 			rtr.ForceArm(tc.arm.ID)
 
 			e, err := New(Config{
-				Provider:           &mockProvider{name: string(tc.arm.ID.Provider())},
+				Provider:           secureMock(&mockProvider{name: string(tc.arm.ID.Provider())}),
 				Router:             rtr,
 				Tools:              tool.NewRegistry(),
 				ForceTwoStageTools: tc.forced,
@@ -136,7 +136,7 @@ func TestUseTwoStageTools(t *testing.T) {
 
 func TestUseTwoStageTools_NoRouter(t *testing.T) {
 	e, err := New(Config{
-		Provider: &mockProvider{name: "anthropic"},
+		Provider: secureMock(&mockProvider{name: "anthropic"}),
 		Tools:    tool.NewRegistry(),
 	})
 	if err != nil {
@@ -149,7 +149,7 @@ func TestUseTwoStageTools_NoRouter(t *testing.T) {
 
 func TestUseTwoStageTools_NoRouter_ForcedOverride(t *testing.T) {
 	e, err := New(Config{
-		Provider:           &mockProvider{name: "anthropic"},
+		Provider:           secureMock(&mockProvider{name: "anthropic"}),
 		Tools:              tool.NewRegistry(),
 		ForceTwoStageTools: true,
 	})
@@ -165,14 +165,14 @@ func TestUseTwoStageTools_NoForcedArm(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:           "llamacpp/qwen3-1b",
-		Provider:     &mockProvider{name: "llamacpp"},
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName:    "qwen3-1b",
 		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 8192},
 	})
 	// No ForceArm called — multi-arm routing
 	e, err := New(Config{
-		Provider: &mockProvider{name: "llamacpp"},
+		Provider: secureMock(&mockProvider{name: "llamacpp"}),
 		Router:   rtr,
 		Tools:    tool.NewRegistry(),
 	})
@@ -286,7 +286,7 @@ func TestBuildRequest_NonTwoStage_UnchangedBehavior(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:           "llamacpp/qwen3-30b",
-		Provider:     &mockProvider{name: "llamacpp"},
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName:    "qwen3-30b",
 		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 32768},
@@ -298,7 +298,7 @@ func TestBuildRequest_NonTwoStage_UnchangedBehavior(t *testing.T) {
 	reg.Register(&categorizedMockTool{mockTool: mockTool{name: "fs.write"}, cat: tool.CategoryWrite})
 
 	e, err := New(Config{
-		Provider: &mockProvider{name: "llamacpp"},
+		Provider: secureMock(&mockProvider{name: "llamacpp"}),
 		Router:   rtr,
 		Tools:    reg,
 	})

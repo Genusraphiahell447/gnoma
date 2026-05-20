@@ -27,13 +27,18 @@ type mockProvider struct {
 func (m *mockProvider) Name() string         { return m.name }
 func (m *mockProvider) DefaultModel() string  { return "mock" }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) { return nil, nil }
-func (m *mockProvider) IsSecure() bool       { return true }
 func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	idx := m.calls.Add(1) - 1
 	if int(idx) >= len(m.streams) {
 		return nil, fmt.Errorf("no more streams")
 	}
 	return m.streams[idx], nil
+}
+
+// secureMock wraps a test provider in *security.SafeProvider so it
+// satisfies router.SecureProvider's sealed Marker.
+func secureMock(p provider.Provider) router.SecureProvider {
+	return security.WrapProvider(p, nil)
 }
 
 type eventStream struct {
@@ -62,7 +67,7 @@ func TestBackgroundElf_RunsAndCompletes(t *testing.T) {
 		name:    "test",
 		streams: []stream.Stream{newEventStream("Hello from elf!")},
 	}
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 
 	elf := SpawnBackground(eng, "say hello")
 
@@ -93,7 +98,7 @@ func TestBackgroundElf_Cancel(t *testing.T) {
 		name:    "test",
 		streams: []stream.Stream{slowStream},
 	}
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 
 	elf := SpawnBackground(eng, "slow task")
 
@@ -111,7 +116,7 @@ func TestBackgroundElf_CollectEvents(t *testing.T) {
 		name:    "test",
 		streams: []stream.Stream{newEventStream("event test")},
 	}
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 
 	elf := SpawnBackground(eng, "generate events")
 
@@ -137,7 +142,7 @@ func TestManager_SpawnAndList(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:        "test/mock",
-		Provider:  mp,
+		Provider:  secureMock(mp),
 		ModelName: "mock",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
@@ -198,7 +203,7 @@ func TestManager_WaitAll(t *testing.T) {
 
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
-		ID: "test/mock", Provider: mp, ModelName: "mock",
+		ID: "test/mock", Provider: secureMock(mp), ModelName: "mock",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
 
@@ -229,7 +234,7 @@ func TestBackgroundElf_WaitIdempotent(t *testing.T) {
 		name:    "test",
 		streams: []stream.Stream{newEventStream("hello")},
 	}
-	eng, _ := engine.New(engine.Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	elf := SpawnBackground(eng, "do something")
 
 	r1 := elf.Wait()
@@ -246,7 +251,7 @@ func TestBackgroundElf_WaitIdempotent(t *testing.T) {
 func TestBackgroundElf_PanicRecovery(t *testing.T) {
 	// A provider that panics on Stream() — simulates an engine crash
 	panicProvider := &panicOnStreamProvider{}
-	eng, _ := engine.New(engine.Config{Provider: panicProvider, Tools: tool.NewRegistry()})
+	eng, _ := engine.New(engine.Config{Provider: secureMock(panicProvider), Tools: tool.NewRegistry()})
 	elf := SpawnBackground(eng, "do something")
 
 	result := elf.Wait() // must not hang
@@ -266,7 +271,6 @@ func (p *panicOnStreamProvider) DefaultModel() string { return "panic" }
 func (p *panicOnStreamProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, nil
 }
-func (p *panicOnStreamProvider) IsSecure() bool { return true }
 func (p *panicOnStreamProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	panic("intentional test panic")
 }
@@ -279,7 +283,7 @@ func TestManager_CleanupRemovesMeta(t *testing.T) {
 
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
-		ID: "test/mock", Provider: mp, ModelName: "mock",
+		ID: "test/mock", Provider: secureMock(mp), ModelName: "mock",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
 
@@ -325,7 +329,7 @@ func TestManager_ReportResultSuppressedWhenIncognito(t *testing.T) {
 	rtr := router.New(router.Config{})
 	armID := router.ArmID("test/mock")
 	rtr.RegisterArm(&router.Arm{
-		ID: armID, Provider: mp, ModelName: "mock",
+		ID: armID, Provider: secureMock(mp), ModelName: "mock",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
 

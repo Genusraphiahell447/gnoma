@@ -28,7 +28,7 @@ func TestForcedArmSupportsTools_ArmWithTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:        "llamacpp/qwen3",
-		Provider:  &mockProvider{name: "llamacpp"},
+		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName: "qwen3",
 		IsLocal:   true,
 		Capabilities: provider.Capabilities{ToolUse: true},
@@ -45,7 +45,7 @@ func TestForcedArmSupportsTools_ArmWithoutTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:        "llamacpp/gemma",
-		Provider:  &mockProvider{name: "llamacpp"},
+		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName: "gemma",
 		IsLocal:   true,
 		Capabilities: provider.Capabilities{ToolUse: false},
@@ -62,7 +62,7 @@ func TestBuildRequest_ForcedArmNoToolSupport_OmitsTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:        "llamacpp/gemma",
-		Provider:  &mockProvider{name: "llamacpp"},
+		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName: "gemma",
 		IsLocal:   true,
 		Capabilities: provider.Capabilities{ToolUse: false},
@@ -74,7 +74,7 @@ func TestBuildRequest_ForcedArmNoToolSupport_OmitsTools(t *testing.T) {
 	reg.Register(&mockTool{name: "bash"})
 
 	e, err := New(Config{
-		Provider: &mockProvider{name: "llamacpp"},
+		Provider: secureMock(&mockProvider{name: "llamacpp"}),
 		Router:   rtr,
 		Tools:    reg,
 	})
@@ -92,7 +92,7 @@ func TestBuildRequest_ForcedArmWithToolSupport_IncludesTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:        "llamacpp/qwen3",
-		Provider:  &mockProvider{name: "llamacpp"},
+		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName: "qwen3",
 		IsLocal:   true,
 		// ContextWindow > 16384 keeps two-stage routing inactive so this
@@ -106,7 +106,7 @@ func TestBuildRequest_ForcedArmWithToolSupport_IncludesTools(t *testing.T) {
 	reg.Register(&mockTool{name: "bash"})
 
 	e, err := New(Config{
-		Provider: &mockProvider{name: "llamacpp"},
+		Provider: secureMock(&mockProvider{name: "llamacpp"}),
 		Router:   rtr,
 		Tools:    reg,
 	})
@@ -129,7 +129,7 @@ func TestBuildRequest_AllowedToolsFilter(t *testing.T) {
 	reg.Register(&mockTool{name: "agent"})
 
 	e, err := New(Config{
-		Provider: &mockProvider{name: "llamacpp"},
+		Provider: secureMock(&mockProvider{name: "llamacpp"}),
 		Tools:    reg,
 	})
 	if err != nil {
@@ -160,7 +160,7 @@ func TestBuildRequest_AllowedToolsFilter(t *testing.T) {
 func TestBuildRequest_Temperature(t *testing.T) {
 	temp := 0.7
 	e, err := New(Config{
-		Provider:    &mockProvider{name: "test"},
+		Provider:    secureMock(&mockProvider{name: "test"}),
 		Tools:       tool.NewRegistry(),
 		Temperature: &temp,
 	})
@@ -179,7 +179,7 @@ func TestBuildRequest_Temperature(t *testing.T) {
 
 func TestBuildRequest_TemperatureNilWhenNotSet(t *testing.T) {
 	e, err := New(Config{
-		Provider: &mockProvider{name: "test"},
+		Provider: secureMock(&mockProvider{name: "test"}),
 		Tools:    tool.NewRegistry(),
 	})
 	if err != nil {
@@ -196,7 +196,7 @@ func TestBuildRequest_MultiArmRouting_IncludesTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
 		ID:        "llamacpp/gemma",
-		Provider:  &mockProvider{name: "llamacpp"},
+		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
 		ModelName: "gemma",
 		IsLocal:   true,
 		Capabilities: provider.Capabilities{ToolUse: false},
@@ -207,7 +207,7 @@ func TestBuildRequest_MultiArmRouting_IncludesTools(t *testing.T) {
 	reg.Register(&mockTool{name: "fs.read"})
 
 	e, err := New(Config{
-		Provider: &mockProvider{name: "llamacpp"},
+		Provider: secureMock(&mockProvider{name: "llamacpp"}),
 		Router:   rtr,
 		Tools:    reg,
 	})

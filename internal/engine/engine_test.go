@@ -33,7 +33,6 @@ func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 		Capabilities: provider.Capabilities{ToolUse: true},
 	}}, nil
 }
-func (m *mockProvider) IsSecure() bool { return true }
 func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	if m.calls >= len(m.streams) {
 		return nil, fmt.Errorf("mock: no more streams (called %d times)", m.calls+1)
@@ -41,6 +40,14 @@ func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Str
 	s := m.streams[m.calls]
 	m.calls++
 	return s, nil
+}
+
+// secureMock wraps a test provider in *security.SafeProvider so it
+// satisfies router.SecureProvider's sealed Marker. Tests use this at every
+// Config.Provider site; the wrapper is firewall-less (pass-through), so
+// behavior is unchanged from before the seal landed.
+func secureMock(p provider.Provider) router.SecureProvider {
+	return security.WrapProvider(p, nil)
 }
 
 // eventStream is a mock stream backed by a slice of events.
@@ -100,7 +107,7 @@ func (m *mockTool) Execute(ctx context.Context, args json.RawMessage) (tool.Resu
 
 func TestNew_ValidConfig(t *testing.T) {
 	e, err := New(Config{
-		Provider: &mockProvider{name: "test"},
+		Provider: secureMock(&mockProvider{name: "test"}),
 		Tools:    tool.NewRegistry(),
 	})
 	if err != nil {
@@ -119,7 +126,7 @@ func TestNew_MissingProvider(t *testing.T) {
 }
 
 func TestNew_MissingTools(t *testing.T) {
-	_, err := New(Config{Provider: &mockProvider{name: "test"}})
+	_, err := New(Config{Provider: secureMock(&mockProvider{name: "test"})})
 	if err == nil {
 		t.Fatal("expected error for missing tool registry")
 	}
@@ -137,7 +144,7 @@ func TestSubmit_SimpleTextResponse(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 
 	var events []stream.Event
 	turn, err := e.Submit(context.Background(), "hi", func(evt stream.Event) {
@@ -204,7 +211,7 @@ func TestSubmit_ToolCallLoop(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	turn, err := e.Submit(context.Background(), "list files", nil)
 	if err != nil {
@@ -265,7 +272,7 @@ func TestSubmit_UnknownTool(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	turn, err := e.Submit(context.Background(), "do something", nil)
 	if err != nil {
@@ -300,7 +307,7 @@ func TestSubmit_ToolExecutionError(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	turn, err := e.Submit(context.Background(), "do it", nil)
 	if err != nil {
@@ -336,7 +343,7 @@ func TestSubmit_MaxTurnsLimit(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg, MaxTurns: 2})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg, MaxTurns: 2})
 
 	_, err := e.Submit(context.Background(), "loop forever", nil)
 	if err == nil {
@@ -379,7 +386,7 @@ func TestSubmit_MultipleToolCalls(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 
 	turn, err := e.Submit(context.Background(), "run both", nil)
 	if err != nil {
@@ -407,7 +414,7 @@ func TestSubmit_NilCallback(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 
 	// nil callback should not panic
 	turn, err := e.Submit(context.Background(), "test", nil)
@@ -430,7 +437,7 @@ func TestEngine_Reset(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	_, _ = e.Submit(context.Background(), "hello", nil)
 
 	if len(e.History()) == 0 {
@@ -461,7 +468,7 @@ func TestEngine_Reset_ClearsContextWindow(t *testing.T) {
 		},
 	}
 	e, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    tool.NewRegistry(),
 		Context:  ctxWindow,
 	})
@@ -503,7 +510,7 @@ func TestSubmit_ContextWindowTracksUserAndToolMessages(t *testing.T) {
 
 	ctxWindow := gnomactx.NewWindow(gnomactx.WindowConfig{MaxTokens: 200_000})
 	e, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    reg,
 		Context:  ctxWindow,
 	})
@@ -542,7 +549,7 @@ func TestSubmit_TrackerReflectsInputTokens(t *testing.T) {
 			),
 		},
 	}
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry(), Context: ctxWindow})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry(), Context: ctxWindow})
 
 	_, _ = e.Submit(context.Background(), "hi", nil)
 
@@ -568,7 +575,7 @@ func TestSubmit_CumulativeUsage(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 
 	_, _ = e.Submit(context.Background(), "one", nil)
 	_, _ = e.Submit(context.Background(), "two", nil)
@@ -608,7 +615,7 @@ func TestSubmit_UsesInjectedClassifier(t *testing.T) {
 	}
 	rtr.RegisterArm(&router.Arm{
 		ID:           armID,
-		Provider:     mp,
+		Provider:     secureMock(mp),
 		ModelName:    "mock-model",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
@@ -616,7 +623,7 @@ func TestSubmit_UsesInjectedClassifier(t *testing.T) {
 
 	spy := &spyClassifier{}
 	e, err := New(Config{
-		Provider:   mp,
+		Provider:   secureMock(mp),
 		Router:     rtr,
 		Tools:      tool.NewRegistry(),
 		Classifier: spy,
@@ -647,7 +654,7 @@ func TestSubmit_NilClassifierFallsBackToHeuristic(t *testing.T) {
 	}
 	rtr.RegisterArm(&router.Arm{
 		ID:           armID,
-		Provider:     mp,
+		Provider:     secureMock(mp),
 		ModelName:    "mock-model",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
@@ -655,7 +662,7 @@ func TestSubmit_NilClassifierFallsBackToHeuristic(t *testing.T) {
 
 	// No Classifier set — should not panic, should use heuristic
 	e, err := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Router:   rtr,
 		Tools:    tool.NewRegistry(),
 	})
@@ -685,14 +692,14 @@ func TestSubmit_ReportsOutcomeToRouter(t *testing.T) {
 	}
 	rtr.RegisterArm(&router.Arm{
 		ID:           armID,
-		Provider:     mp,
+		Provider:     secureMock(mp),
 		ModelName:    "mock-model",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
 	rtr.ForceArm(armID)
 
 	e, err := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Router:   rtr,
 		Tools:    tool.NewRegistry(),
 	})
@@ -731,7 +738,7 @@ func TestSubmit_SuppressesOutcomeWhenIncognito(t *testing.T) {
 	mp := &mockProvider{name: "test", streams: []stream.Stream{makeStream(), makeStream()}}
 	rtr.RegisterArm(&router.Arm{
 		ID:           armID,
-		Provider:     mp,
+		Provider:     secureMock(mp),
 		ModelName:    "mock-model",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
@@ -741,7 +748,7 @@ func TestSubmit_SuppressesOutcomeWhenIncognito(t *testing.T) {
 	fw.Incognito().Activate()
 
 	e, err := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Router:   rtr,
 		Tools:    tool.NewRegistry(),
 		Firewall: fw,

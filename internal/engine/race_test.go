@@ -53,7 +53,7 @@ func TestEngine_ConcurrentSubmitAndSetters(t *testing.T) {
 		name:    "test",
 		streams: []stream.Stream{newBlockingStream(release, "mock-model")},
 	}
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 
 	var wg sync.WaitGroup
 	wg.Add(2)

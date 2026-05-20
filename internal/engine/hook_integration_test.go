@@ -85,7 +85,7 @@ func TestHook_NilDispatcher_NoChange(t *testing.T) {
 			),
 		},
 	}
-	eng, err := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	eng, err := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestHook_PreToolUse_Deny(t *testing.T) {
 	}
 
 	eng, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    reg,
 		Hooks:    hookDispatcher(hook.PreToolUse, &blockingExecutor{}),
 	})
@@ -151,7 +151,7 @@ func TestHook_PreToolUse_Allow(t *testing.T) {
 	}
 
 	eng, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    reg,
 		Hooks:    hookDispatcher(hook.PreToolUse, &allowingExecutor{}),
 	})
@@ -181,7 +181,7 @@ func TestHook_PreToolUse_DenyMessage(t *testing.T) {
 	}
 
 	eng, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    reg,
 		Hooks:    hookDispatcher(hook.PreToolUse, &blockingExecutor{}),
 	})
@@ -221,7 +221,7 @@ func TestHook_PreToolUse_Transform(t *testing.T) {
 	}
 
 	eng, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    reg,
 		Hooks: hookDispatcher(hook.PreToolUse,
 			&argTransformExecutor{newArgs: json.RawMessage(`{"command":"safe-replacement"}`)}),
@@ -254,7 +254,7 @@ func TestHook_PostToolUse_Transform(t *testing.T) {
 	}
 
 	eng, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    reg,
 		Hooks: hookDispatcher(hook.PostToolUse,
 			&resultTransformExecutor{newOutput: "transformed output"}),
@@ -293,7 +293,7 @@ func TestHook_PostToolUse_DenyTreatedAsSkip(t *testing.T) {
 	}
 
 	eng, _ := New(Config{
-		Provider: mp,
+		Provider: secureMock(mp),
 		Tools:    reg,
 		Hooks:    hookDispatcher(hook.PostToolUse, &blockingExecutor{}),
 	})
@@ -334,7 +334,7 @@ func TestHook_Stop_MaxTurns(t *testing.T) {
 		),
 	})
 
-	eng, _ := New(Config{Provider: mp, Tools: reg, Hooks: d, MaxTurns: 1})
+	eng, _ := New(Config{Provider: secureMock(mp), Tools: reg, Hooks: d, MaxTurns: 1})
 	_, err := eng.Submit(context.Background(), "run", nil)
 	// MaxTurns exceeded returns an error
 	if err == nil {

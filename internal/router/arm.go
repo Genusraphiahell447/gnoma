@@ -6,17 +6,20 @@ import (
 	"time"
 
 	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/security"
 )
 
 // ArmID uniquely identifies a model+provider pair.
 type ArmID string
 
-// SecureProvider is the interface that all router arms must satisfy.
-// It ensures that the provider has been wrapped with security controls
-// (e.g. security.SafeProvider).
+// SecureProvider is the interface that all router arms must satisfy. It
+// embeds security.Marker — a sealed trait whose unexported marker method
+// can only be satisfied by types defined in internal/security. That makes
+// "the provider passed in has been wrapped" a compile-time guarantee, not
+// a convention enforced by reviewers.
 type SecureProvider interface {
 	provider.Provider
-	IsSecure() bool
+	security.Marker
 }
 
 // Arm represents a provider+model pair available for routing.

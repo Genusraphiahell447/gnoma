@@ -31,8 +31,6 @@ func (m *recordingProvider) Models(_ context.Context) ([]provider.ModelInfo, err
 		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 8192},
 	}}, nil
 }
-func (m *recordingProvider) IsSecure() bool { return true }
-
 func (m *recordingProvider) Stream(_ context.Context, req provider.Request) (stream.Stream, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -90,7 +88,7 @@ func TestTwoStage_FullRoundTrip(t *testing.T) {
 	}
 
 	e, err := New(Config{
-		Provider:           mp,
+		Provider:           secureMock(mp),
 		Tools:              reg,
 		ForceTwoStageTools: true, // no router needed; just force the path
 	})
@@ -161,7 +159,7 @@ func TestTwoStage_InvalidCategoryFallsBackToRoundOne(t *testing.T) {
 	}
 
 	e, err := New(Config{
-		Provider:           mp,
+		Provider:           secureMock(mp),
 		Tools:              reg,
 		ForceTwoStageTools: true,
 	})

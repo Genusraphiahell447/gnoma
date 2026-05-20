@@ -45,7 +45,7 @@ func TestEarlyStop_PatchSpiral_InjectsCorrection(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 	_, err := e.Submit(context.Background(), "fix the bug", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -95,7 +95,7 @@ func TestEarlyStop_PatchSpiral_PerPathIsolation(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 	_, err := e.Submit(context.Background(), "edit two files", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -138,7 +138,7 @@ func TestEarlyStop_GreetingRegression_InjectsCorrection(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: reg})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: reg})
 	_, err := e.Submit(context.Background(), "inspect /x.go", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -171,7 +171,7 @@ func TestEarlyStop_NoFalsePositive_GreetingOnFirstTurn(t *testing.T) {
 		},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	_, err := e.Submit(context.Background(), "hello", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -205,7 +205,7 @@ func TestEarlyStop_Repetition_BreaksAndCorrects(t *testing.T) {
 		streams: []stream.Stream{round1, round2},
 	}
 
-	e, _ := New(Config{Provider: mp, Tools: tool.NewRegistry()})
+	e, _ := New(Config{Provider: secureMock(mp), Tools: tool.NewRegistry()})
 	_, err := e.Submit(context.Background(), "do something", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)

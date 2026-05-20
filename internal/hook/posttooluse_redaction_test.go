@@ -44,8 +44,6 @@ func (p *recordingProvider) Stream(_ context.Context, req provider.Request) (str
 		},
 	}, nil
 }
-func (p *recordingProvider) IsSecure() bool { return true }
-
 type finalEventStream struct {
 	events []stream.Event
 	idx    int
