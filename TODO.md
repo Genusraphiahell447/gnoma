@@ -4,13 +4,16 @@ Active work, newest first.
 
 ## In flight
 
-- **Distribution** — `.goreleaser.yml` is configured for
-  `linux`/`darwin`/`windows` × `amd64`/`arm64`. Still pending: first
-  tag + release pipeline trigger, optional Homebrew tap and Docker
-  image, mirror release publishing to GitHub.
 - **Compound tools (post-SLM Phase E)** — held until ≥50 SLM
   observations inform which primitives are worth adding. See
   [`docs/superpowers/plans/2026-05-19-post-slm-unlock.md`](docs/superpowers/plans/2026-05-19-post-slm-unlock.md).
+- **Distribution — follow-ups.** v0.1.0 shipped (archives on
+  github.com/VikingOwl91/gnoma/releases, multi-arch images on
+  ghcr.io/vikingowl91/gnoma). Still optional: Homebrew tap,
+  `curl | sh` installer script, signed checksums (cosign/sigstore),
+  release note automation, Windows process-tree kill via
+  golang.org/x/sys/windows job objects (currently `os.Process.Kill`
+  only — see `internal/mcp/transport_windows.go`).
 
 ## Stable backlog (not in active phases)
 
@@ -29,6 +32,12 @@ Active work, newest first.
 ## History
 
 Completed initiatives, kept here as pointers to their plan files:
+
+- **v0.1.0 release** — 2026-05-20. First tagged release. GoReleaser
+  pipeline produces six static archives (linux/darwin/windows ×
+  amd64/arm64) on the GitHub mirror plus multi-arch Docker images on
+  GHCR. History was rewritten on the same day to migrate authorship to
+  a noreply identity and strip co-author attribution.
 
 - **Post-audit security hardening** — complete 2026-05-19. Three waves
   + one ADR closed all 14 findings from the external review:
