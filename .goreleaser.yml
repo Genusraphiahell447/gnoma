@@ -89,6 +89,6 @@ docker_manifests:
       - "ghcr.io/vikingowl91/gnoma:latest-arm64"
 
 release:
-  gitea:
-    owner: Owlibou
+  github:
+    owner: VikingOwl91
     name: gnoma

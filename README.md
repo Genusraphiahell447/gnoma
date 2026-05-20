@@ -21,13 +21,10 @@ Releases are built by [GoReleaser](.goreleaser.yml) for
 `linux`, `darwin`, and `windows` × `amd64`/`arm64` as static (`CGO_ENABLED=0`)
 archives. Until the first tag is cut, see "Build from source" below.
 
-Once releases are published:
+Once releases are published, grab the archive matching your OS/arch from
+<https://github.com/VikingOwl91/gnoma/releases>:
 
 ```sh
-# Pick the archive matching your OS/arch from the releases page:
-#   https://somegit.dev/Owlibou/gnoma/releases   (upstream)
-#   https://github.com/VikingOwl91/gnoma/releases (mirror)
-
 # Linux/macOS one-liner (substitute the asset URL):
 curl -fsSL <ARCHIVE_URL> | tar -xz -C /tmp
 sudo mv /tmp/gnoma /usr/local/bin/
@@ -44,14 +41,12 @@ Container Registry on each tagged release:
 
 ```sh
 docker pull ghcr.io/vikingowl91/gnoma:latest
-docker run --rm -it \
-  -v "$PWD:/workspace" \
-  -e ANTHROPIC_API_KEY \
-  ghcr.io/vikingowl91/gnoma:latest --version
+docker run --rm -it -v "$PWD:/workspace" ghcr.io/vikingowl91/gnoma:latest --version
 ```
 
 Mount your project as `/workspace` (the image's working directory) and pass
-provider keys via `-e`.
+any provider keys via `-e VAR_NAME` — see the [Providers](#providers) table
+for env-var names.
 
 ### Go users
 
@@ -74,13 +69,14 @@ Requires Go 1.26+.
 
 ## Quickstart
 
-```sh
-# Set at least one provider key (or run a local model — see Providers below).
-export ANTHROPIC_API_KEY=sk-ant-...
+Set at least one provider key (env var names are listed in the
+[Providers](#providers) table below) — or run a local model and skip
+the keys entirely.
 
+```sh
 gnoma                              # interactive TUI
 echo "list files" | gnoma          # pipe / one-shot mode
-gnoma --provider ollama            # use a local model
+gnoma --provider ollama            # use a local model (no API key needed)
 gnoma --version
 ```
 
