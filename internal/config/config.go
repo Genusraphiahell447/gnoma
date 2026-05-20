@@ -112,12 +112,12 @@ type RouterSection struct {
 //	timeout = "30s"
 //	replace_default = { exec = "bash" }  # MCP tool "exec" replaces built-in "bash"
 type MCPServerConfig struct {
-	Name           string            `toml:"name"`
-	Command        string            `toml:"command"`
-	Args           []string          `toml:"args"`
-	Env            map[string]string `toml:"env"`
-	Timeout        string            `toml:"timeout"`
-	ReplaceDefault map[string]string      `toml:"replace_default"` // MCP tool name → built-in name
+	Name           string                   `toml:"name"`
+	Command        string                   `toml:"command"`
+	Args           []string                 `toml:"args"`
+	Env            map[string]string        `toml:"env"`
+	Timeout        string                   `toml:"timeout"`
+	ReplaceDefault map[string]string        `toml:"replace_default"` // MCP tool name → built-in name
 	ToolPolicy     map[string]MCPToolPolicy `toml:"tool_policy"`     // MCP tool name → policy
 }
 

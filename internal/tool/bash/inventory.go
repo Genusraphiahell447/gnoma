@@ -31,10 +31,10 @@ type SystemInventory struct {
 }
 
 type HardwareInfo struct {
-	CPU     string
-	Cores   int
+	CPU      string
+	Cores    int
 	MemTotal string
-	GPU     string
+	GPU      string
 }
 
 type Runtime struct {

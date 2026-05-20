@@ -54,7 +54,7 @@ func (t TaskType) String() string {
 type Priority int
 
 const (
-	PriorityLow      Priority = iota
+	PriorityLow Priority = iota
 	PriorityNormal
 	PriorityHigh
 	PriorityCritical

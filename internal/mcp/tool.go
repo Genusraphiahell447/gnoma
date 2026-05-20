@@ -21,7 +21,7 @@ type Adapter struct {
 
 // Compile-time interface checks.
 var (
-	_ tool.Tool           = (*Adapter)(nil)
+	_ tool.Tool              = (*Adapter)(nil)
 	_ tool.DeferrableTool    = (*Adapter)(nil)
 	_ tool.PathSensitiveTool = (*Adapter)(nil)
 )

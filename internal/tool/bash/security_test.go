@@ -36,11 +36,11 @@ func TestCheckIncomplete(t *testing.T) {
 		cmd  string
 		want SecurityCheck
 	}{
-		{"\techo hello", CheckIncomplete},     // tab start
-		{"-flag value", CheckIncomplete},       // flag start
-		{"echo hello |", CheckIncomplete},      // trailing pipe
-		{"echo hello &", CheckIncomplete},      // trailing ampersand
-		{"echo hello ;", CheckIncomplete},      // trailing semicolon
+		{"\techo hello", CheckIncomplete}, // tab start
+		{"-flag value", CheckIncomplete},  // flag start
+		{"echo hello |", CheckIncomplete}, // trailing pipe
+		{"echo hello &", CheckIncomplete}, // trailing ampersand
+		{"echo hello ;", CheckIncomplete}, // trailing semicolon
 	}
 	for _, tt := range tests {
 		v := ValidateCommand(tt.cmd)

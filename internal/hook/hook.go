@@ -39,7 +39,7 @@ func (d HookDef) timeout() time.Duration {
 // HookResult is returned by an Executor after running a hook.
 type HookResult struct {
 	Action   Action
-	Output   []byte        // transformed payload (nil = no transform)
+	Output   []byte // transformed payload (nil = no transform)
 	Error    error
 	Duration time.Duration
 }

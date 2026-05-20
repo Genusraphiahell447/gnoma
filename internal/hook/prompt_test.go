@@ -33,10 +33,10 @@ type sliceStream struct {
 	idx    int
 }
 
-func (s *sliceStream) Next() bool    { s.idx++; return s.idx <= len(s.events) }
+func (s *sliceStream) Next() bool            { s.idx++; return s.idx <= len(s.events) }
 func (s *sliceStream) Current() stream.Event { return s.events[s.idx-1] }
-func (s *sliceStream) Err() error    { return nil }
-func (s *sliceStream) Close() error  { return nil }
+func (s *sliceStream) Err() error            { return nil }
+func (s *sliceStream) Close() error          { return nil }
 
 // --- Template rendering tests ---
 

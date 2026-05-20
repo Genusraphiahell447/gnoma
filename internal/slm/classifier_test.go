@@ -45,10 +45,10 @@ type mockStream struct {
 	idx    int
 }
 
-func (s *mockStream) Next() bool             { s.idx++; return s.idx <= len(s.events) }
-func (s *mockStream) Current() stream.Event  { return s.events[s.idx-1] }
-func (s *mockStream) Err() error             { return nil }
-func (s *mockStream) Close() error           { return nil }
+func (s *mockStream) Next() bool            { s.idx++; return s.idx <= len(s.events) }
+func (s *mockStream) Current() stream.Event { return s.events[s.idx-1] }
+func (s *mockStream) Err() error            { return nil }
+func (s *mockStream) Close() error          { return nil }
 
 func TestClassifier_HappyPath(t *testing.T) {
 	// SLM complexity 0.55 stays above the Debug floor (0.4), so the SLM

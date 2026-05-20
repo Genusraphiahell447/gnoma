@@ -16,7 +16,7 @@ import (
 type Status int
 
 const (
-	StatusPending   Status = iota
+	StatusPending Status = iota
 	StatusRunning
 	StatusCompleted
 	StatusFailed
@@ -164,10 +164,10 @@ func (e *BackgroundElf) run(ctx context.Context, prompt string) {
 	e.result <- r
 }
 
-func (e *BackgroundElf) ID() string          { return e.id }
-func (e *BackgroundElf) Status() Status      { return Status(e.status.Load()) }
+func (e *BackgroundElf) ID() string                  { return e.id }
+func (e *BackgroundElf) Status() Status              { return Status(e.status.Load()) }
 func (e *BackgroundElf) Events() <-chan stream.Event { return e.events }
-func (e *BackgroundElf) Cancel()             { e.cancel() }
+func (e *BackgroundElf) Cancel()                     { e.cancel() }
 
 func (e *BackgroundElf) Wait() Result {
 	e.resultOnce.Do(func() {

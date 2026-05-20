@@ -21,16 +21,16 @@ func TestMatchCompletion(t *testing.T) {
 	}{
 		{"/h", "/help"},
 		{"/he", "/help"},
-		{"/help", ""},          // already complete
-		{"/cl", "/clear"},      // unambiguous prefix
-		{"/co", ""},            // ambiguous: /compact, /config
+		{"/help", ""},     // already complete
+		{"/cl", "/clear"}, // unambiguous prefix
+		{"/co", ""},       // ambiguous: /compact, /config
 		{"/com", "/compact"},
 		{"/con", "/config"},
 		{"/q", "/quit"},
-		{"/model ", ""},        // has args — no command completion
-		{"hello", ""},          // not a slash command
-		{"/", ""},              // too short
-		{"/x", ""},             // no match
+		{"/model ", ""}, // has args — no command completion
+		{"hello", ""},   // not a slash command
+		{"/", ""},       // too short
+		{"/x", ""},      // no match
 	}
 
 	for _, tt := range tests {
@@ -50,12 +50,12 @@ func TestFuzzyMatch(t *testing.T) {
 		{"hlp", "help", true},
 		{"clr", "clear", true},
 		{"mdl", "model", true},
-		{"help", "help", true},    // exact match
-		{"HELP", "help", true},    // case insensitive
-		{"xyz", "help", false},    // no match
-		{"", "help", true},        // empty pattern matches everything
-		{"hx", "help", false},     // x not present
-		{"elp", "help", true},     // subsequence not at start
+		{"help", "help", true}, // exact match
+		{"HELP", "help", true}, // case insensitive
+		{"xyz", "help", false}, // no match
+		{"", "help", true},     // empty pattern matches everything
+		{"hx", "help", false},  // x not present
+		{"elp", "help", true},  // subsequence not at start
 	}
 
 	for _, tt := range tests {
@@ -76,15 +76,15 @@ func TestFuzzyMatchCommands(t *testing.T) {
 	}
 
 	tests := []struct {
-		query    string
-		wantLen  int
+		query     string
+		wantLen   int
 		wantFirst string
 	}{
-		{"", 5, "/clear"},     // empty = all commands
-		{"h", 1, "/help"},     // only /help contains h as subsequence
-		{"hel", 1, "/help"},   // only /help
-		{"mdl", 1, "/model"},  // subsequence match
-		{"xyz", 0, ""},        // no match
+		{"", 5, "/clear"},    // empty = all commands
+		{"h", 1, "/help"},    // only /help contains h as subsequence
+		{"hel", 1, "/help"},  // only /help
+		{"mdl", 1, "/model"}, // subsequence match
+		{"xyz", 0, ""},       // no match
 	}
 
 	for _, tt := range tests {
@@ -105,11 +105,11 @@ func TestMatchArgCompletion(t *testing.T) {
 	}{
 		{"/permission a", "/permission auto"},
 		{"/permission au", "/permission auto"},
-		{"/permission auto", ""},              // already complete
+		{"/permission auto", ""},                 // already complete
 		{"/permission d", "/permission default"}, // first match
 		{"/perm b", "/perm bypass"},
 		{"/perm p", "/perm plan"},
-		{"/model foo", ""},                    // no arg completion for /model yet
+		{"/model foo", ""}, // no arg completion for /model yet
 	}
 
 	for _, tt := range tests {
@@ -128,10 +128,10 @@ func TestMatchArgCompletion_Profile(t *testing.T) {
 	}{
 		{"/profile w", "/profile work"},
 		{"/profile p", "/profile private"},
-		{"/profile work", ""},          // already complete
+		{"/profile work", ""}, // already complete
 		{"/profile e", "/profile experiment"},
-		{"/profile z", ""},             // no match
-		{"/profile ", ""},              // empty arg — wait for input
+		{"/profile z", ""}, // no match
+		{"/profile ", ""},  // empty arg — wait for input
 	}
 	for _, tt := range tests {
 		got := matchArgCompletion(tt.input, profiles)

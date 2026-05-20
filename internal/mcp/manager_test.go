@@ -200,10 +200,11 @@ type mockTool struct {
 	name string
 }
 
-func (m *mockTool) Name() string                                                     { return m.name }
-func (m *mockTool) Description() string                                              { return "mock" }
-func (m *mockTool) Parameters() json.RawMessage                                      { return json.RawMessage(`{}`) }
-func (m *mockTool) Execute(_ context.Context, _ json.RawMessage) (tool.Result, error) { return tool.Result{}, nil }
-func (m *mockTool) IsReadOnly() bool                                                 { return false }
-func (m *mockTool) IsDestructive() bool                                              { return false }
-
+func (m *mockTool) Name() string                { return m.name }
+func (m *mockTool) Description() string         { return "mock" }
+func (m *mockTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (m *mockTool) Execute(_ context.Context, _ json.RawMessage) (tool.Result, error) {
+	return tool.Result{}, nil
+}
+func (m *mockTool) IsReadOnly() bool    { return false }
+func (m *mockTool) IsDestructive() bool { return false }

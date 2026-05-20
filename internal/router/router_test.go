@@ -162,8 +162,8 @@ func TestLimitPool_ScarcityMultiplier_Exhausted(t *testing.T) {
 func TestLimitPool_ScarcityMultiplier_UseItOrLoseIt(t *testing.T) {
 	p := &LimitPool{
 		TotalLimit: 100, Used: 30, // 70% remaining
-		ScarcityK:  2,
-		ResetAt:    time.Now().Add(30 * time.Minute), // reset in 30 min
+		ScarcityK: 2,
+		ResetAt:   time.Now().Add(30 * time.Minute), // reset in 30 min
 	}
 	m := p.ScarcityMultiplier()
 	if m != 0.5 {
@@ -737,8 +737,8 @@ func TestRouter_DisabledArm_ForcedBypasses(t *testing.T) {
 func TestRouter_AllDisabled_ReturnsError(t *testing.T) {
 	r := New(Config{})
 	r.RegisterArm(&Arm{
-		ID:       "a/disabled",
-		Disabled: true,
+		ID:           "a/disabled",
+		Disabled:     true,
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
 
@@ -750,10 +750,10 @@ func TestRouter_AllDisabled_ReturnsError(t *testing.T) {
 
 func TestFilterFeasible_MaxComplexity(t *testing.T) {
 	slmArm := &Arm{
-		ID:           "slm/tiny",
-		IsLocal:      true,
+		ID:            "slm/tiny",
+		IsLocal:       true,
 		MaxComplexity: 0.3,
-		Capabilities: provider.Capabilities{ToolUse: false},
+		Capabilities:  provider.Capabilities{ToolUse: false},
 	}
 	apiArm := &Arm{
 		ID:           "api/big",
@@ -786,9 +786,9 @@ func TestFilterFeasible_MaxComplexity(t *testing.T) {
 func TestFilterFeasible_MaxComplexity_Zero_MeansNoLimit(t *testing.T) {
 	// MaxComplexity == 0 means "no ceiling" — existing arms are unaffected.
 	arm := &Arm{
-		ID:           "api/arm",
+		ID:            "api/arm",
 		MaxComplexity: 0, // zero = no ceiling
-		Capabilities: provider.Capabilities{ToolUse: true, ContextWindow: 200000},
+		Capabilities:  provider.Capabilities{ToolUse: true, ContextWindow: 200000},
 	}
 	task := Task{Type: TaskOrchestration, ComplexityScore: 0.99}
 	got := filterFeasible([]*Arm{arm}, task)
@@ -796,4 +796,3 @@ func TestFilterFeasible_MaxComplexity_Zero_MeansNoLimit(t *testing.T) {
 		t.Error("arm with MaxComplexity=0 should never be excluded by complexity ceiling")
 	}
 }
-

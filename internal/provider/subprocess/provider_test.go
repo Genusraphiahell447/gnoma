@@ -10,9 +10,9 @@ import (
 func TestProvider_NameAndDefaultModel(t *testing.T) {
 	agent := DiscoveredAgent{
 		CLIAgent: CLIAgent{
-			Name:        "testcli",
-			DisplayName: "Test CLI",
-			Format:      FormatVibeStreaming,
+			Name:         "testcli",
+			DisplayName:  "Test CLI",
+			Format:       FormatVibeStreaming,
 			Capabilities: provider.Capabilities{ContextWindow: 32000},
 		},
 		Path:    "/usr/bin/testcli",

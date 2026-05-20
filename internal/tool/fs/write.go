@@ -49,8 +49,10 @@ func NewWriteTool(opts ...WriteOption) *WriteTool {
 	return t
 }
 
-func (t *WriteTool) Name() string               { return writeToolName }
-func (t *WriteTool) Description() string         { return "Write content to a file, creating parent directories as needed" }
+func (t *WriteTool) Name() string { return writeToolName }
+func (t *WriteTool) Description() string {
+	return "Write content to a file, creating parent directories as needed"
+}
 func (t *WriteTool) Parameters() json.RawMessage { return writeParams }
 func (t *WriteTool) IsReadOnly() bool            { return false }
 func (t *WriteTool) IsDestructive() bool         { return false }

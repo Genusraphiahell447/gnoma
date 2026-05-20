@@ -24,8 +24,8 @@ type mockProvider struct {
 	streams []stream.Stream
 }
 
-func (m *mockProvider) Name() string         { return m.name }
-func (m *mockProvider) DefaultModel() string  { return "mock" }
+func (m *mockProvider) Name() string                                           { return m.name }
+func (m *mockProvider) DefaultModel() string                                   { return "mock" }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) { return nil, nil }
 func (m *mockProvider) Stream(_ context.Context, _ provider.Request) (stream.Stream, error) {
 	idx := m.calls.Add(1) - 1
@@ -55,10 +55,10 @@ func newEventStream(text string) *eventStream {
 	}
 }
 
-func (s *eventStream) Next() bool         { s.idx++; return s.idx <= len(s.events) }
+func (s *eventStream) Next() bool            { s.idx++; return s.idx <= len(s.events) }
 func (s *eventStream) Current() stream.Event { return s.events[s.idx-1] }
-func (s *eventStream) Err() error          { return nil }
-func (s *eventStream) Close() error        { return nil }
+func (s *eventStream) Err() error            { return nil }
+func (s *eventStream) Close() error          { return nil }
 
 // --- Tests ---
 
@@ -141,9 +141,9 @@ func TestManager_SpawnAndList(t *testing.T) {
 
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
-		ID:        "test/mock",
-		Provider:  secureMock(mp),
-		ModelName: "mock",
+		ID:           "test/mock",
+		Provider:     secureMock(mp),
+		ModelName:    "mock",
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
 
@@ -266,7 +266,7 @@ func TestBackgroundElf_PanicRecovery(t *testing.T) {
 
 type panicOnStreamProvider struct{}
 
-func (p *panicOnStreamProvider) Name() string        { return "panic" }
+func (p *panicOnStreamProvider) Name() string         { return "panic" }
 func (p *panicOnStreamProvider) DefaultModel() string { return "panic" }
 func (p *panicOnStreamProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, nil

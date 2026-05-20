@@ -15,14 +15,14 @@ import (
 
 // LocalConfig holds all configuration for a Local session.
 type LocalConfig struct {
-	Engine     *engine.Engine
-	Provider   string
-	Model      string
-	SessionID  string                  // identifies this session on disk
-	TurnCount  int                     // seed from restored snapshot; 0 for new sessions
-	Store      *SessionStore           // nil = no persistence
-	Incognito  *security.IncognitoMode // nil = always persist
-	Logger     *slog.Logger            // nil = slog.Default()
+	Engine    *engine.Engine
+	Provider  string
+	Model     string
+	SessionID string                  // identifies this session on disk
+	TurnCount int                     // seed from restored snapshot; 0 for new sessions
+	Store     *SessionStore           // nil = no persistence
+	Incognito *security.IncognitoMode // nil = always persist
+	Logger    *slog.Logger            // nil = slog.Default()
 }
 
 // Local implements Session using goroutines and channels within the same process.

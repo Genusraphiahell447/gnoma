@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"somegit.dev/Owlibou/gnoma/internal/provider"
-	"somegit.dev/Owlibou/gnoma/internal/stream"
 	mistralgo "github.com/VikingOwl91/mistral-go-sdk"
 	"github.com/VikingOwl91/mistral-go-sdk/model"
+	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
 const defaultModel = "mistral-large-latest"
@@ -82,9 +82,9 @@ func (p *Provider) Models(ctx context.Context) ([]provider.ModelInfo, error) {
 	var models []provider.ModelInfo
 	for _, m := range resp.Data {
 		models = append(models, provider.ModelInfo{
-			ID:       m.ID,
-			Name:     m.ID,
-			Provider: p.name,
+			ID:           m.ID,
+			Name:         m.ID,
+			Provider:     p.name,
 			Capabilities: inferCapabilities(m),
 		})
 	}

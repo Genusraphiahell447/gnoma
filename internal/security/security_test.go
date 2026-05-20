@@ -188,9 +188,9 @@ func TestScanner_DetectsMistralKey(t *testing.T) {
 
 	// Should NOT false-positive on bare 32-char strings.
 	negatives := []string{
-		`commit abcdefabcdefabcdefabcdefabcdefab`,               // git hash
-		`uuid: 550e8400e29b41d4a716446655440000`,                // UUID without dashes
-		`checksum = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"`,        // generic checksum
+		`commit abcdefabcdefabcdefabcdefabcdefab`,       // git hash
+		`uuid: 550e8400e29b41d4a716446655440000`,        // UUID without dashes
+		`checksum = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"`, // generic checksum
 	}
 	for _, text := range negatives {
 		matches := s.Scan(text)
@@ -238,14 +238,14 @@ func TestScanner_Entropy(t *testing.T) {
 
 func TestShannonEntropy(t *testing.T) {
 	tests := []struct {
-		input    string
-		minBits  float64
-		maxBits  float64
+		input   string
+		minBits float64
+		maxBits float64
 	}{
-		{"aaaa", 0, 0.1},              // very low entropy
-		{"abcd", 1.9, 2.1},            // 4 unique chars = ~2 bits
-		{"abcdefgh", 2.9, 3.1},        // 8 unique = ~3 bits
-		{"aB3dE5fG7hI9jK", 3.5, 4.5},  // mixed case + digits
+		{"aaaa", 0, 0.1},             // very low entropy
+		{"abcd", 1.9, 2.1},           // 4 unique chars = ~2 bits
+		{"abcdefgh", 2.9, 3.1},       // 8 unique = ~3 bits
+		{"aB3dE5fG7hI9jK", 3.5, 4.5}, // mixed case + digits
 	}
 	for _, tt := range tests {
 		e := shannonEntropy(tt.input)

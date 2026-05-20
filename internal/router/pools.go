@@ -82,7 +82,7 @@ func PoolsFromRateLimits(armID ArmID, rl provider.RateLimits) []*LimitPool {
 			ResetPeriod: time.Minute,
 			ResetAt:     now.Add(time.Minute),
 			ArmRates:    map[ArmID]float64{armID: 0.4}, // ~40% of tokens are output
-			ScarcityK:   3.0, // output is more precious
+			ScarcityK:   3.0,                           // output is more precious
 		})
 	}
 

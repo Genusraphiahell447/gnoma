@@ -43,7 +43,7 @@ func NewEditTool() *EditTool { return &EditTool{} }
 
 func (t *EditTool) SetGuard(g *Guard) { t.guard = g }
 
-func (t *EditTool) Name() string               { return editToolName }
+func (t *EditTool) Name() string                { return editToolName }
 func (t *EditTool) Description() string         { return "Perform exact string replacement in a file" }
 func (t *EditTool) Parameters() json.RawMessage { return editParams }
 func (t *EditTool) IsReadOnly() bool            { return false }

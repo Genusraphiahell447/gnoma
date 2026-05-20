@@ -61,11 +61,13 @@ func (t *BatchTool) SetProgressCh(ch chan<- elf.Progress) {
 	t.progressCh = ch
 }
 
-func (t *BatchTool) Name() string               { return "spawn_elfs" }
-func (t *BatchTool) Description() string         { return "Spawn multiple elfs (sub-agents) in parallel. Use this when you need to run 2+ independent tasks concurrently. Each elf gets its own conversation and tools. All elfs run simultaneously and results are collected when all complete." }
+func (t *BatchTool) Name() string { return "spawn_elfs" }
+func (t *BatchTool) Description() string {
+	return "Spawn multiple elfs (sub-agents) in parallel. Use this when you need to run 2+ independent tasks concurrently. Each elf gets its own conversation and tools. All elfs run simultaneously and results are collected when all complete."
+}
 func (t *BatchTool) Parameters() json.RawMessage { return batchSchema }
-func (t *BatchTool) IsReadOnly() bool  { return true }
-func (t *BatchTool) IsDestructive() bool { return false }
+func (t *BatchTool) IsReadOnly() bool            { return true }
+func (t *BatchTool) IsDestructive() bool         { return false }
 
 type batchArgs struct {
 	Tasks    []batchTask `json:"tasks"`

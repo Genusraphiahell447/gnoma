@@ -38,8 +38,10 @@ func NewGlobTool() *GlobTool { return &GlobTool{} }
 
 func (t *GlobTool) SetGuard(g *Guard) { t.guard = g }
 
-func (t *GlobTool) Name() string               { return globToolName }
-func (t *GlobTool) Description() string         { return "Find files matching a glob pattern, sorted by modification time" }
+func (t *GlobTool) Name() string { return globToolName }
+func (t *GlobTool) Description() string {
+	return "Find files matching a glob pattern, sorted by modification time"
+}
 func (t *GlobTool) Parameters() json.RawMessage { return globParams }
 func (t *GlobTool) IsReadOnly() bool            { return true }
 func (t *GlobTool) IsDestructive() bool         { return false }

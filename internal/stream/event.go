@@ -11,7 +11,7 @@ import (
 type EventType int
 
 const (
-	EventTextDelta     EventType = iota + 1
+	EventTextDelta EventType = iota + 1
 	EventThinkingDelta
 	EventToolCallStart
 	EventToolCallDelta

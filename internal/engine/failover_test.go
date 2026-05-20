@@ -102,10 +102,10 @@ type erroringStream struct {
 	done bool
 }
 
-func (s *erroringStream) Next() bool         { return false }
+func (s *erroringStream) Next() bool            { return false }
 func (s *erroringStream) Current() stream.Event { return stream.Event{} }
-func (s *erroringStream) Err() error          { return s.err }
-func (s *erroringStream) Close() error        { s.done = true; return nil }
+func (s *erroringStream) Err() error            { return s.err }
+func (s *erroringStream) Close() error          { s.done = true; return nil }
 
 // makeFailoverArm builds a router.Arm wrapping a mock provider whose Stream
 // either returns an erroringStream (when failErr is non-nil) or a successful

@@ -17,8 +17,8 @@ type PromptFunc func(ctx context.Context, toolName string, args json.RawMessage)
 
 // ToolInfo provides tool metadata for permission decisions.
 type ToolInfo struct {
-	Name        string
-	IsReadOnly  bool
+	Name          string
+	IsReadOnly    bool
 	IsDestructive bool
 }
 
@@ -243,4 +243,3 @@ func (c *Checker) checkCompoundCommand(ctx context.Context, info ToolInfo, args 
 	}
 	return nil
 }
-

@@ -148,7 +148,7 @@ func probeOllamaModel(ctx context.Context, baseURL, model string) (bool, int) {
 		lines := strings.Split(data.Parameters, "\n")
 		for _, l := range lines {
 			if strings.HasPrefix(l, "num_ctx") {
-				fmt.Sscanf(l, "num_ctx %d", &contextSize)
+				_, _ = fmt.Sscanf(l, "num_ctx %d", &contextSize)
 				break
 			}
 		}

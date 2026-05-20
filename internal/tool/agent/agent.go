@@ -50,11 +50,13 @@ func (t *Tool) SetProgressCh(ch chan<- elf.Progress) {
 	t.ProgressCh = ch
 }
 
-func (t *Tool) Name() string               { return "agent" }
-func (t *Tool) Description() string         { return "Spawn a sub-agent (elf) to handle a task independently. The elf gets its own conversation and tools. IMPORTANT: To spawn multiple elfs in parallel, call this tool multiple times in the SAME response — do not wait for one to finish before spawning the next." }
+func (t *Tool) Name() string { return "agent" }
+func (t *Tool) Description() string {
+	return "Spawn a sub-agent (elf) to handle a task independently. The elf gets its own conversation and tools. IMPORTANT: To spawn multiple elfs in parallel, call this tool multiple times in the SAME response — do not wait for one to finish before spawning the next."
+}
 func (t *Tool) Parameters() json.RawMessage { return paramSchema }
-func (t *Tool) IsReadOnly() bool  { return true }
-func (t *Tool) IsDestructive() bool { return false }
+func (t *Tool) IsReadOnly() bool            { return true }
+func (t *Tool) IsDestructive() bool         { return false }
 
 type agentArgs struct {
 	Prompt   string `json:"prompt"`

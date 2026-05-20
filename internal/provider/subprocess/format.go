@@ -40,8 +40,8 @@ type claudeEvent struct {
 	Message *claudeMessage `json:"message,omitempty"`
 	IsError bool           `json:"is_error,omitempty"`
 	// result fields
-	StopReason string        `json:"stop_reason,omitempty"`
-	Usage      *claudeUsage  `json:"usage,omitempty"`
+	StopReason string       `json:"stop_reason,omitempty"`
+	Usage      *claudeUsage `json:"usage,omitempty"`
 }
 
 type claudeMessage struct {
@@ -128,12 +128,12 @@ type geminiParser struct{}
 func newGeminiParser() FormatParser { return &geminiParser{} }
 
 type geminiEvent struct {
-	Type   string       `json:"type"`
-	Role   string       `json:"role,omitempty"`
-	Content string      `json:"content,omitempty"`
-	Delta  bool         `json:"delta,omitempty"`
-	Status string       `json:"status,omitempty"`
-	Stats  *geminiStats `json:"stats,omitempty"`
+	Type    string       `json:"type"`
+	Role    string       `json:"role,omitempty"`
+	Content string       `json:"content,omitempty"`
+	Delta   bool         `json:"delta,omitempty"`
+	Status  string       `json:"status,omitempty"`
+	Stats   *geminiStats `json:"stats,omitempty"`
 }
 
 type geminiStats struct {

@@ -27,10 +27,10 @@ func TestForcedArmSupportsTools_NoForcedArm(t *testing.T) {
 func TestForcedArmSupportsTools_ArmWithTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
-		ID:        "llamacpp/qwen3",
-		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
-		ModelName: "qwen3",
-		IsLocal:   true,
+		ID:           "llamacpp/qwen3",
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
+		ModelName:    "qwen3",
+		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: true},
 	})
 	rtr.ForceArm("llamacpp/qwen3")
@@ -44,10 +44,10 @@ func TestForcedArmSupportsTools_ArmWithTools(t *testing.T) {
 func TestForcedArmSupportsTools_ArmWithoutTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
-		ID:        "llamacpp/gemma",
-		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
-		ModelName: "gemma",
-		IsLocal:   true,
+		ID:           "llamacpp/gemma",
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
+		ModelName:    "gemma",
+		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: false},
 	})
 	rtr.ForceArm("llamacpp/gemma")
@@ -61,10 +61,10 @@ func TestForcedArmSupportsTools_ArmWithoutTools(t *testing.T) {
 func TestBuildRequest_ForcedArmNoToolSupport_OmitsTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
-		ID:        "llamacpp/gemma",
-		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
-		ModelName: "gemma",
-		IsLocal:   true,
+		ID:           "llamacpp/gemma",
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
+		ModelName:    "gemma",
+		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: false},
 	})
 	rtr.ForceArm("llamacpp/gemma")
@@ -195,10 +195,10 @@ func TestBuildRequest_TemperatureNilWhenNotSet(t *testing.T) {
 func TestBuildRequest_MultiArmRouting_IncludesTools(t *testing.T) {
 	rtr := router.New(router.Config{})
 	rtr.RegisterArm(&router.Arm{
-		ID:        "llamacpp/gemma",
-		Provider:  secureMock(&mockProvider{name: "llamacpp"}),
-		ModelName: "gemma",
-		IsLocal:   true,
+		ID:           "llamacpp/gemma",
+		Provider:     secureMock(&mockProvider{name: "llamacpp"}),
+		ModelName:    "gemma",
+		IsLocal:      true,
 		Capabilities: provider.Capabilities{ToolUse: false},
 	})
 	// No forced arm — multi-arm routing

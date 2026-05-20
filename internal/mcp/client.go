@@ -41,8 +41,8 @@ func NewClient(transport *Transport, logger *slog.Logger) *Client {
 // receives server info, and sends initialized notification.
 func (c *Client) Initialize(ctx context.Context) error {
 	params := struct {
-		ProtocolVersion string `json:"protocolVersion"`
-		Capabilities    struct{}       `json:"capabilities"`
+		ProtocolVersion string   `json:"protocolVersion"`
+		Capabilities    struct{} `json:"capabilities"`
 		ClientInfo      struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`

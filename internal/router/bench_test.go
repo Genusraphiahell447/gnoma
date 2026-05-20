@@ -11,29 +11,29 @@ func benchArms() []*Arm {
 	return []*Arm{
 		{
 			ID: "anthropic/claude-sonnet", ModelName: "claude-sonnet",
-			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 200000},
-			CostPer1kInput:  0.003, CostPer1kOutput: 0.015,
+			Capabilities:   provider.Capabilities{ToolUse: true, ContextWindow: 200000},
+			CostPer1kInput: 0.003, CostPer1kOutput: 0.015,
 		},
 		{
 			ID: "anthropic/claude-opus", ModelName: "claude-opus",
-			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 200000, ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}},
-			CostPer1kInput:  0.015, CostPer1kOutput: 0.075,
+			Capabilities:   provider.Capabilities{ToolUse: true, ContextWindow: 200000, ThinkingModes: []provider.EffortLevel{provider.EffortLow, provider.EffortMedium, provider.EffortHigh}},
+			CostPer1kInput: 0.015, CostPer1kOutput: 0.075,
 		},
 		{
 			ID: "openai/gpt-4o", ModelName: "gpt-4o",
-			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 128000},
-			CostPer1kInput:  0.005, CostPer1kOutput: 0.015,
+			Capabilities:   provider.Capabilities{ToolUse: true, ContextWindow: 128000},
+			CostPer1kInput: 0.005, CostPer1kOutput: 0.015,
 		},
 		{
 			ID: "ollama/qwen3:8b", ModelName: "qwen3:8b",
-			IsLocal:         true,
-			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 32000},
-			CostPer1kInput:  0, CostPer1kOutput: 0,
+			IsLocal:        true,
+			Capabilities:   provider.Capabilities{ToolUse: true, ContextWindow: 32000},
+			CostPer1kInput: 0, CostPer1kOutput: 0,
 		},
 		{
 			ID: "mistral/mistral-large", ModelName: "mistral-large",
-			Capabilities:    provider.Capabilities{ToolUse: true, ContextWindow: 128000},
-			CostPer1kInput:  0.002, CostPer1kOutput: 0.006,
+			Capabilities:   provider.Capabilities{ToolUse: true, ContextWindow: 128000},
+			CostPer1kInput: 0.002, CostPer1kOutput: 0.006,
 		},
 	}
 }

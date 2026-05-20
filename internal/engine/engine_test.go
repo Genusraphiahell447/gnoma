@@ -26,7 +26,7 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) Name() string         { return m.name }
-func (m *mockProvider) DefaultModel() string  { return "mock-model" }
+func (m *mockProvider) DefaultModel() string { return "mock-model" }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{
 		ID: "mock-model", Name: "mock-model", Provider: m.name,
@@ -91,7 +91,7 @@ type mockTool struct {
 	execFn   func(ctx context.Context, args json.RawMessage) (tool.Result, error)
 }
 
-func (m *mockTool) Name() string               { return m.name }
+func (m *mockTool) Name() string                { return m.name }
 func (m *mockTool) Description() string         { return "mock tool" }
 func (m *mockTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (m *mockTool) IsReadOnly() bool            { return m.readOnly }

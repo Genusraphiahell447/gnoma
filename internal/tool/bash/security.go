@@ -11,20 +11,20 @@ type SecurityCheck int
 
 const (
 	CheckIncomplete        SecurityCheck = iota + 1 // fragments, trailing operators
-	CheckMetacharacters                              // ; | & $ ` < >
-	CheckCmdSubstitution                             // $(), ``, ${}
-	CheckRedirection                                 // < > >> etc.
-	CheckDangerousVars                               // IFS, PATH manipulation
-	CheckNewlineInjection                            // embedded newlines
-	CheckControlChars                                // ASCII 00-1F (except \n \t)
-	CheckJQInjection                                 // jq with shell metacharacters
-	CheckObfuscatedFlags                             // Unicode lookalike hyphens
-	CheckProcEnviron                                 // /proc/*/environ access
-	CheckBraceExpansion                              // dangerous {a,b} expansion
-	CheckUnicodeWhitespace                           // non-ASCII whitespace
-	CheckZshDangerous                                // zsh-specific dangerous constructs
-	CheckCommentDesync                               // # inside strings hiding commands
-	CheckIndirectExec                                // eval, bash -c, curl|bash, source
+	CheckMetacharacters                             // ; | & $ ` < >
+	CheckCmdSubstitution                            // $(), ``, ${}
+	CheckRedirection                                // < > >> etc.
+	CheckDangerousVars                              // IFS, PATH manipulation
+	CheckNewlineInjection                           // embedded newlines
+	CheckControlChars                               // ASCII 00-1F (except \n \t)
+	CheckJQInjection                                // jq with shell metacharacters
+	CheckObfuscatedFlags                            // Unicode lookalike hyphens
+	CheckProcEnviron                                // /proc/*/environ access
+	CheckBraceExpansion                             // dangerous {a,b} expansion
+	CheckUnicodeWhitespace                          // non-ASCII whitespace
+	CheckZshDangerous                               // zsh-specific dangerous constructs
+	CheckCommentDesync                              // # inside strings hiding commands
+	CheckIndirectExec                               // eval, bash -c, curl|bash, source
 )
 
 // SecurityViolation describes a failed security check.
@@ -165,7 +165,7 @@ func checkNewlineInjection(cmd string) *SecurityViolation {
 	return nil
 }
 
-// checkCmdSubstitution blocks $(), ``, and ${} command/variable substitution.
+// checkCmdSubstitution blocks $(), “, and ${} command/variable substitution.
 // These allow arbitrary code execution within a command.
 func checkCmdSubstitution(cmd string) *SecurityViolation {
 	inSingle := false

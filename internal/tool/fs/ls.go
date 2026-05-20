@@ -32,7 +32,7 @@ func NewLSTool() *LSTool { return &LSTool{} }
 
 func (t *LSTool) SetGuard(g *Guard) { t.guard = g }
 
-func (t *LSTool) Name() string               { return lsToolName }
+func (t *LSTool) Name() string                { return lsToolName }
 func (t *LSTool) Description() string         { return "List directory contents with file types and sizes" }
 func (t *LSTool) Parameters() json.RawMessage { return lsParams }
 func (t *LSTool) IsReadOnly() bool            { return true }

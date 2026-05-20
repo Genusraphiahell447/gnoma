@@ -27,7 +27,7 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) Name() string         { return m.name }
-func (m *mockProvider) DefaultModel() string  { return "mock-model" }
+func (m *mockProvider) DefaultModel() string { return "mock-model" }
 func (m *mockProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return nil, nil
 }
@@ -56,10 +56,10 @@ func newEventStream(stopReason message.StopReason, events ...stream.Event) *even
 	return &eventStream{events: events}
 }
 
-func (s *eventStream) Next() bool         { s.idx++; return s.idx <= len(s.events) }
+func (s *eventStream) Next() bool            { s.idx++; return s.idx <= len(s.events) }
 func (s *eventStream) Current() stream.Event { return s.events[s.idx-1] }
-func (s *eventStream) Err() error          { return nil }
-func (s *eventStream) Close() error        { return nil }
+func (s *eventStream) Err() error            { return nil }
+func (s *eventStream) Close() error          { return nil }
 
 // --- Tests ---
 

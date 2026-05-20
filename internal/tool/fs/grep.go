@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	grepToolName   = "fs.grep"
+	grepToolName      = "fs.grep"
 	defaultMaxResults = 250
 )
 
@@ -49,7 +49,7 @@ func NewGrepTool() *GrepTool { return &GrepTool{} }
 
 func (t *GrepTool) SetGuard(g *Guard) { t.guard = g }
 
-func (t *GrepTool) Name() string               { return grepToolName }
+func (t *GrepTool) Name() string                { return grepToolName }
 func (t *GrepTool) Description() string         { return "Search file contents using a regular expression" }
 func (t *GrepTool) Parameters() json.RawMessage { return grepParams }
 func (t *GrepTool) IsReadOnly() bool            { return true }

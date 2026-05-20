@@ -3,10 +3,10 @@ package mistral
 import (
 	"encoding/json"
 
-	"somegit.dev/Owlibou/gnoma/internal/message"
-	"somegit.dev/Owlibou/gnoma/internal/stream"
 	mistralgo "github.com/VikingOwl91/mistral-go-sdk"
 	"github.com/VikingOwl91/mistral-go-sdk/chat"
+	"somegit.dev/Owlibou/gnoma/internal/message"
+	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
 // mistralStream adapts mistral's Stream[CompletionChunk] to gnoma's stream.Stream.
@@ -21,9 +21,9 @@ type mistralStream struct {
 
 	// Deferred finish reason (when finish arrives on the same chunk as content)
 	pendingFinish *chat.FinishReason
-	pendingUsage  *message.Usage  // usage from a chunk that also had other data
-	emittedStop   bool            // true after we've emitted the synthetic stop event
-	hadToolCalls  bool            // true if any tool calls were emitted
+	pendingUsage  *message.Usage // usage from a chunk that also had other data
+	emittedStop   bool           // true after we've emitted the synthetic stop event
+	hadToolCalls  bool           // true if any tool calls were emitted
 }
 
 type toolCallState struct {

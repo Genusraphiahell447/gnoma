@@ -133,215 +133,215 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 	streamLoop:
 		for {
 
-		if e.cfg.Router != nil {
-			prompt := e.latestUserPrompt()
-			task := e.classify(ctx, prompt)
-			if e.cfg.Context != nil {
-				task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
+			if e.cfg.Router != nil {
+				prompt := e.latestUserPrompt()
+				task := e.classify(ctx, prompt)
+				if e.cfg.Context != nil {
+					task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
+				} else {
+					task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+				}
+				task.ExcludedArms = failedArms
+
+				e.logger.Debug("routing request",
+					"task_type", task.Type,
+					"complexity", task.ComplexityScore,
+					"round", turn.Rounds,
+					"failover_attempt", failoverAttempt,
+				)
+
+				s, decision, err = e.cfg.Router.Stream(ctx, task, req)
+				if decision.Arm != nil {
+					lastArmID = decision.Arm.ID
+					lastTaskType = task.Type
+					lastClassifierSource = task.ClassifierSource
+					e.logger.Debug("streaming request",
+						"provider", decision.Arm.Provider.Name(),
+						"model", decision.Arm.ModelName,
+						"arm", decision.Arm.ID,
+						"messages", len(req.Messages),
+						"tools", len(req.Tools),
+						"round", turn.Rounds,
+					)
+					if turn.Rounds == 1 && failoverAttempt == 0 && cb != nil {
+						cb(stream.Event{
+							Type:              stream.EventRouting,
+							RoutingModel:      string(decision.Arm.ID),
+							RoutingTask:       task.Type.String(),
+							RoutingClassifier: task.ClassifierSource.String(),
+						})
+					}
+				}
 			} else {
-				task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
-			}
-			task.ExcludedArms = failedArms
-
-			e.logger.Debug("routing request",
-				"task_type", task.Type,
-				"complexity", task.ComplexityScore,
-				"round", turn.Rounds,
-				"failover_attempt", failoverAttempt,
-			)
-
-			s, decision, err = e.cfg.Router.Stream(ctx, task, req)
-			if decision.Arm != nil {
-				lastArmID = decision.Arm.ID
-				lastTaskType = task.Type
-				lastClassifierSource = task.ClassifierSource
+				prov := e.activeProvider()
 				e.logger.Debug("streaming request",
-					"provider", decision.Arm.Provider.Name(),
-					"model", decision.Arm.ModelName,
-					"arm", decision.Arm.ID,
+					"provider", prov.Name(),
+					"model", req.Model,
 					"messages", len(req.Messages),
 					"tools", len(req.Tools),
 					"round", turn.Rounds,
 				)
-				if turn.Rounds == 1 && failoverAttempt == 0 && cb != nil {
-					cb(stream.Event{
-						Type:              stream.EventRouting,
-						RoutingModel:      string(decision.Arm.ID),
-						RoutingTask:       task.Type.String(),
-						RoutingClassifier: task.ClassifierSource.String(),
-					})
-				}
+				s, err = prov.Stream(ctx, req)
 			}
-		} else {
-			prov := e.activeProvider()
-			e.logger.Debug("streaming request",
-				"provider", prov.Name(),
-				"model", req.Model,
-				"messages", len(req.Messages),
-				"tools", len(req.Tools),
-				"round", turn.Rounds,
-			)
-			s, err = prov.Stream(ctx, req)
-		}
-		if err != nil {
-			if e.cfg.Router != nil && decision.Arm != nil {
-				failedArms = append(failedArms, decision.Arm.ID)
-			}
-
-			// If we have a router and no forced arm, we fall back to other models immediately.
-			skipDelay := e.cfg.Router != nil && e.cfg.Router.ForcedArm() == ""
-
-			// Apply temporary backoff to the failing arm if it was a 429
-			if e.cfg.Router != nil && decision.Arm != nil {
-				var provErr *provider.ProviderError
-				if errors.As(err, &provErr) && (provErr.StatusCode == 429 || provErr.StatusCode == 529) {
-					e.logger.Info("applying backoff to exhausted model", "arm", decision.Arm.ID)
-					e.cfg.Router.Backoff(decision.Arm.ID, 5*time.Minute)
-				}
-			}
-
-			// Retry on transient errors (429, 5xx) with exponential backoff
-			s, err = e.retryOnTransient(ctx, err, skipDelay, func() (stream.Stream, error) {
-				if e.cfg.Router != nil {
-					prompt := e.latestUserPrompt()
-					task := e.classify(ctx, prompt)
-					if e.cfg.Context != nil {
-						task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
-					} else {
-						task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
-					}
-					
-					task.ExcludedArms = failedArms
-					var retryDecision router.RoutingDecision
-					s, retryDecision, err = e.cfg.Router.Stream(ctx, task, req)
-					if err == nil {
-						decision = retryDecision // adopt new reservation on retry
-					} else if retryDecision.Arm != nil {
-						failedArms = append(failedArms, retryDecision.Arm.ID)
-
-						// Also apply backoff to arms that fail during the fallback retry loop
-						var provErr *provider.ProviderError
-						if errors.As(err, &provErr) && (provErr.StatusCode == 429 || provErr.StatusCode == 529) {
-							e.logger.Info("applying backoff to exhausted model (during fallback)", "arm", retryDecision.Arm.ID)
-							e.cfg.Router.Backoff(retryDecision.Arm.ID, 5*time.Minute)
-						}
-					}
-					return s, err
-				}
-				return e.activeProvider().Stream(ctx, req)
-			})
 			if err != nil {
-				// Try reactive compaction on 413 (request too large)
-				s, err = e.handleRequestTooLarge(ctx, err)
-				if err != nil {
-					decision.Rollback()
-					streamErr := fmt.Errorf("provider stream: %w", err)
-					reportOutcome(streamErr)
-					return nil, streamErr
+				if e.cfg.Router != nil && decision.Arm != nil {
+					failedArms = append(failedArms, decision.Arm.ID)
 				}
-			}
-		}
 
-		// Consume stream, forwarding events to callback.
-		// Track TTFT and stream duration for arm performance metrics.
-		acc = stream.NewAccumulator()
-		stopReason = ""
-		model = ""
-		streamStart = time.Now()
-		firstTokenAt = time.Time{}
-		repetitionTripped = false
+				// If we have a router and no forced arm, we fall back to other models immediately.
+				skipDelay := e.cfg.Router != nil && e.cfg.Router.ForcedArm() == ""
 
-		for s.Next() {
-			evt := s.Current()
-			acc.Apply(evt)
-
-			// Record time of first text token for TTFT metric
-			if firstTokenAt.IsZero() && evt.Type == stream.EventTextDelta && evt.Text != "" {
-				firstTokenAt = time.Now()
-			}
-
-			// Feed text deltas to the repetition detector. On trigger, stop
-			// consuming further events — the partial response is committed
-			// to history below and a corrective message is injected.
-			if evt.Type == stream.EventTextDelta && evt.Text != "" {
-				if repetitionDet.Feed(evt.Text) {
-					repetitionTripped = true
-					e.logger.Info("early-stop: repetition loop detected", "round", turn.Rounds)
-					if cb != nil {
-						cb(evt)
+				// Apply temporary backoff to the failing arm if it was a 429
+				if e.cfg.Router != nil && decision.Arm != nil {
+					var provErr *provider.ProviderError
+					if errors.As(err, &provErr) && (provErr.StatusCode == 429 || provErr.StatusCode == 529) {
+						e.logger.Info("applying backoff to exhausted model", "arm", decision.Arm.ID)
+						e.cfg.Router.Backoff(decision.Arm.ID, 5*time.Minute)
 					}
-					break
+				}
+
+				// Retry on transient errors (429, 5xx) with exponential backoff
+				s, err = e.retryOnTransient(ctx, err, skipDelay, func() (stream.Stream, error) {
+					if e.cfg.Router != nil {
+						prompt := e.latestUserPrompt()
+						task := e.classify(ctx, prompt)
+						if e.cfg.Context != nil {
+							task.EstimatedTokens = int(e.cfg.Context.Tracker().CountTokens(prompt))
+						} else {
+							task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
+						}
+
+						task.ExcludedArms = failedArms
+						var retryDecision router.RoutingDecision
+						s, retryDecision, err = e.cfg.Router.Stream(ctx, task, req)
+						if err == nil {
+							decision = retryDecision // adopt new reservation on retry
+						} else if retryDecision.Arm != nil {
+							failedArms = append(failedArms, retryDecision.Arm.ID)
+
+							// Also apply backoff to arms that fail during the fallback retry loop
+							var provErr *provider.ProviderError
+							if errors.As(err, &provErr) && (provErr.StatusCode == 429 || provErr.StatusCode == 529) {
+								e.logger.Info("applying backoff to exhausted model (during fallback)", "arm", retryDecision.Arm.ID)
+								e.cfg.Router.Backoff(retryDecision.Arm.ID, 5*time.Minute)
+							}
+						}
+						return s, err
+					}
+					return e.activeProvider().Stream(ctx, req)
+				})
+				if err != nil {
+					// Try reactive compaction on 413 (request too large)
+					s, err = e.handleRequestTooLarge(ctx, err)
+					if err != nil {
+						decision.Rollback()
+						streamErr := fmt.Errorf("provider stream: %w", err)
+						reportOutcome(streamErr)
+						return nil, streamErr
+					}
 				}
 			}
 
-			// Capture stop reason and model from events
-			if evt.StopReason != "" {
-				stopReason = evt.StopReason
-			}
-			if evt.Model != "" {
-				model = evt.Model
-			}
+			// Consume stream, forwarding events to callback.
+			// Track TTFT and stream duration for arm performance metrics.
+			acc = stream.NewAccumulator()
+			stopReason = ""
+			model = ""
+			streamStart = time.Now()
+			firstTokenAt = time.Time{}
+			repetitionTripped = false
 
-			if cb != nil {
-				cb(evt)
-			}
-		}
-		streamEnd = time.Now()
-		if err := s.Err(); err != nil {
-			e.logger.Debug("stream terminated with error",
-				"error", err,
-				"rounds", turn.Rounds,
-				"failover_attempt", failoverAttempt,
-				"has_content", acc.HasContent(),
-			)
-			if closeErr := s.Close(); closeErr != nil {
-				e.logger.Warn("stream close after error failed", "error", closeErr)
-			}
+			for s.Next() {
+				evt := s.Current()
+				acc.Apply(evt)
 
-			// Consumption-time failover: the stream errored before producing
-			// any user-visible content, the error class warrants trying a
-			// different arm, and we have a router that can pick one. Emit a
-			// hint to the TUI, exclude the failed arm, and loop. If any of
-			// these guards fails — content was streamed, error is fatal, the
-			// arm was force-pinned, retry budget exhausted — fall through
-			// to the existing terminal error path so the user sees what
-			// went wrong instead of a silent stall.
-			canFailover := e.cfg.Router != nil &&
-				e.cfg.Router.ForcedArm() == "" &&
-				decision.Arm != nil &&
-				!acc.HasContent() &&
-				isFailoverable(err) &&
-				failoverAttempt < maxFailovers
-			if canFailover {
-				failedArmID := decision.Arm.ID
-				failedArms = append(failedArms, failedArmID)
-				decision.Rollback()
+				// Record time of first text token for TTFT metric
+				if firstTokenAt.IsZero() && evt.Type == stream.EventTextDelta && evt.Text != "" {
+					firstTokenAt = time.Now()
+				}
+
+				// Feed text deltas to the repetition detector. On trigger, stop
+				// consuming further events — the partial response is committed
+				// to history below and a corrective message is injected.
+				if evt.Type == stream.EventTextDelta && evt.Text != "" {
+					if repetitionDet.Feed(evt.Text) {
+						repetitionTripped = true
+						e.logger.Info("early-stop: repetition loop detected", "round", turn.Rounds)
+						if cb != nil {
+							cb(evt)
+						}
+						break
+					}
+				}
+
+				// Capture stop reason and model from events
+				if evt.StopReason != "" {
+					stopReason = evt.StopReason
+				}
+				if evt.Model != "" {
+					model = evt.Model
+				}
+
 				if cb != nil {
-					cb(stream.Event{
-						Type:         stream.EventFailover,
-						FailedArm:    string(failedArmID),
-						FailedReason: shortFailReason(err),
-						Err:          err,
-					})
+					cb(evt)
 				}
-				e.logger.Info("stream failover",
-					"failed_arm", failedArmID,
-					"reason", err,
-					"attempt", failoverAttempt+1,
-				)
-				failoverAttempt++
-				continue streamLoop
 			}
+			streamEnd = time.Now()
+			if err := s.Err(); err != nil {
+				e.logger.Debug("stream terminated with error",
+					"error", err,
+					"rounds", turn.Rounds,
+					"failover_attempt", failoverAttempt,
+					"has_content", acc.HasContent(),
+				)
+				if closeErr := s.Close(); closeErr != nil {
+					e.logger.Warn("stream close after error failed", "error", closeErr)
+				}
 
-			decision.Rollback()
-			streamErr := e.annotateStreamError(err, len(req.Tools))
-			reportOutcome(streamErr)
-			return nil, streamErr
-		}
-		if err := s.Close(); err != nil {
-			e.logger.Warn("stream close failed", "error", err)
-		}
-		break streamLoop
+				// Consumption-time failover: the stream errored before producing
+				// any user-visible content, the error class warrants trying a
+				// different arm, and we have a router that can pick one. Emit a
+				// hint to the TUI, exclude the failed arm, and loop. If any of
+				// these guards fails — content was streamed, error is fatal, the
+				// arm was force-pinned, retry budget exhausted — fall through
+				// to the existing terminal error path so the user sees what
+				// went wrong instead of a silent stall.
+				canFailover := e.cfg.Router != nil &&
+					e.cfg.Router.ForcedArm() == "" &&
+					decision.Arm != nil &&
+					!acc.HasContent() &&
+					isFailoverable(err) &&
+					failoverAttempt < maxFailovers
+				if canFailover {
+					failedArmID := decision.Arm.ID
+					failedArms = append(failedArms, failedArmID)
+					decision.Rollback()
+					if cb != nil {
+						cb(stream.Event{
+							Type:         stream.EventFailover,
+							FailedArm:    string(failedArmID),
+							FailedReason: shortFailReason(err),
+							Err:          err,
+						})
+					}
+					e.logger.Info("stream failover",
+						"failed_arm", failedArmID,
+						"reason", err,
+						"attempt", failoverAttempt+1,
+					)
+					failoverAttempt++
+					continue streamLoop
+				}
+
+				decision.Rollback()
+				streamErr := e.annotateStreamError(err, len(req.Tools))
+				reportOutcome(streamErr)
+				return nil, streamErr
+			}
+			if err := s.Close(); err != nil {
+				e.logger.Warn("stream close failed", "error", err)
+			}
+			break streamLoop
 		} // end streamLoop
 
 		// Build response
@@ -974,4 +974,3 @@ func (e *Engine) annotateStreamError(err error, toolCount int) error {
 	}
 	return fmt.Errorf("stream error: %w", err)
 }
-

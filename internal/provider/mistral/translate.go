@@ -3,9 +3,9 @@ package mistral
 import (
 	"encoding/json"
 
+	"github.com/VikingOwl91/mistral-go-sdk/chat"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/provider"
-	"github.com/VikingOwl91/mistral-go-sdk/chat"
 )
 
 // --- gnoma → Mistral ---

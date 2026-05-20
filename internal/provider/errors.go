@@ -60,10 +60,10 @@ func (e *ProviderError) Unwrap() error {
 // that return 500 for deterministic client-side failures. These should not be
 // retried because the same request will always produce the same error.
 var nonRetryable500Substrings = []string{
-	"Failed to parse tool call",   // llama.cpp: model output invalid tool call JSON
-	"failed to parse tool call",   // lowercase variant
-	"tool_call_error",             // some servers use this error type
-	"invalid_tool_call",           // OpenAI-compat servers
+	"Failed to parse tool call", // llama.cpp: model output invalid tool call JSON
+	"failed to parse tool call", // lowercase variant
+	"tool_call_error",           // some servers use this error type
+	"invalid_tool_call",         // OpenAI-compat servers
 }
 
 // ClassifyHTTPError classifies an HTTP error using both status code and the

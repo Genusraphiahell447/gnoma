@@ -29,11 +29,11 @@ const (
 
 // CLIAgent describes a known CLI agent binary.
 type CLIAgent struct {
-	Name        string
-	DisplayName string
-	ProbeArgs   []string              // args to fetch version (e.g. ["--version"])
-	PromptArgs  func(string) []string // build argv for a non-interactive prompt run
-	Format      StreamFormat
+	Name         string
+	DisplayName  string
+	ProbeArgs    []string              // args to fetch version (e.g. ["--version"])
+	PromptArgs   func(string) []string // build argv for a non-interactive prompt run
+	Format       StreamFormat
 	Capabilities provider.Capabilities
 	// PromptResponseFormat indicates the agent has no native structured-output
 	// mode and must rely on prompt-augmented JSON schema instructions. Treated

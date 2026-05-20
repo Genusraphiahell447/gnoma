@@ -97,13 +97,13 @@ func TestInventory_Summary(t *testing.T) {
 
 func TestInventory_QuerySection(t *testing.T) {
 	inv := &SystemInventory{
-		OS:    "Linux",
-		Shell: "/bin/zsh",
-		Hardware: HardwareInfo{CPU: "Test CPU", Cores: 4, MemTotal: "16 GB"},
-		Tools:    []string{"git", "make"},
-		Runtimes: []Runtime{{"go", "1.26"}, {"rust", "1.91"}},
+		OS:          "Linux",
+		Shell:       "/bin/zsh",
+		Hardware:    HardwareInfo{CPU: "Test CPU", Cores: 4, MemTotal: "16 GB"},
+		Tools:       []string{"git", "make"},
+		Runtimes:    []Runtime{{"go", "1.26"}, {"rust", "1.91"}},
 		DevPackages: []string{"docker", "kubectl"},
-		PackageMgr: "pacman", PackageCount: 100,
+		PackageMgr:  "pacman", PackageCount: 100,
 	}
 
 	// Runtimes

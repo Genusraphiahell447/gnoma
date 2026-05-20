@@ -20,7 +20,7 @@ func (m *mockProvider) Stream(_ context.Context, _ Request) (stream.Stream, erro
 }
 
 func (m *mockProvider) Name() string         { return m.name }
-func (m *mockProvider) DefaultModel() string  { return "mock-model" }
+func (m *mockProvider) DefaultModel() string { return "mock-model" }
 func (m *mockProvider) Models(_ context.Context) ([]ModelInfo, error) {
 	return []ModelInfo{{ID: "mock-model", Name: "mock-model", Provider: m.name}}, nil
 }

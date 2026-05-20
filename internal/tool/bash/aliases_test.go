@@ -271,8 +271,8 @@ func TestAliasMap_AliasSummary(t *testing.T) {
 	m.mu.Lock()
 	m.aliases["find"] = "fd"
 	m.aliases["grep"] = "rg --color=auto"
-	m.aliases["ls"] = "ls --color=auto"  // flag-only, same command — should be excluded
-	m.aliases["ll"] = "ls -la"           // replacement to different command — included
+	m.aliases["ls"] = "ls --color=auto" // flag-only, same command — should be excluded
+	m.aliases["ll"] = "ls -la"          // replacement to different command — included
 	m.mu.Unlock()
 
 	summary := m.AliasSummary()

@@ -93,7 +93,7 @@ func (p *recordingProvider) Stream(_ context.Context, req provider.Request) (str
 
 type noopStream struct{}
 
-func (s *noopStream) Next() bool           { return false }
+func (s *noopStream) Next() bool            { return false }
 func (s *noopStream) Current() stream.Event { return stream.Event{} }
 func (s *noopStream) Err() error            { return nil }
 func (s *noopStream) Close() error          { return nil }

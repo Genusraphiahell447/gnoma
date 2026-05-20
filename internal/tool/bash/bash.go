@@ -61,7 +61,7 @@ func New(opts ...Option) *Tool {
 	return t
 }
 
-func (t *Tool) Name() string               { return toolName }
+func (t *Tool) Name() string                { return toolName }
 func (t *Tool) Description() string         { return "Execute a bash command and return its output" }
 func (t *Tool) Parameters() json.RawMessage { return parameterSchema }
 func (t *Tool) IsReadOnly() bool            { return false }

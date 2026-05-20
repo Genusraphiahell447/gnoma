@@ -34,10 +34,10 @@ func TestCapabilities_SupportsEffort(t *testing.T) {
 		level provider.EffortLevel
 		want  bool
 	}{
-		{provider.EffortAuto, true},   // EffortAuto always passes
-		{provider.EffortLow, true},    // explicitly listed
+		{provider.EffortAuto, true},    // EffortAuto always passes
+		{provider.EffortLow, true},     // explicitly listed
 		{provider.EffortMedium, false}, // not listed
-		{provider.EffortHigh, true},   // explicitly listed
+		{provider.EffortHigh, true},    // explicitly listed
 	}
 	for _, tc := range tests {
 		if got := caps.SupportsEffort(tc.level); got != tc.want {

@@ -28,8 +28,10 @@ func New(inv *bash.SystemInventory) *Tool {
 	return &Tool{inventory: inv}
 }
 
-func (t *Tool) Name() string               { return "system_info" }
-func (t *Tool) Description() string         { return "Query system information: installed runtimes, packages, tools, hardware" }
+func (t *Tool) Name() string { return "system_info" }
+func (t *Tool) Description() string {
+	return "Query system information: installed runtimes, packages, tools, hardware"
+}
 func (t *Tool) Parameters() json.RawMessage { return paramSchema }
 func (t *Tool) IsReadOnly() bool            { return true }
 func (t *Tool) IsDestructive() bool         { return false }

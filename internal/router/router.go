@@ -92,7 +92,7 @@ func (r *Router) Select(task Task) RoutingDecision {
 		if r.localOnly && !arm.IsLocal {
 			continue
 		}
-		
+
 		isExcluded := false
 		for _, ex := range task.ExcludedArms {
 			if arm.ID == ex {

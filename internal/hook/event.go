@@ -68,8 +68,8 @@ type CommandType int
 
 const (
 	CommandTypeShell  CommandType = iota + 1 // run a shell command
-	CommandTypePrompt                         // send a prompt to an LLM
-	CommandTypeAgent                          // spawn an elf
+	CommandTypePrompt                        // send a prompt to an LLM
+	CommandTypeAgent                         // spawn an elf
 )
 
 func (c CommandType) String() string {

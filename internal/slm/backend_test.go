@@ -93,7 +93,7 @@ func TestStartBackend_Ollama_NoModels_FailsClean(t *testing.T) {
 
 func TestStartBackend_OpenAICompat_RequiresBaseURLAndModel(t *testing.T) {
 	cases := []BackendConfig{
-		{Backend: BackendOpenAICompat, Model: "x"},                        // missing base_url
+		{Backend: BackendOpenAICompat, Model: "x"},                          // missing base_url
 		{Backend: BackendOpenAICompat, BaseURL: "http://localhost:1234/v1"}, // missing model
 	}
 	for i, c := range cases {

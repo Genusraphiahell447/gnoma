@@ -24,7 +24,7 @@ type recordingProvider struct {
 }
 
 func (m *recordingProvider) Name() string         { return "recording" }
-func (m *recordingProvider) DefaultModel() string  { return "mock-model" }
+func (m *recordingProvider) DefaultModel() string { return "mock-model" }
 func (m *recordingProvider) Models(_ context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{
 		ID: "mock-model", Name: "mock-model", Provider: "recording",

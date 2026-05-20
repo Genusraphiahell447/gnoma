@@ -100,9 +100,9 @@ func TestFormatProfileList_Markers(t *testing.T) {
 	var buf bytes.Buffer
 	formatProfileList(&buf,
 		[]string{"experiment", "private", "work"},
-		true,         // dirExists
-		"work",       // defaultName
-		"private",    // activeName (e.g. --profile private set)
+		true,      // dirExists
+		"work",    // defaultName
+		"private", // activeName (e.g. --profile private set)
 		"/home/x/.config/gnoma/profiles",
 		"/home/x/.config/gnoma/config.toml",
 	)

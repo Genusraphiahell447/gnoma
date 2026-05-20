@@ -250,7 +250,7 @@ func (s *ollamaStub) server() *httptest.Server {
 			if s.showFunc != nil {
 				tmpl, params = s.showFunc(modelName)
 			}
-			fmt.Fprintf(w, `{"template":%q,"parameters":%q}`, tmpl, params)
+			_, _ = fmt.Fprintf(w, `{"template":%q,"parameters":%q}`, tmpl, params)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -297,8 +297,8 @@ func TestDiscoverOllama_PrunesCacheOnDisappearance(t *testing.T) {
 	defer srv.Close()
 
 	cache := map[string]bool{
-		"alive:latest": true,
-		"ghost:latest": true, // not in tags response — must be pruned
+		"alive:latest":  true,
+		"ghost:latest":  true, // not in tags response — must be pruned
 		"another-ghost": false,
 	}
 	if _, err := DiscoverOllama(context.Background(), srv.URL, cache); err != nil {

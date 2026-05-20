@@ -16,7 +16,7 @@ type deferredMockTool struct {
 	name string
 }
 
-func (d *deferredMockTool) Name() string               { return d.name }
+func (d *deferredMockTool) Name() string                { return d.name }
 func (d *deferredMockTool) Description() string         { return "deferred mock" }
 func (d *deferredMockTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (d *deferredMockTool) IsReadOnly() bool            { return true }

@@ -343,11 +343,11 @@ func TestSafeSplitPoint_NoAdjustmentNeeded(t *testing.T) {
 
 func TestSafeSplitPoint_WalksBackPastToolResult(t *testing.T) {
 	history := []message.Message{
-		message.NewUserText("hello"),        // 0
-		message.NewAssistantText("hi"),      // 1
-		toolCallMsg(),                        // 2 — assistant with tool call
-		toolResultMsg(),                      // 3 — tool result (should NOT be split point)
-		message.NewAssistantText("done"),    // 4
+		message.NewUserText("hello"),     // 0
+		message.NewAssistantText("hi"),   // 1
+		toolCallMsg(),                    // 2 — assistant with tool call
+		toolResultMsg(),                  // 3 — tool result (should NOT be split point)
+		message.NewAssistantText("done"), // 4
 	}
 	// Target split at 3 would orphan the tool result (no matching tool call in recent window)
 	got := safeSplitPoint(history, 3)
@@ -376,11 +376,11 @@ func TestTruncate_NeverOrphansToolResult(t *testing.T) {
 	// With keepRecent=3, naive split at index 2 would grab [toolresult, assistant, user]
 	// — orphaning the tool call. safeSplitPoint should walk back to index 1 instead.
 	history := []message.Message{
-		message.NewUserText("start"),       // 0
-		toolCallMsg(),                       // 1 — assistant with tool call
-		toolResultMsg(),                     // 2 — must stay paired with index 1
-		message.NewAssistantText("done"),   // 3
-		message.NewUserText("next"),        // 4
+		message.NewUserText("start"),     // 0
+		toolCallMsg(),                    // 1 — assistant with tool call
+		toolResultMsg(),                  // 2 — must stay paired with index 1
+		message.NewAssistantText("done"), // 3
+		message.NewUserText("next"),      // 4
 	}
 
 	result, err := s.Compact(history, 100_000)

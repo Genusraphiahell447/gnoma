@@ -12,20 +12,20 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
-	"charm.land/bubbles/v2/textarea"
-	"charm.land/glamour/v2"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
-	"somegit.dev/Owlibou/gnoma/internal/skill"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/permission"
 	"somegit.dev/Owlibou/gnoma/internal/router"
 	"somegit.dev/Owlibou/gnoma/internal/security"
 	"somegit.dev/Owlibou/gnoma/internal/session"
+	"somegit.dev/Owlibou/gnoma/internal/skill"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
@@ -57,24 +57,24 @@ type chatMessage struct {
 
 // Config holds optional dependencies for TUI features.
 type Config struct {
-	Firewall             *security.Firewall    // for incognito toggle
-	Engine               *engine.Engine        // for model switching
-	Permissions          *permission.Checker   // for mode switching
-	Router               *router.Router        // for model listing
-	ElfManager           *elf.Manager          // for CancelAll on escape/quit
-	PermCh               chan bool             // TUI → engine: y/n response
-	PermReqCh            <-chan PermReqMsg    // engine → TUI: tool requesting approval
-	ElfProgress          <-chan elf.Progress   // elf → TUI: structured progress updates
-	SessionStore         *session.SessionStore // nil = no persistence
-	StartWithResumePicker bool                 // open session picker on launch
-	Skills               *skill.Registry       // nil = no skills loaded
-	PluginInfos          []PluginInfo          // discovered plugins for /plugins command
-	Version              string                // build version string (from ldflags)
-	ModelUpdateCh        <-chan struct{}        // signals when the model name changes (discovery reconciliation)
-	SLM                  SLMInfo               // SLM backend status for the status bar
-	Profile              ProfileInfo           // active profile state for status bar + /profile command
-	ProfileNames         []string              // available profile names (sorted) for /profile autocomplete
-	SwitchProfile        func(name string)     // optional: when set, /profile <name> calls this and returns tea.Quit
+	Firewall              *security.Firewall    // for incognito toggle
+	Engine                *engine.Engine        // for model switching
+	Permissions           *permission.Checker   // for mode switching
+	Router                *router.Router        // for model listing
+	ElfManager            *elf.Manager          // for CancelAll on escape/quit
+	PermCh                chan bool             // TUI → engine: y/n response
+	PermReqCh             <-chan PermReqMsg     // engine → TUI: tool requesting approval
+	ElfProgress           <-chan elf.Progress   // elf → TUI: structured progress updates
+	SessionStore          *session.SessionStore // nil = no persistence
+	StartWithResumePicker bool                  // open session picker on launch
+	Skills                *skill.Registry       // nil = no skills loaded
+	PluginInfos           []PluginInfo          // discovered plugins for /plugins command
+	Version               string                // build version string (from ldflags)
+	ModelUpdateCh         <-chan struct{}       // signals when the model name changes (discovery reconciliation)
+	SLM                   SLMInfo               // SLM backend status for the status bar
+	Profile               ProfileInfo           // active profile state for status bar + /profile command
+	ProfileNames          []string              // available profile names (sorted) for /profile autocomplete
+	SwitchProfile         func(name string)     // optional: when set, /profile <name> calls this and returns tea.Quit
 }
 
 // ProfileInfo mirrors the resolved profile state so the TUI can render
@@ -109,51 +109,51 @@ type Model struct {
 	width   int
 	height  int
 
-	messages     []chatMessage
-	streaming    bool
-	streamBuf    *strings.Builder // regular text content (assistant role)
-	thinkingBuf  *strings.Builder // reasoning/thinking content (frozen once text starts)
-	currentRole  string
+	messages    []chatMessage
+	streaming   bool
+	streamBuf   *strings.Builder // regular text content (assistant role)
+	thinkingBuf *strings.Builder // reasoning/thinking content (frozen once text starts)
+	currentRole string
 
-	input          textarea.Model
-	suggestion     string      // ghost-text completion (dimmed, accepted with Tab)
-	completionSrc  []cmdEntry  // sorted slash commands for completion
-	suggestions    []cmdEntry  // live dropdown matches for current input
-	suggIdx        int         // selected index in dropdown
-	inputMode      string      // "", "command" (/), "execute" (!)
-	mdRenderer     *glamour.TermRenderer
-	mdRendererWidth int // cached width to avoid recreating on same-width resizes
-	expandOutput   bool   // ctrl+o toggles expanded tool output
-	elfStates      map[string]*elf.Progress // active elf states keyed by ID
-	elfOrder       []string                 // insertion-ordered elf IDs for tree rendering
-	elfToolActive  bool                     // suppresses next toolresult (elf output)
-	cwd            string
-	gitBranch      string
-	scrollOffset   int
-	incognito      bool
-	copyMode       bool            // ctrl+] toggles mouse passthrough for terminal text selection
-	lastCtrlC      time.Time       // tracks first ctrl+c for double-press detection
-	quitHint       bool            // show "ctrl+c to quit" indicator in status bar
-	permPending    bool            // waiting for user to approve/deny a tool
-	permToolName   string          // which tool is asking
-	permArgs       json.RawMessage // tool args for display
+	input           textarea.Model
+	suggestion      string     // ghost-text completion (dimmed, accepted with Tab)
+	completionSrc   []cmdEntry // sorted slash commands for completion
+	suggestions     []cmdEntry // live dropdown matches for current input
+	suggIdx         int        // selected index in dropdown
+	inputMode       string     // "", "command" (/), "execute" (!)
+	mdRenderer      *glamour.TermRenderer
+	mdRendererWidth int                      // cached width to avoid recreating on same-width resizes
+	expandOutput    bool                     // ctrl+o toggles expanded tool output
+	elfStates       map[string]*elf.Progress // active elf states keyed by ID
+	elfOrder        []string                 // insertion-ordered elf IDs for tree rendering
+	elfToolActive   bool                     // suppresses next toolresult (elf output)
+	cwd             string
+	gitBranch       string
+	scrollOffset    int
+	incognito       bool
+	copyMode        bool            // ctrl+] toggles mouse passthrough for terminal text selection
+	lastCtrlC       time.Time       // tracks first ctrl+c for double-press detection
+	quitHint        bool            // show "ctrl+c to quit" indicator in status bar
+	permPending     bool            // waiting for user to approve/deny a tool
+	permToolName    string          // which tool is asking
+	permArgs        json.RawMessage // tool args for display
 
 	// Settings panel (/config)
 	configPanelOpen bool
 	configSelected  int
 
 	// Session resume picker
-	resumePending  bool
-	resumeSessions []session.Metadata
-	resumeSelected int
-	clearPending      bool   // waiting for y/n confirmation on /clear
+	resumePending     bool
+	resumeSessions    []session.Metadata
+	resumeSelected    int
+	clearPending      bool     // waiting for y/n confirmation on /clear
 	modelSnapshot     []string // snapshot of arm IDs from last /model display
-	initPending       bool   // true while /init turn is in-flight; triggers AGENTS.md reload on turnDone
-	initHadToolCalls  bool   // set when any tool call fires during an init turn
-	initRetried       bool   // set after first retry (no-tool-call case) so we don't retry indefinitely
-	initWriteNudged   bool   // set after write nudge (spawn_elfs-ran-but-no-fs_write case)
-	streamFilterClose  string // non-empty while suppressing a model pseudo-block; value is expected close tag
-	runningTools   []string        // transient: tool names currently executing (rendered ephemerally, not in chat history)
+	initPending       bool     // true while /init turn is in-flight; triggers AGENTS.md reload on turnDone
+	initHadToolCalls  bool     // set when any tool call fires during an init turn
+	initRetried       bool     // set after first retry (no-tool-call case) so we don't retry indefinitely
+	initWriteNudged   bool     // set after write nudge (spawn_elfs-ran-but-no-fs_write case)
+	streamFilterClose string   // non-empty while suppressing a model pseudo-block; value is expected close tag
+	runningTools      []string // transient: tool names currently executing (rendered ephemerally, not in chat history)
 }
 
 func New(sess session.Session, cfg Config) Model {
@@ -1518,7 +1518,6 @@ func (m Model) applySessionSnapshot(snap session.Snapshot) (tea.Model, tea.Cmd) 
 // (e.g. Gemma4) emit as plain text instead of structured function calls.
 var reModelCodeBlock = regexp.MustCompile(`(?s)(<<[/]?tool_code>>.*?<<[/]tool_code>>|<<function_call>>.*?<tool_call\|>)`)
 
-
 // sanitizeAssistantText removes model-specific artifacts (e.g. <<tool_code>> blocks)
 // before rendering or writing to disk.
 func sanitizeAssistantText(s string) string {
@@ -1533,8 +1532,8 @@ func sanitizeAssistantText(s string) string {
 // Checked in order; first match wins.
 var modelBlockPairs = [][2]string{
 	{"<<tool_code>>", "<</tool_code>>"},
-	{"<<tool_code>>", "<<</tool_code>>"},   // some model variants
-	{"<<function_call>>", "<tool_call|>"},  // Gemma function-call format
+	{"<<tool_code>>", "<<</tool_code>>"},  // some model variants
+	{"<<function_call>>", "<tool_call|>"}, // Gemma function-call format
 }
 
 // filterModelCodeBlocks suppresses model-internal pseudo-tool-call blocks from a

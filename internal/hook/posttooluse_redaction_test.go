@@ -44,6 +44,7 @@ func (p *recordingProvider) Stream(_ context.Context, req provider.Request) (str
 		},
 	}, nil
 }
+
 type finalEventStream struct {
 	events []stream.Event
 	idx    int

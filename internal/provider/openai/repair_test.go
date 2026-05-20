@@ -195,10 +195,10 @@ func TestRepairArgs_TakesFirstBalancedBlock(t *testing.T) {
 
 func TestRepairArgs_UnrepairableFails(t *testing.T) {
 	cases := []string{
-		`{"a":`,                  // truncated
-		`not json at all`,        // no JSON
-		`{{{`,                    // unbalanced
-		`{"a":1`,                 // missing close
+		`{"a":`,           // truncated
+		`not json at all`, // no JSON
+		`{{{`,             // unbalanced
+		`{"a":1`,          // missing close
 	}
 	for _, in := range cases {
 		got, repaired := repairArgs(in)

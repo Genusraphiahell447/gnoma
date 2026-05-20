@@ -9,7 +9,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-
 // SetProjectConfig writes a single key=value to the project config file (.gnoma/config.toml).
 // Only whitelisted keys are supported.
 func SetProjectConfig(key, value string) error {

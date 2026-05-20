@@ -37,9 +37,9 @@ type Manager struct {
 type ManagerConfig struct {
 	Router      *router.Router
 	Tools       *tool.Registry
-	Permissions *permission.Checker  // nil = allow all (unsafe; prefer passing parent checker)
-	Firewall    *security.Firewall   // nil = no scanning
-	Store       *persist.Store       // nil = no result persistence for elfs
+	Permissions *permission.Checker // nil = allow all (unsafe; prefer passing parent checker)
+	Firewall    *security.Firewall  // nil = no scanning
+	Store       *persist.Store      // nil = no result persistence for elfs
 	Logger      *slog.Logger
 }
 

@@ -19,19 +19,19 @@ import (
 
 // Config holds engine configuration.
 type Config struct {
-	Provider    router.SecureProvider    // direct provider (used if Router is nil)
-	Router      *router.Router           // nil = use Provider directly
-	Classifier  router.TaskClassifier    // nil = HeuristicClassifier
+	Provider    router.SecureProvider // direct provider (used if Router is nil)
+	Router      *router.Router        // nil = use Provider directly
+	Classifier  router.TaskClassifier // nil = HeuristicClassifier
 	Tools       *tool.Registry
-	Firewall    *security.Firewall       // nil = no scanning
-	Permissions *permission.Checker      // nil = allow all
-	Context     *gnomactx.Window         // nil = no compaction
-	System      string                   // system prompt
-	Model       string                   // override model (empty = provider default)
-	Temperature *float64                 // nil = provider default
-	MaxTurns    int                      // safety limit on tool loops (0 = unlimited)
-	Store       *persist.Store           // nil = no result persistence
-	Hooks       *hook.Dispatcher         // nil = no hooks
+	Firewall    *security.Firewall  // nil = no scanning
+	Permissions *permission.Checker // nil = allow all
+	Context     *gnomactx.Window    // nil = no compaction
+	System      string              // system prompt
+	Model       string              // override model (empty = provider default)
+	Temperature *float64            // nil = provider default
+	MaxTurns    int                 // safety limit on tool loops (0 = unlimited)
+	Store       *persist.Store      // nil = no result persistence
+	Hooks       *hook.Dispatcher    // nil = no hooks
 	Logger      *slog.Logger
 
 	// ForceTwoStageTools forces the two-stage tool-routing path on the forced

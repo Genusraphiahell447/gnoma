@@ -202,7 +202,7 @@ func (s *openaiStream) Next() bool {
 
 func (s *openaiStream) Current() stream.Event { return s.cur }
 func (s *openaiStream) Err() error            { return s.err }
-func (s *openaiStream) Close() error           { return s.raw.Close() }
+func (s *openaiStream) Close() error          { return s.raw.Close() }
 
 // wrapSDKError converts an OpenAI SDK apierror.Error into a ProviderError
 // so the engine's retry logic can classify it properly.

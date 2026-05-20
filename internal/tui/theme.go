@@ -86,7 +86,7 @@ var (
 		Foreground(cPurple)
 
 	sDiffAdd = lipgloss.NewStyle().
-		Foreground(cGreen)
+			Foreground(cGreen)
 
 	sDiffRemove = lipgloss.NewStyle().
 			Foreground(cRed)

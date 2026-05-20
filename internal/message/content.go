@@ -9,7 +9,7 @@ import (
 type ContentType int
 
 const (
-	ContentText       ContentType = iota + 1
+	ContentText ContentType = iota + 1
 	ContentToolCall
 	ContentToolResult
 	ContentThinking

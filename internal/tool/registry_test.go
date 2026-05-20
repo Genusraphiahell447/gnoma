@@ -18,11 +18,11 @@ type stubTool struct {
 	execFn      func(ctx context.Context, args json.RawMessage) (Result, error)
 }
 
-func (s *stubTool) Name() string                 { return s.name }
-func (s *stubTool) Description() string           { return s.description }
-func (s *stubTool) Parameters() json.RawMessage   { return s.params }
-func (s *stubTool) IsReadOnly() bool              { return s.readOnly }
-func (s *stubTool) IsDestructive() bool           { return s.destructive }
+func (s *stubTool) Name() string                { return s.name }
+func (s *stubTool) Description() string         { return s.description }
+func (s *stubTool) Parameters() json.RawMessage { return s.params }
+func (s *stubTool) IsReadOnly() bool            { return s.readOnly }
+func (s *stubTool) IsDestructive() bool         { return s.destructive }
 func (s *stubTool) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	if s.execFn != nil {
 		return s.execFn(ctx, args)
