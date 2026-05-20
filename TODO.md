@@ -35,7 +35,6 @@ Phases (2026-05-07 roadmap):
 - **Thinking mode** (disabled / budget / adaptive) — M12 in milestones
 - **Structured output** with JSON schema validation — M12
 - **Native agy JSON output** — update subprocess provider to use `--output-format stream-json` once supported by agy CLI, replacing the current prompt-augmentation fallback.
-- **Stream-error failover** — when an arm's `Stream` returns an error (auth failure, rate limit, subprocess exit, transport error), the router should transparently retry on the next-best arm matching the task type and surface a one-line hint to the user (e.g. `↻ vibe failed (Invalid API key), retried on anthropic/claude-opus-4-7`). Today the error bubbles straight to the TUI and the turn dies. Needs: classify retryable vs. fatal errors, cap retries per turn, ensure no duplicate billing on streams that emitted partial usage.
 - **SQLite session persistence** + serve mode — M10
 - **Task learning** (pattern recognition, persistent tasks) — M11
 - **Web UI** (`gnoma web`) — M15

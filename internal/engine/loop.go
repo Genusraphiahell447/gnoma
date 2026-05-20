@@ -109,10 +109,29 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		// Build provider request (gates tools on model capabilities)
 		req := e.buildRequest(ctx)
 
-		// Route and stream
+		// Route and stream. Both stream-creation errors (existing path) and
+		// stream-consumption errors (new path, end of streamLoop) can trigger
+		// failover to a different arm. failedArms accumulates across the whole
+		// round so the router doesn't re-pick a known-broken arm.
 		var s stream.Stream
 		var err error
 		var decision router.RoutingDecision
+		var failedArms []router.ArmID
+		var acc *stream.Accumulator
+		var stopReason message.StopReason
+		var model string
+		var streamStart, streamEnd time.Time
+		var firstTokenAt time.Time
+		var repetitionTripped bool
+
+		// maxFailovers caps the consumption-time failover budget per round.
+		// Creation-time retries inside retryOnTransient have their own
+		// 4-attempt budget; together they bound total arm attempts per round.
+		const maxFailovers = 4
+		failoverAttempt := 0
+
+	streamLoop:
+		for {
 
 		if e.cfg.Router != nil {
 			prompt := e.latestUserPrompt()
@@ -122,11 +141,13 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			} else {
 				task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
 			}
+			task.ExcludedArms = failedArms
 
 			e.logger.Debug("routing request",
 				"task_type", task.Type,
 				"complexity", task.ComplexityScore,
 				"round", turn.Rounds,
+				"failover_attempt", failoverAttempt,
 			)
 
 			s, decision, err = e.cfg.Router.Stream(ctx, task, req)
@@ -142,7 +163,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 					"tools", len(req.Tools),
 					"round", turn.Rounds,
 				)
-				if turn.Rounds == 1 && cb != nil {
+				if turn.Rounds == 1 && failoverAttempt == 0 && cb != nil {
 					cb(stream.Event{
 						Type:              stream.EventRouting,
 						RoutingModel:      string(decision.Arm.ID),
@@ -163,7 +184,6 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 			s, err = prov.Stream(ctx, req)
 		}
 		if err != nil {
-			var failedArms []router.ArmID
 			if e.cfg.Router != nil && decision.Arm != nil {
 				failedArms = append(failedArms, decision.Arm.ID)
 			}
@@ -224,13 +244,12 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 
 		// Consume stream, forwarding events to callback.
 		// Track TTFT and stream duration for arm performance metrics.
-		acc := stream.NewAccumulator()
-		var stopReason message.StopReason
-		var model string
-
-		streamStart := time.Now()
-		var firstTokenAt time.Time
-		repetitionTripped := false
+		acc = stream.NewAccumulator()
+		stopReason = ""
+		model = ""
+		streamStart = time.Now()
+		firstTokenAt = time.Time{}
+		repetitionTripped = false
 
 		for s.Next() {
 			evt := s.Current()
@@ -267,15 +286,53 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 				cb(evt)
 			}
 		}
-		streamEnd := time.Now()
+		streamEnd = time.Now()
 		if err := s.Err(); err != nil {
 			e.logger.Debug("stream terminated with error",
 				"error", err,
 				"rounds", turn.Rounds,
+				"failover_attempt", failoverAttempt,
+				"has_content", acc.HasContent(),
 			)
 			if closeErr := s.Close(); closeErr != nil {
 				e.logger.Warn("stream close after error failed", "error", closeErr)
 			}
+
+			// Consumption-time failover: the stream errored before producing
+			// any user-visible content, the error class warrants trying a
+			// different arm, and we have a router that can pick one. Emit a
+			// hint to the TUI, exclude the failed arm, and loop. If any of
+			// these guards fails — content was streamed, error is fatal, the
+			// arm was force-pinned, retry budget exhausted — fall through
+			// to the existing terminal error path so the user sees what
+			// went wrong instead of a silent stall.
+			canFailover := e.cfg.Router != nil &&
+				e.cfg.Router.ForcedArm() == "" &&
+				decision.Arm != nil &&
+				!acc.HasContent() &&
+				isFailoverable(err) &&
+				failoverAttempt < maxFailovers
+			if canFailover {
+				failedArmID := decision.Arm.ID
+				failedArms = append(failedArms, failedArmID)
+				decision.Rollback()
+				if cb != nil {
+					cb(stream.Event{
+						Type:         stream.EventFailover,
+						FailedArm:    string(failedArmID),
+						FailedReason: shortFailReason(err),
+						Err:          err,
+					})
+				}
+				e.logger.Info("stream failover",
+					"failed_arm", failedArmID,
+					"reason", err,
+					"attempt", failoverAttempt+1,
+				)
+				failoverAttempt++
+				continue streamLoop
+			}
+
 			decision.Rollback()
 			streamErr := e.annotateStreamError(err, len(req.Tools))
 			reportOutcome(streamErr)
@@ -284,6 +341,8 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 		if err := s.Close(); err != nil {
 			e.logger.Warn("stream close failed", "error", err)
 		}
+		break streamLoop
+		} // end streamLoop
 
 		// Build response
 		resp := acc.Response(stopReason, model)
@@ -846,6 +905,58 @@ func (e *Engine) retryOnTransient(ctx context.Context, firstErr error, skipDelay
 	}
 
 	return nil, firstErr
+}
+
+// isFailoverable reports whether err warrants asking the router for a
+// different arm. Broader than retryOnTransient's Retryable check: a
+// subprocess CLI agent that exits 1 because of bad credentials is not a
+// provider.ProviderError but still calls for trying a different arm.
+//
+// Conservative deny-list — fatal classes that another arm cannot help with:
+//   - context.Canceled / DeadlineExceeded: user-driven abort, propagate.
+//   - HTTP 400 (bad request) / 413 (too large): request-shape problem,
+//     other arms will reject it the same way. (413 has its own dedicated
+//     reactive-compaction path; we don't want to compete with it here.)
+//
+// Everything else — auth (401/403), rate limits (429), 5xx, subprocess
+// errors, network/transport failures — is failoverable.
+func isFailoverable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var provErr *provider.ProviderError
+	if errors.As(err, &provErr) {
+		if provErr.StatusCode == 400 || provErr.StatusCode == 413 {
+			return false
+		}
+	}
+	return true
+}
+
+// shortFailReason produces a one-line summary of err for TUI display.
+// Long error chains (a full subprocess exit + stderr dump can run to a
+// few hundred chars) are truncated to keep the rendered hint readable.
+func shortFailReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	// Strip the leading "subprocess: exit status N: " envelope when the
+	// CLI agent has surfaced its own message after the colon; the user
+	// cares about the inner message, not our wrapper.
+	if i := strings.Index(s, "Error: "); i >= 0 && i < 80 {
+		s = s[i+len("Error: "):]
+	}
+	if len(s) > 160 {
+		s = s[:157] + "..."
+	}
+	// Collapse newlines to single spaces — multi-line stderr breaks TUI layout.
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
 }
 
 // annotateStreamError wraps a stream error with diagnostic context when the

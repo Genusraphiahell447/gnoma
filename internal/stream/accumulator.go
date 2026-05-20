@@ -93,6 +93,29 @@ func (a *Accumulator) Apply(e Event) {
 	}
 }
 
+// HasContent reports whether any user-visible content (text, thinking, or
+// tool calls) has been accumulated. Used by the engine to decide whether a
+// stream error is safe to fail over to another arm: a retry that would
+// produce duplicate text after the user already saw partial output is
+// worse than surfacing the error.
+//
+// Usage events alone do not count as content — they are bookkeeping.
+func (a *Accumulator) HasContent() bool {
+	if a.textBuf != nil && a.textBuf.Len() > 0 {
+		return true
+	}
+	if a.thinkBuf != nil && a.thinkBuf.Len() > 0 {
+		return true
+	}
+	if len(a.content) > 0 {
+		return true
+	}
+	if len(a.toolCallOrder) > 0 {
+		return true
+	}
+	return false
+}
+
 // Response builds the final message.Response from all accumulated events.
 func (a *Accumulator) Response(stopReason message.StopReason, model string) message.Response {
 	a.flushText()

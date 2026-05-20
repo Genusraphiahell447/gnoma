@@ -19,7 +19,8 @@ const (
 	EventToolResult    // tool execution output
 	EventPermissionReq // permission prompt needed
 	EventUsage
-	EventRouting // router arm selection
+	EventRouting  // router arm selection
+	EventFailover // arm swap after a stream error (no content was emitted)
 	EventError
 )
 
@@ -43,6 +44,8 @@ func (et EventType) String() string {
 		return "usage"
 	case EventRouting:
 		return "routing"
+	case EventFailover:
+		return "failover"
 	case EventError:
 		return "error"
 	default:
@@ -79,6 +82,13 @@ type Event struct {
 	RoutingModel      string // e.g. "anthropic/claude-sonnet-4-20250514"
 	RoutingTask       string // classified task type
 	RoutingClassifier string // classifier source: heuristic / slm / slm_fallback
+
+	// Failover — set on EventFailover. FailedArm is the arm whose stream
+	// errored out before producing content; FailedReason is a short message
+	// suitable for TUI display (the underlying error is in Err). RoutingModel
+	// holds the arm being tried next.
+	FailedArm    string
+	FailedReason string
 
 	// Error
 	Err error

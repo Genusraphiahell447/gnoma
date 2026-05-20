@@ -54,6 +54,13 @@ func (m Model) handleStreamEvent(evt stream.Event) (tea.Model, tea.Cmd) {
 		}
 		content += ")"
 		m.messages = append(m.messages, chatMessage{role: "cost", content: content})
+	case stream.EventFailover:
+		content := fmt.Sprintf("↻ %s failed", evt.FailedArm)
+		if evt.FailedReason != "" {
+			content += " (" + evt.FailedReason + ")"
+		}
+		content += " — retrying on another arm"
+		m.messages = append(m.messages, chatMessage{role: "cost", content: content})
 	case stream.EventToolResult:
 		if m.elfToolActive {
 			// Suppress raw elf output — tree shows progress, LLM summarizes
