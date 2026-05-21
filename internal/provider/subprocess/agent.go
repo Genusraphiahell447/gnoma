@@ -24,7 +24,7 @@ const (
 	FormatClaudeStreamJSON StreamFormat = "claude-stream-json"
 	FormatGeminiStreamJSON StreamFormat = "gemini-stream-json"
 	FormatVibeStreaming    StreamFormat = "vibe-streaming"
-	FormatAgyText          StreamFormat = "agy-text"
+	FormatCodexStreamJSON  StreamFormat = "codex-stream-json"
 )
 
 // CLIAgent describes a known CLI agent binary.
@@ -97,25 +97,17 @@ var knownAgents = []CLIAgent{
 		},
 	},
 	{
-		Name:        "agy",
-		DisplayName: "Antigravity",
+		Name:        "codex",
+		DisplayName: "Codex CLI",
 		ProbeArgs:   []string{"--version"},
 		PromptArgs: func(p string) []string {
-			// --dangerously-skip-permissions parallels gemini's --yolo and
-			// vibe's --trust: required for non-interactive runs since stdin
-			// is closed and we cannot answer permission prompts.
-			return []string{"--print", p, "--dangerously-skip-permissions"}
+			return []string{"exec", p, "--json", "--dangerously-bypass-approvals-and-sandbox"}
 		},
-		Format: FormatAgyText,
-		// JSONOutput / Vision left false: agy v1.0.0 has no native
-		// structured-output flag and no image-input mechanism. JSON support
-		// is faked via PromptResponseFormat (best-effort, model-dependent);
-		// see TODO.md for tracking native stream-json support.
+		Format: FormatCodexStreamJSON,
 		Capabilities: provider.Capabilities{
 			ToolUse:       true,
 			ContextWindow: 200000,
 		},
-		PromptResponseFormat: true,
 	},
 }
 
@@ -128,8 +120,8 @@ func newParser(f StreamFormat, rf *provider.ResponseFormat) FormatParser {
 		return newGeminiParser()
 	case FormatVibeStreaming:
 		return newVibeParser()
-	case FormatAgyText:
-		return newAgyParser(rf)
+	case FormatCodexStreamJSON:
+		return newCodexParser()
 	default:
 		return nil
 	}

@@ -1,0 +1,3 @@
+{"type":"item.completed", "item":{"type":"agent_message", "text":"hello"}}
+{"type":"item.completed", "item":{"type":"tool_call", "text":"ignored"}}
+{"type":"turn.completed", "usage":{"input_tokens": 10, "output_tokens": 5}}

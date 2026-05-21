@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
-	"somegit.dev/Owlibou/gnoma/internal/provider"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
 )
 
@@ -226,26 +225,68 @@ func (p *vibeParser) ParseLine(line []byte) ([]stream.Event, error) {
 
 func (p *vibeParser) Done() []stream.Event { return nil }
 
-// --- agy-text ---
-// Format emitted by: agy -p "..."
+// --- codex-stream-json ---
+// Format emitted by: codex exec "..." --json --dangerously-bypass-approvals-and-sandbox
 //
-// agy emits plain text to stdout. Each line is emitted as an EventTextDelta.
-// If ResponseFormat is JSON, the prompt was augmented to request JSON;
-// we still emit everything as text so the user sees progress.
+// Relevant event types:
+//   type=item.completed, item.type=agent_message → EventTextDelta (using item.text)
+//   type=turn.completed                          → EventUsage (using usage)
 
-type agyParser struct {
-	rf *provider.ResponseFormat
+type codexParser struct{}
+
+func newCodexParser() FormatParser { return &codexParser{} }
+
+type codexEvent struct {
+	Type  string      `json:"type"`
+	Item  *codexItem  `json:"item,omitempty"`
+	Usage *codexUsage `json:"usage,omitempty"`
 }
 
-func newAgyParser(rf *provider.ResponseFormat) FormatParser {
-	return &agyParser{rf: rf}
+type codexItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
-func (p *agyParser) ParseLine(line []byte) ([]stream.Event, error) {
-	return []stream.Event{{
-		Type: stream.EventTextDelta,
-		Text: string(line) + "\n",
-	}}, nil
+type codexUsage struct {
+	InputTokens      int64 `json:"input_tokens"`
+	OutputTokens     int64 `json:"output_tokens"`
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
 }
 
-func (p *agyParser) Done() []stream.Event { return nil }
+func (p *codexParser) ParseLine(line []byte) ([]stream.Event, error) {
+	var ev codexEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return nil, fmt.Errorf("codex: parse line: %w", err)
+	}
+
+	switch ev.Type {
+	case "item.completed":
+		if ev.Item != nil && ev.Item.Type == "agent_message" && ev.Item.Text != "" {
+			return []stream.Event{{Type: stream.EventTextDelta, Text: ev.Item.Text}}, nil
+		}
+	case "turn.completed":
+		if ev.Usage != nil {
+			input := ev.Usage.InputTokens
+			if input == 0 {
+				input = ev.Usage.PromptTokens
+			}
+			output := ev.Usage.OutputTokens
+			if output == 0 {
+				output = ev.Usage.CompletionTokens
+			}
+			return []stream.Event{{
+				Type: stream.EventUsage,
+				Usage: &message.Usage{
+					InputTokens:  input,
+					OutputTokens: output,
+				},
+				StopReason: message.StopEndTurn,
+			}}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (p *codexParser) Done() []stream.Event { return nil }
