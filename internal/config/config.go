@@ -201,14 +201,14 @@ type ProviderSection struct {
 	Default     string            `toml:"default"`
 	Model       string            `toml:"model"`
 	MaxTokens   int64             `toml:"max_tokens"`
-	Temperature *float64          `toml:"temperature"` // TODO(M8): wire to provider.Request.Temperature
+	Temperature *float64          `toml:"temperature"`
 	APIKeys     map[string]string `toml:"api_keys"`
 	Endpoints   map[string]string `toml:"endpoints"`
 }
 
 type ToolsSection struct {
 	BashTimeout Duration `toml:"bash_timeout"`
-	MaxFileSize int64    `toml:"max_file_size"` // TODO(M8): wire to fs tool WithMaxFileSize option
+	MaxFileSize int64    `toml:"max_file_size"`
 }
 
 // RateLimitSection allows overriding default rate limits per provider.

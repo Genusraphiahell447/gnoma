@@ -229,6 +229,12 @@ func TestCheckSensitiveRedirection_Blocked(t *testing.T) {
 		"echo evil > /etc/passwd",
 		"echo evil>>/etc/shadow",
 		"echo evil >> /etc/shadow",
+		"echo evil >\\\n.env",
+		"echo evil > \".env\"",
+		"echo evil > '.env'",
+		"echo evil > ./.env",
+		"echo evil > sub/.env",
+		"echo evil > /home/user/workspace/.env",
 	}
 	for _, cmd := range blocked {
 		t.Run(cmd, func(t *testing.T) {
@@ -237,6 +243,17 @@ func TestCheckSensitiveRedirection_Blocked(t *testing.T) {
 				t.Errorf("ValidateCommand(%q) = nil, want violation", cmd)
 			}
 		})
+	}
+}
+
+func TestCheckSensitiveRedirection_SyntaxError(t *testing.T) {
+	v := ValidateCommand("echo hello > \"unclosed quote")
+	if v == nil {
+		t.Error("expected violation for invalid syntax")
+		return
+	}
+	if v.Check != CheckIncomplete {
+		t.Errorf("expected CheckIncomplete, got %d", v.Check)
 	}
 }
 

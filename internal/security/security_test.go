@@ -360,6 +360,15 @@ func TestSanitizeUnicode_PreservesEmoji(t *testing.T) {
 	}
 }
 
+func TestSanitizeUnicode_StripsUnassigned(t *testing.T) {
+	// Unassigned character (Cn) e.g., U+0378
+	unassigned := "Hello\u0378world"
+	result := SanitizeUnicode(unassigned)
+	if result != "Helloworld" {
+		t.Errorf("should strip unassigned characters, got %q", result)
+	}
+}
+
 // --- Incognito ---
 
 func TestIncognito_DefaultOff(t *testing.T) {

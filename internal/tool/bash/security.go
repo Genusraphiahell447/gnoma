@@ -2,8 +2,11 @@ package bash
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // SecurityCheck identifies a specific validation check.
@@ -251,7 +254,7 @@ func checkStandaloneSemicolon(cmd string) *SecurityViolation {
 }
 
 // checkSensitiveRedirection blocks output redirection to sensitive paths.
-// Detects: >, >>, fd redirects (2>), and no-space variants (>/etc/passwd).
+// Uses a POSIX shell parser to reliably identify all output redirections.
 func checkSensitiveRedirection(cmd string) *SecurityViolation {
 	sensitiveTargets := []string{
 		"/etc/passwd", "/etc/shadow", "/etc/sudoers",
@@ -260,22 +263,90 @@ func checkSensitiveRedirection(cmd string) *SecurityViolation {
 		".env",
 	}
 
-	for _, target := range sensitiveTargets {
-		// Match any form: >, >>, 2>, 2>>, &> followed by optional whitespace then target
-		idx := strings.Index(cmd, target)
-		if idx <= 0 {
-			continue
-		}
-		// Check what precedes the target (skip whitespace backwards)
-		pre := strings.TrimRight(cmd[:idx], " \t")
-		if len(pre) > 0 && (pre[len(pre)-1] == '>' || strings.HasSuffix(pre, ">>")) {
-			return &SecurityViolation{
-				Check:   CheckRedirection,
-				Message: fmt.Sprintf("redirection to sensitive path: %s", target),
-			}
+	reader := strings.NewReader(cmd)
+	parser := syntax.NewParser()
+	file, err := parser.Parse(reader, "")
+	if err != nil {
+		return &SecurityViolation{
+			Check:   CheckIncomplete,
+			Message: fmt.Sprintf("invalid command syntax: %v", err),
 		}
 	}
-	return nil
+
+	var violation *SecurityViolation
+	printer := syntax.NewPrinter()
+
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if violation != nil {
+			return false
+		}
+
+		if stmt, ok := node.(*syntax.Stmt); ok {
+			for _, redir := range stmt.Redirs {
+				op := redir.Op
+				// Check all redirection operators that write or modify files:
+				// Skip read-only/heredoc operators: RdrIn (<), DplIn (<&), Hdoc (<<), DashHdoc (<<-), WordHdoc (<<<)
+				if op == syntax.RdrIn || op == syntax.DplIn || op == syntax.Hdoc || op == syntax.DashHdoc || op == syntax.WordHdoc {
+					continue
+				}
+
+				if redir.Word == nil {
+					continue
+				}
+
+				var b strings.Builder
+				_ = printer.Print(&b, redir.Word)
+				targetPath := b.String()
+
+				// Strip single/double quotes around the target word if present
+				targetPath = strings.TrimSpace(targetPath)
+				if (strings.HasPrefix(targetPath, "\"") && strings.HasSuffix(targetPath, "\"")) ||
+					(strings.HasPrefix(targetPath, "'") && strings.HasSuffix(targetPath, "'")) {
+					if len(targetPath) >= 2 {
+						targetPath = targetPath[1 : len(targetPath)-1]
+					}
+				}
+
+				cleaned := filepath.Clean(targetPath)
+
+				for _, target := range sensitiveTargets {
+					if strings.HasPrefix(target, "/") {
+						// Absolute targets: exact match
+						if cleaned == target {
+							violation = &SecurityViolation{
+								Check:   CheckRedirection,
+								Message: fmt.Sprintf("redirection to sensitive path: %s", target),
+							}
+							return false
+						}
+					} else {
+						// Relative targets: suffix/base match
+						if target == ".env" || target == ".bashrc" || target == ".zshrc" || target == ".profile" || target == ".bash_profile" {
+							if filepath.Base(cleaned) == target {
+								violation = &SecurityViolation{
+									Check:   CheckRedirection,
+									Message: fmt.Sprintf("redirection to sensitive path: %s", target),
+								}
+								return false
+							}
+						} else {
+							// Relative paths with directory components (e.g. .ssh/config)
+							if strings.HasSuffix(cleaned, "/"+target) || cleaned == target {
+								violation = &SecurityViolation{
+									Check:   CheckRedirection,
+									Message: fmt.Sprintf("redirection to sensitive path: %s", target),
+								}
+								return false
+							}
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+
+	return violation
 }
 
 // checkJQInjection detects jq commands with embedded shell metacharacters in the filter.

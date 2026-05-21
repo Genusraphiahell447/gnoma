@@ -44,6 +44,10 @@ func shouldStrip(r rune) bool {
 	if unicode.Is(unicode.Co, r) {
 		return true
 	}
+	// Strip unassigned characters (Cn) — unregistered characters
+	if unicode.Is(unicode.Cn, r) {
+		return true
+	}
 
 	// Strip specific dangerous ranges
 	switch {

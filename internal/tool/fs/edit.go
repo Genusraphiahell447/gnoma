@@ -79,7 +79,7 @@ func (t *EditTool) Execute(_ context.Context, args json.RawMessage) (tool.Result
 
 	path := a.Path
 	if t.guard != nil {
-		resolved, err := t.guard.ResolveRead(path)
+		resolved, err := t.guard.ResolveWrite(path)
 		if err != nil {
 			return tool.Result{Output: fmt.Sprintf("Error: %v", err)}, nil
 		}
