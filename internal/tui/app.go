@@ -672,25 +672,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+y":
 			return m.copyLatestResponse()
 		case "ctrl+v":
-			// Image paste writes bytes to .gnoma/pasted_image_*.png on disk,
-			// which violates the /incognito no-persistence contract — skip
-			// the image branch when incognito is active and fall through to
-			// the in-memory text fallback.
+			// Image paste writes the file to the user's cache directory
+			// (not the project workdir, which would pollute the repo).
+			// Skipped entirely under /incognito to honor the
+			// no-persistence contract; falls through to text clipboard.
 			if !m.incognito {
 				imgBytes, ext, err := pasteImageFromClipboard()
 				if err == nil && len(imgBytes) > 0 {
-					timestamp := time.Now().UnixNano()
-					dir := filepath.Join(gnomacfg.ProjectRoot(), ".gnoma")
-					if errDir := os.MkdirAll(dir, 0o755); errDir == nil {
-						filename := fmt.Sprintf("pasted_image_%d%s", timestamp, ext)
-						path := filepath.Join(dir, filename)
-						if errWrite := os.WriteFile(path, imgBytes, 0o600); errWrite == nil {
-							id := fmt.Sprintf("#img%d", len(m.pastedImages)+1)
-							placeholder := fmt.Sprintf("[Pasted image %s]", id)
-							m.pastedImages[id] = path
-							m.input.InsertString(placeholder)
-							return m, nil
-						}
+					if path, errStore := storePastedImage(imgBytes, ext); errStore == nil {
+						id := fmt.Sprintf("#img%d", len(m.pastedImages)+1)
+						placeholder := fmt.Sprintf("[Pasted image %s]", id)
+						m.pastedImages[id] = path
+						m.input.InsertString(placeholder)
+						return m, nil
 					}
 				}
 			}
@@ -2274,6 +2268,73 @@ func savePromptHistory(input string) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		slog.Warn("prompt history: chmod failed", "err", err, "path", path)
 	}
+}
+
+// pastedImageStaleAfter bounds how long a pasted-image file lives in the
+// user cache before it is eligible for pruning. Long enough to survive
+// any reasonable single turn (including provider retries and slow
+// subprocess CLIs), short enough that files don't accumulate across
+// sessions or days.
+const pastedImageStaleAfter = 2 * time.Hour
+
+// pastedImageDir returns the on-disk location where Ctrl+V image pastes
+// are written. Uses os.UserCacheDir() (XDG_CACHE_HOME on Linux,
+// ~/Library/Caches on macOS, %LocalAppData% on Windows) so paste files
+// stay out of the project workdir and live somewhere the OS knows is
+// purgeable. The directory is created at mode 0700 because pasted
+// images may contain screenshots with sensitive content.
+func pastedImageDir() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, "gnoma", "pasted-images")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// pruneStalePastedImages removes pasted-image files older than
+// pastedImageStaleAfter. Best-effort; errors are logged but not returned
+// so a paste never fails because of cleanup trouble.
+func pruneStalePastedImages(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-pastedImageStaleAfter)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			if rmErr := os.Remove(filepath.Join(dir, e.Name())); rmErr != nil {
+				slog.Debug("pasted-image prune failed", "name", e.Name(), "err", rmErr)
+			}
+		}
+	}
+}
+
+// storePastedImage persists clipboard image bytes to the user cache and
+// returns the absolute path. Prunes stale entries on each paste so the
+// directory does not grow without bound across sessions.
+func storePastedImage(data []byte, ext string) (string, error) {
+	dir, err := pastedImageDir()
+	if err != nil {
+		return "", err
+	}
+	pruneStalePastedImages(dir)
+	name := fmt.Sprintf("pasted_image_%d%s", time.Now().UnixNano(), ext)
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func pasteImageFromClipboard() ([]byte, string, error) {

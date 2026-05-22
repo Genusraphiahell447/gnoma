@@ -33,7 +33,14 @@ Thumbs.db
 # Session data
 .gnoma/sessions/
 
+# Pasted-image artifacts. New images go to the user cache dir
+# (~/.cache/gnoma/pasted-images/); the pattern covers legacy
+# files written into .gnoma/ before that change.
+.gnoma/pasted_image_*
+
 # Debug
 __debug_bin*
 .env
 .claude/
+log.txt
+codex_out.jsonl
