@@ -29,9 +29,10 @@ func (e *Engine) Submit(ctx context.Context, input string, cb Callback) (*Turn, 
 
 // SubmitWithOptions is like Submit but applies per-turn overrides (e.g. ToolChoice).
 func (e *Engine) SubmitWithOptions(ctx context.Context, input string, opts TurnOptions, cb Callback) (*Turn, error) {
+	userMsg := e.buildUserMessage(ctx, input, cb)
+
 	e.mu.Lock()
 	e.turnOpts = opts
-	userMsg := message.NewUserText(input)
 	e.history = append(e.history, userMsg)
 	e.mu.Unlock()
 	defer func() {
@@ -45,6 +46,29 @@ func (e *Engine) SubmitWithOptions(ctx context.Context, input string, opts TurnO
 	}
 
 	return e.runLoop(ctx, cb)
+}
+
+// buildUserMessage wraps the raw input into a message.Message. When the
+// active model advertises Vision capability and the input contains
+// `[Image: /path]` markers, the markers are inlined as ImageContent blocks
+// carrying the file bytes; otherwise the input is wrapped as a single
+// text block (legacy behavior). Marker-parse warnings are forwarded to cb
+// as system events so the user sees why a paste fell back to text.
+func (e *Engine) buildUserMessage(ctx context.Context, input string, cb Callback) message.Message {
+	if !imageMarkerRe.MatchString(input) {
+		return message.NewUserText(input)
+	}
+	caps := e.resolveCapabilities(ctx)
+	if caps == nil || !caps.Vision {
+		// Active model can't see images; leave markers as text so any
+		// downstream subprocess CLI that auto-ingests paths still works.
+		return message.NewUserText(input)
+	}
+	content, warnings := parseImageMarkers(input)
+	for _, w := range warnings {
+		e.logger.Warn("image marker parse", "warning", w)
+	}
+	return message.Message{Role: message.RoleUser, Content: content}
 }
 
 // SubmitMessages is like Submit but accepts pre-built messages.
@@ -142,6 +166,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 					task.EstimatedTokens = int(gnomactx.EstimateTokens(prompt))
 				}
 				task.ExcludedArms = failedArms
+				task.RequiresVision = e.latestUserHasImages()
 
 				e.logger.Debug("routing request",
 					"task_type", task.Type,
@@ -212,6 +237,7 @@ func (e *Engine) runLoop(ctx context.Context, cb Callback) (*Turn, error) {
 						}
 
 						task.ExcludedArms = failedArms
+						task.RequiresVision = e.latestUserHasImages()
 						var retryDecision router.RoutingDecision
 						s, retryDecision, err = e.cfg.Router.Stream(ctx, task, req)
 						if err == nil {

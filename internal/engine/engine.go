@@ -343,6 +343,20 @@ func (e *Engine) latestUserPrompt() string {
 	return ""
 }
 
+// latestUserHasImages reports whether the most recent user message carries
+// any inline image content. Used by the routing path to enforce vision
+// capability when selecting an arm.
+func (e *Engine) latestUserHasImages() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for i := len(e.history) - 1; i >= 0; i-- {
+		if e.history[i].Role == message.RoleUser {
+			return e.history[i].HasImages()
+		}
+	}
+	return false
+}
+
 // historySnapshot returns a copy of the current history slice.
 func (e *Engine) historySnapshot() []message.Message {
 	e.mu.Lock()
