@@ -55,8 +55,11 @@ dockers:
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.title=gnoma"
-      - "--label=org.opencontainers.image.source=https://somegit.dev/Owlibou/gnoma"
-      - "--label=org.opencontainers.image.url=https://github.com/VikingOwl91/gnoma"
+      # image.source points at the GitHub mirror so GHCR auto-links the
+      # package page to the repo (Readme, contributors, discussions).
+      # The Gitea canonical URL stays available via image.url.
+      - "--label=org.opencontainers.image.source=https://github.com/VikingOwl91/gnoma"
+      - "--label=org.opencontainers.image.url=https://somegit.dev/Owlibou/gnoma"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
@@ -71,8 +74,11 @@ dockers:
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.title=gnoma"
-      - "--label=org.opencontainers.image.source=https://somegit.dev/Owlibou/gnoma"
-      - "--label=org.opencontainers.image.url=https://github.com/VikingOwl91/gnoma"
+      # image.source points at the GitHub mirror so GHCR auto-links the
+      # package page to the repo (Readme, contributors, discussions).
+      # The Gitea canonical URL stays available via image.url.
+      - "--label=org.opencontainers.image.source=https://github.com/VikingOwl91/gnoma"
+      - "--label=org.opencontainers.image.url=https://somegit.dev/Owlibou/gnoma"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
