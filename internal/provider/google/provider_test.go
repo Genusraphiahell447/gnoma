@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"somegit.dev/Owlibou/gnoma/internal/provider"
+	"cloud.google.com/go/auth"
+
+	_ "somegit.dev/Owlibou/gnoma/internal/provider"
 )
 
 func TestTryLoadOAuthCredentials_Formats(t *testing.T) {
@@ -97,30 +100,15 @@ func TestTryLoadOAuthCredentials_Formats(t *testing.T) {
 	}
 }
 
-func TestNew_Precedence(t *testing.T) {
-	// We will override the HOME env var in the test to control the expanded path.
-	origHome := os.Getenv("HOME")
-	defer func() {
-		if err := os.Setenv("HOME", origHome); err != nil {
-			t.Errorf("failed to restore HOME env var: %v", err)
-		}
-	}()
+func TestSelectOAuthCredentials_Precedence(t *testing.T) {
+	// Override HOME so expandHome() resolves into a sandbox dir.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
 
-	tmpHome, err := os.MkdirTemp("", "gnoma-home-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp home dir: %v", err)
-	}
-	defer os.RemoveAll(tmpHome)
-
-	if err := os.Setenv("HOME", tmpHome); err != nil {
-		t.Fatalf("failed to set HOME env var: %v", err)
-	}
-
-	// Helper to write a mock credentials file
 	writeCreds := func(relPath, tokenVal string) {
 		absPath := filepath.Join(tmpHome, relPath)
 		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
-			t.Fatalf("failed to create dir: %v", err)
+			t.Fatalf("mkdir: %v", err)
 		}
 		data := oauthCreds{
 			AccessToken: tokenVal,
@@ -128,50 +116,117 @@ func TestNew_Precedence(t *testing.T) {
 		}
 		bz, err := json.Marshal(data)
 		if err != nil {
-			t.Fatalf("failed to marshal: %v", err)
+			t.Fatal(err)
 		}
-		if err := os.WriteFile(absPath, bz, 0644); err != nil {
-			t.Fatalf("failed to write file: %v", err)
+		if err := os.WriteFile(absPath, bz, 0600); err != nil {
+			t.Fatalf("write: %v", err)
 		}
 	}
 
-	// 1. Setup both agy and gemini. agy should take precedence.
-	// We use the first path of agyPaths: "~/.config/google-antigravity/session.json"
-	// and geminiPaths: "~/.gemini/oauth_creds.json"
-	writeCreds(filepath.Join(".config", "google-antigravity", "session.json"), "token-agy")
-	writeCreds(filepath.Join(".gemini", "oauth_creds.json"), "token-gemini")
-
-	cfg := provider.ProviderConfig{
-		Options: map[string]interface{}{
-			"project":  "test-project-123",
-			"location": "us-central1",
-		},
+	tokenOf := func(c *auth.Credentials) string {
+		t.Helper()
+		tok, err := c.Token(context.Background())
+		if err != nil {
+			t.Fatalf("Token: %v", err)
+		}
+		return tok.Value
 	}
 
-	p, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() with both creds failed: %v", err)
-	}
+	t.Run("agy beats gemini when both present", func(t *testing.T) {
+		// Fresh sandbox per subtest to avoid leftover files.
+		sub := t.TempDir()
+		t.Setenv("HOME", sub)
+		// Use the first agy path and the first gemini path.
+		writeAt := func(rel, tok string) {
+			abs := filepath.Join(sub, rel)
+			if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+				t.Fatal(err)
+			}
+			bz, _ := json.Marshal(oauthCreds{
+				AccessToken: tok,
+				ExpiryDate:  time.Now().Add(time.Hour).Unix(),
+			})
+			if err := os.WriteFile(abs, bz, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeAt(filepath.Join(".config", "google-antigravity", "session.json"), "token-agy")
+		writeAt(filepath.Join(".gemini", "oauth_creds.json"), "token-gemini")
 
-	googleProv, ok := p.(*Provider)
-	if !ok {
-		t.Fatalf("expected *Provider, got %T", p)
-	}
+		creds, source, err := selectOAuthCredentials()
+		if err != nil {
+			t.Fatalf("selectOAuthCredentials: %v", err)
+		}
+		if source != CredentialSourceAgy {
+			t.Errorf("source = %q, want %q", source, CredentialSourceAgy)
+		}
+		if got := tokenOf(creds); got != "token-agy" {
+			t.Errorf("loaded token = %q, want token-agy (agy precedence violated)", got)
+		}
+	})
 
-	// Use googleProv's client to check the configured token (by calling Credentials.Token)
-	// We can't access client.Credentials directly as it might be unexported/not exposed, but we can verify the client config or test credentials directly.
-	// Actually, we can just test the tryLoadOAuthCredentials lookup logic or call New and check errors.
-	// Let's verify we get no error.
-	_ = googleProv
+	t.Run("falls back to gemini when agy missing", func(t *testing.T) {
+		sub := t.TempDir()
+		t.Setenv("HOME", sub)
+		// Only gemini file present.
+		geminiPath := filepath.Join(sub, ".gemini", "oauth_creds.json")
+		if err := os.MkdirAll(filepath.Dir(geminiPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		bz, _ := json.Marshal(oauthCreds{
+			AccessToken: "token-gemini-only",
+			ExpiryDate:  time.Now().Add(time.Hour).Unix(),
+		})
+		if err := os.WriteFile(geminiPath, bz, 0600); err != nil {
+			t.Fatal(err)
+		}
 
-	// 2. Now delete agy and keep only gemini.
-	if err := os.Remove(filepath.Join(tmpHome, ".config", "google-antigravity", "session.json")); err != nil {
-		t.Fatalf("failed to remove agy config: %v", err)
-	}
+		creds, source, err := selectOAuthCredentials()
+		if err != nil {
+			t.Fatalf("selectOAuthCredentials: %v", err)
+		}
+		if source != CredentialSourceGemini {
+			t.Errorf("source = %q, want %q", source, CredentialSourceGemini)
+		}
+		if got := tokenOf(creds); got != "token-gemini-only" {
+			t.Errorf("loaded token = %q, want token-gemini-only", got)
+		}
+	})
 
-	p2, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() with gemini creds failed: %v", err)
+	t.Run("missing files are not warning-worthy", func(t *testing.T) {
+		// Sanity check: empty home directory walks the chain without
+		// failing in unexpected ways (only ADC would remain, which we
+		// don't assert on here because the test host may or may not have
+		// gcloud configured).
+		sub := t.TempDir()
+		t.Setenv("HOME", sub)
+		_, _, err := selectOAuthCredentials()
+		// Either ADC works on this host (no error) or no creds anywhere
+		// (returns our specific "no google credentials" error). Both are
+		// fine; the point is we don't panic or report a misconfiguration.
+		if err != nil && !strings.Contains(err.Error(), "no google credentials") {
+			t.Errorf("unexpected error shape: %v", err)
+		}
+	})
+	_ = writeCreds // keep helper available if extended in future
+}
+
+func TestFileTokenProvider_RejectsExpired(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "creds.json")
+	bz, _ := json.Marshal(oauthCreds{
+		AccessToken: "stale",
+		ExpiryDate:  time.Now().Add(-time.Hour).Unix(),
+	})
+	if err := os.WriteFile(path, bz, 0600); err != nil {
+		t.Fatal(err)
 	}
-	_ = p2
+	tp := &fileTokenProvider{filePath: path}
+	tok, err := tp.Token(context.Background())
+	if err == nil {
+		t.Errorf("expected error for expired token, got token %+v", tok)
+	}
+	if err != nil && !strings.Contains(err.Error(), "expired") {
+		t.Errorf("error %q should mention expiry", err)
+	}
 }
