@@ -53,6 +53,7 @@ func TestKnownAgents_ValidFormats(t *testing.T) {
 		FormatClaudeStreamJSON: true,
 		FormatGeminiStreamJSON: true,
 		FormatVibeStreaming:    true,
+		FormatAgyText:          true,
 		FormatCodexStreamJSON:  true,
 	}
 	for _, a := range knownAgents {
