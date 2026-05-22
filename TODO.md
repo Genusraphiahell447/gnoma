@@ -15,6 +15,18 @@ Active work, newest first.
 - **Compound tools (post-SLM Phase E)** — held until ≥50 SLM
   observations inform which primitives are worth adding. See
   [`docs/superpowers/plans/2026-05-19-post-slm-unlock.md`](docs/superpowers/plans/2026-05-19-post-slm-unlock.md).
+- **Sensitive-content handling — unified policy.** Three input paths
+  can introduce sensitive content into the context: pasted images
+  (screenshots may contain secrets, API keys, PII), pasted text (often
+  copied straight from a terminal with credentials), and tool-read
+  files (`.env`, key files, etc.). Today these are handled
+  inconsistently: incognito gates persistence but content still flows
+  to providers; outgoing-scan firewall covers some patterns but is
+  format-aware only for text. Need a single policy/UI: at-paste
+  warning when the content matches sensitive heuristics, a
+  consent-gated review step, and consistent treatment across the
+  three paths. Cross-cuts with Phase F entropy work and the
+  outgoing-scan firewall.
 - **Distribution — follow-ups.** v0.1.0 shipped (archives on
   github.com/VikingOwl91/gnoma/releases, multi-arch images on
   ghcr.io/vikingowl91/gnoma). Still optional: Homebrew tap,
