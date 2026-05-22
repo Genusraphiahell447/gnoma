@@ -2,6 +2,7 @@ package security
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"regexp"
 )
@@ -35,6 +36,8 @@ type Scanner struct {
 	patterns          []SecretPattern
 	entropyThreshold  float64
 	redactHighEntropy bool
+	safelist          []safelistEntry
+	logger            *slog.Logger
 }
 
 func NewScanner(entropyThreshold float64, redactHighEntropy bool) *Scanner {
@@ -46,6 +49,30 @@ func NewScanner(entropyThreshold float64, redactHighEntropy bool) *Scanner {
 		entropyThreshold:  entropyThreshold,
 		redactHighEntropy: redactHighEntropy,
 	}
+}
+
+// SetSafelist configures the format-aware entropy pre-extractor (Phase F-1).
+// Names are looked up in defaultSafelistPatterns; unknown names are silently
+// dropped (callers that want to surface typos should use splitSafelistNames
+// directly — NewFirewall does this). Calling with an empty or nil slice
+// clears the safelist and restores pre-F-1 behavior (every long token is
+// entropy-scored).
+func (s *Scanner) SetSafelist(names []string) {
+	s.safelist = buildSafelist(names)
+}
+
+// SetLogger swaps the logger used for safelist-skip telemetry. The Scanner
+// otherwise logs nothing; if unset it falls back to slog.Default() so tests
+// stay quiet.
+func (s *Scanner) SetLogger(logger *slog.Logger) {
+	s.logger = logger
+}
+
+func (s *Scanner) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // AddPattern adds a custom detection pattern.
@@ -98,10 +125,21 @@ func (s *Scanner) HasSecrets(content string) bool {
 // scanEntropy detects high-entropy strings that might be secrets.
 func (s *Scanner) scanEntropy(content string) []SecretMatch {
 	var matches []SecretMatch
+	safeSpans := safelistSpansFor(content, s.safelist)
 	// Check each word-like token that's long enough to be a secret
 	words := entropyTokenize(content)
 	for _, w := range words {
 		if len(w.text) < 20 { // secrets are typically 20+ chars
+			continue
+		}
+		if name, ok := inAnySpan(safeSpans, w.start, w.start+len(w.text)); ok {
+			// Per-pattern telemetry for FP-rate measurement. Token bytes
+			// stay out of the log — only length + the safelist name that
+			// covered it. F-2's go/no-go hinges on this data.
+			s.log().Debug("entropy candidate skipped by safelist",
+				"pattern", name,
+				"token_len", len(w.text),
+			)
 			continue
 		}
 		entropy := shannonEntropy(w.text)

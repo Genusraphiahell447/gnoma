@@ -445,21 +445,30 @@ on the remaining unstructured residue.
 
 #### Tasks (F-1)
 
-- [ ] `internal/security/safelist.go` — compiled regex list for the
-  known-safe shapes, with per-pattern naming so the trace path matches
-  the existing `pattern` log field.
-- [ ] `Scanner.scanEntropy()` consults the safelist first; matching
-  tokens are skipped (not scored).
-- [ ] Config knob `[firewall.entropy].safelist = ["uuid", "sha_hex",
-  "iso8601"]` so users can curate which formats are auto-skipped.
-  Empty / unset preserves current behaviour exactly.
-- [ ] Tests: UUID skipped, SHA-256 skipped, mixed payload (structured
-  + unstructured), config-disabled-safelist preserves current behaviour,
-  measurement of FP-rate delta on a synthetic corpus.
+- [x] `internal/security/safelist.go` — compiled regex list for the
+  known-safe shapes (`uuid`, `sha_hex`, `iso8601`, `url`) with
+  per-pattern naming so the trace path matches the existing `pattern`
+  log field.
+- [x] `Scanner.scanEntropy()` consults the safelist first; tokens
+  contained in any safelist span are skipped (not scored).
+- [x] Config knob `[security].entropy_safelist = ["uuid", "sha_hex",
+  "iso8601", "url"]` so users can curate which formats are auto-skipped.
+  Empty / unset preserves current behaviour exactly. (TOML key lives
+  under `[security]` to match the existing `entropy_threshold` and
+  `redact_high_entropy` knobs, not under a new `[firewall.entropy]`
+  table.)
+- [x] Tests: UUID skipped, SHA-1/256 skipped, mixed payload with secret
+  preserved, secret-adjacent-to-UUID regression guard, empty safelist
+  preserves pre-F-1 behaviour, unknown name silently dropped.
+- [ ] Measurement of FP-rate delta on a synthetic corpus — deferred
+  until telemetry from a real workload is available (the synthetic
+  corpus would just measure the unit tests).
 
 **Effort estimate:** ~150 LOC + tests.
 
-**Status:** scoped, not started.
+**Status:** shipped 2026-05-22. Default config remains empty; users
+opt in by adding `entropy_safelist` to `[security]`. F-2 gating still
+requires real-world FP-rate observations.
 
 ### F-2: SLM-assisted classifier for ambiguous entropy hits
 

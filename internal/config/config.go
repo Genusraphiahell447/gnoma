@@ -170,14 +170,19 @@ type SessionSection struct {
 //
 //	[security]
 //	entropy_threshold = 4.5
+//	entropy_safelist  = ["uuid", "sha_hex", "iso8601", "url"]
 //
 //	[[security.patterns]]
 //	name = "internal_token"
 //	regex = "mycompany_[a-zA-Z0-9]{32}"
 //	action = "redact"
+//
+// entropy_safelist names known-safe shapes that bypass the entropy scorer
+// (Phase F-1 FP reduction). Empty / unset preserves pre-F-1 behavior.
 type SecuritySection struct {
 	EntropyThreshold  float64         `toml:"entropy_threshold"`
 	RedactHighEntropy bool            `toml:"redact_high_entropy"`
+	EntropySafelist   []string        `toml:"entropy_safelist"`
 	Patterns          []PatternConfig `toml:"patterns"`
 }
 

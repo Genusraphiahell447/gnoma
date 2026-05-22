@@ -25,6 +25,7 @@ type FirewallConfig struct {
 	ScanToolResults   bool
 	RedactHighEntropy bool
 	EntropyThreshold  float64
+	EntropySafelist   []string
 	Logger            *slog.Logger
 }
 
@@ -33,8 +34,20 @@ func NewFirewall(cfg FirewallConfig) *Firewall {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	scanner := NewScanner(cfg.EntropyThreshold, cfg.RedactHighEntropy)
+	scanner.SetLogger(logger)
+	// Validate safelist names at the config boundary so a typo surfaces
+	// loudly instead of silently disabling FP reduction.
+	entries, unknown := splitSafelistNames(cfg.EntropySafelist)
+	for _, name := range unknown {
+		logger.Warn("ignoring unknown entropy safelist name",
+			"name", name,
+			"hint", "valid names: uuid, sha_hex, iso8601, url",
+		)
+	}
+	scanner.safelist = entries
 	return &Firewall{
-		scanner:         NewScanner(cfg.EntropyThreshold, cfg.RedactHighEntropy),
+		scanner:         scanner,
 		incognito:       NewIncognitoMode(),
 		logger:          logger,
 		scanOutgoing:    cfg.ScanOutgoing,

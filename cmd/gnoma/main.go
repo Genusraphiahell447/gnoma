@@ -529,6 +529,7 @@ func main() {
 		ScanOutgoing:     true,
 		ScanToolResults:  true,
 		EntropyThreshold: entropyThreshold,
+		EntropySafelist:  cfg.Security.EntropySafelist,
 		Logger:           logger,
 	})
 	// Install into the ref so every SafeProvider wrapper sees scanning
