@@ -34,7 +34,11 @@ Active work, newest first.
   `curl | sh` installer script, signed checksums (cosign/sigstore),
   release note automation, Windows process-tree kill via
   golang.org/x/sys/windows job objects (currently `os.Process.Kill`
-  only — see `internal/mcp/transport_windows.go`).
+  only — see `internal/mcp/transport_windows.go`), and migration
+  from `dockers` + `docker_manifests` to `dockers_v2` in
+  `.goreleaser.yml` (collapses ~45 lines into one block but
+  requires Dockerfile changes for the per-platform binary layout
+  — deferred to its own commit before v0.3.0).
 
 ## Stable backlog (not in active phases)
 
