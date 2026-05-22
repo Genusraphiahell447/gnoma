@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +27,7 @@ const (
 	FormatGeminiStreamJSON StreamFormat = "gemini-stream-json"
 	FormatVibeStreaming    StreamFormat = "vibe-streaming"
 	FormatAgyText          StreamFormat = "agy-text"
+	FormatCodexStreamJSON  StreamFormat = "codex-stream-json"
 )
 
 // CLIAgent describes a known CLI agent binary.
@@ -100,13 +103,8 @@ var knownAgents = []CLIAgent{
 		Name:        "agy",
 		DisplayName: "Antigravity",
 		ProbeArgs:   []string{"--version"},
-		PromptArgs: func(p string) []string {
-			// --dangerously-skip-permissions parallels gemini's --yolo and
-			// vibe's --trust: required for non-interactive runs since stdin
-			// is closed and we cannot answer permission prompts.
-			return []string{"--print", p, "--dangerously-skip-permissions"}
-		},
-		Format: FormatAgyText,
+		PromptArgs:  agyPromptArgs,
+		Format:      FormatAgyText,
 		// JSONOutput / Vision left false: agy v1.0.0 has no native
 		// structured-output flag and no image-input mechanism. JSON support
 		// is faked via PromptResponseFormat (best-effort, model-dependent);
@@ -117,6 +115,66 @@ var knownAgents = []CLIAgent{
 		},
 		PromptResponseFormat: true,
 	},
+	{
+		Name:        "codex",
+		DisplayName: "Codex CLI",
+		ProbeArgs:   []string{"--version"},
+		PromptArgs:  codexPromptArgs,
+		Format:      FormatCodexStreamJSON,
+		Capabilities: provider.Capabilities{
+			ToolUse:       true,
+			ContextWindow: 200000,
+		},
+	},
+}
+
+// agySandboxBypassEnv toggles the --dangerously-skip-permissions flag passed
+// to agy. Defaults to "on" because agy's stdin is closed in our
+// non-interactive invocation; without the flag the CLI blocks on permission
+// prompts that nobody can answer. Mirrors the codex env in shape and
+// default for consistency.
+const agySandboxBypassEnv = "GNOMA_AGY_BYPASS_PERMISSIONS"
+
+func agyBypassPermissions() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(agySandboxBypassEnv))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func agyPromptArgs(p string) []string {
+	args := []string{"--print", p}
+	if agyBypassPermissions() {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+	return args
+}
+
+// codexSandboxBypassEnv toggles the --dangerously-bypass-approvals-and-sandbox
+// flag passed to codex. Defaults to "on" because codex's stdin is closed in
+// the non-interactive `exec` mode we use; without the bypass the CLI blocks
+// waiting for an approval prompt that nobody can answer and the turn hangs.
+// Operators who pre-approve via codex's own config (e.g. a workspace-level
+// trust file) can set this to "0", "false", or "no" to drop the flag.
+const codexSandboxBypassEnv = "GNOMA_CODEX_BYPASS_SANDBOX"
+
+func codexBypassSandbox() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(codexSandboxBypassEnv))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func codexPromptArgs(p string) []string {
+	args := []string{"exec", p, "--json"}
+	if codexBypassSandbox() {
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	return args
 }
 
 // newParser returns a FormatParser for the given format.
@@ -130,6 +188,8 @@ func newParser(f StreamFormat, rf *provider.ResponseFormat) FormatParser {
 		return newVibeParser()
 	case FormatAgyText:
 		return newAgyParser(rf)
+	case FormatCodexStreamJSON:
+		return newCodexParser()
 	default:
 		return nil
 	}

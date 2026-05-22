@@ -1,11 +1,10 @@
 // Package subprocess provides a provider.Provider that delegates to CLI agents
-// (claude, gemini, vibe, agy) by spawning them as subprocesses.
+// (claude, gemini, vibe, codex) by spawning them as subprocesses.
 //
 // Impedance mismatch: these CLI agents are full agentic loops, not LLM endpoints.
 // Only the latest user message is passed as a prompt. The following provider.Request
 // fields are intentionally ignored: Tools, SystemPrompt, Messages (history),
 // Temperature, TopP, TopK, Thinking, ToolChoice, MaxTokens.
-// ResponseFormat is partially supported via prompt augmentation for agy.
 // Internal tool calls executed by the CLI are surfaced as EventTextDelta (opaque).
 //
 // SECURITY WARNING: These CLI agents are external trust boundaries. They run
@@ -38,7 +37,7 @@ func New(agent DiscoveredAgent) *Provider {
 // Name returns "subprocess" — all CLI agents share this provider namespace.
 func (p *Provider) Name() string { return "subprocess" }
 
-// DefaultModel returns the CLI binary name (e.g., "claude", "gemini", "vibe", "agy").
+// DefaultModel returns the CLI binary name (e.g., "claude", "gemini", "vibe", "codex").
 func (p *Provider) DefaultModel() string { return p.agent.Name }
 
 // Models returns a single ModelInfo describing this CLI agent.

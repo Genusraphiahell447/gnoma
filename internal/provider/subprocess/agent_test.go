@@ -54,6 +54,7 @@ func TestKnownAgents_ValidFormats(t *testing.T) {
 		FormatGeminiStreamJSON: true,
 		FormatVibeStreaming:    true,
 		FormatAgyText:          true,
+		FormatCodexStreamJSON:  true,
 	}
 	for _, a := range knownAgents {
 		if !valid[a.Format] {
@@ -84,7 +85,7 @@ func TestNewParser_ReturnsParserForKnownFormats(t *testing.T) {
 		FormatClaudeStreamJSON,
 		FormatGeminiStreamJSON,
 		FormatVibeStreaming,
-		FormatAgyText,
+		FormatCodexStreamJSON,
 	}
 	for _, f := range formats {
 		p := newParser(f, nil)
