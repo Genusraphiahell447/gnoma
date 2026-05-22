@@ -1,7 +1,9 @@
 package openai
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
@@ -39,6 +41,37 @@ func unsanitizeToolName(name string) string {
 	return name
 }
 
+// buildUserContentParts converts a heterogeneous user-content slice into
+// OpenAI content-parts. Adjacent text blocks are concatenated. Each Image
+// block is emitted as an image_url part carrying a base64 data URL.
+func buildUserContentParts(blocks []message.Content) []oai.ChatCompletionContentPartUnionParam {
+	parts := make([]oai.ChatCompletionContentPartUnionParam, 0, len(blocks))
+	var textBuf strings.Builder
+	flushText := func() {
+		if textBuf.Len() > 0 {
+			parts = append(parts, oai.TextContentPart(textBuf.String()))
+			textBuf.Reset()
+		}
+	}
+	for _, c := range blocks {
+		switch c.Type {
+		case message.ContentText:
+			textBuf.WriteString(c.Text)
+		case message.ContentImage:
+			if c.Image == nil || len(c.Image.Data) == 0 {
+				continue
+			}
+			flushText()
+			dataURL := fmt.Sprintf("data:%s;base64,%s", c.Image.MediaType, base64.StdEncoding.EncodeToString(c.Image.Data))
+			parts = append(parts, oai.ImageContentPart(oai.ChatCompletionContentPartImageImageURLParam{
+				URL: dataURL,
+			}))
+		}
+	}
+	flushText()
+	return parts
+}
+
 // --- gnoma → OpenAI ---
 
 func translateMessages(msgs []message.Message) []oai.ChatCompletionMessageParamUnion {
@@ -66,6 +99,12 @@ func translateMessage(m message.Message) []oai.ChatCompletionMessageParamUnion {
 				}
 			}
 			return msgs
+		}
+		// Inline images → content parts array; pure text → plain string.
+		if m.HasImages() {
+			return []oai.ChatCompletionMessageParamUnion{
+				oai.UserMessage(buildUserContentParts(m.Content)),
+			}
 		}
 		return []oai.ChatCompletionMessageParamUnion{
 			oai.UserMessage(m.TextContent()),
