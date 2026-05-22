@@ -1,8 +1,10 @@
 package subprocess
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"somegit.dev/Owlibou/gnoma/internal/message"
 	"somegit.dev/Owlibou/gnoma/internal/stream"
@@ -255,9 +257,23 @@ type codexUsage struct {
 }
 
 func (p *codexParser) ParseLine(line []byte) ([]stream.Event, error) {
+	// Codex emits banner/debug lines to stdout interleaved with the JSON
+	// event stream (version notes, sandbox warnings, "starting turn" log
+	// lines, etc.). Skip anything that isn't a JSON object so a stray
+	// banner can't abort the turn — subprocessStream.Next treats a
+	// parser error as terminal.
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, nil
+	}
+
 	var ev codexEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("codex: parse line: %w", err)
+	if err := json.Unmarshal(trimmed, &ev); err != nil {
+		// Looks like JSON but won't parse — log and skip rather than
+		// killing the stream; codex JSON-line output is the only path
+		// we have to recover from a malformed line.
+		slog.Debug("codex: skipping unparseable JSON line", "err", err, "line", string(trimmed))
+		return nil, nil
 	}
 
 	switch ev.Type {
@@ -267,12 +283,16 @@ func (p *codexParser) ParseLine(line []byte) ([]stream.Event, error) {
 		}
 	case "turn.completed":
 		if ev.Usage != nil {
+			// Some codex builds emit input_tokens, others (older) emit
+			// prompt_tokens; new builds occasionally include both with
+			// slightly different values. max() prevents silent
+			// undercounting when both are non-zero.
 			input := ev.Usage.InputTokens
-			if input == 0 {
+			if ev.Usage.PromptTokens > input {
 				input = ev.Usage.PromptTokens
 			}
 			output := ev.Usage.OutputTokens
-			if output == 0 {
+			if ev.Usage.CompletionTokens > output {
 				output = ev.Usage.CompletionTokens
 			}
 			return []stream.Event{{
