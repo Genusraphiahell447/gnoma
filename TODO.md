@@ -39,6 +39,9 @@ Active work, newest first.
 
 - **Thinking mode** (disabled / budget / adaptive) — M12.
 - **Structured output** with JSON schema validation — M12.
+- **Native agy JSON output** — switch the subprocess provider to
+  `--output-format stream-json` once the agy CLI supports it,
+  replacing the current prompt-augmentation fallback.
 - **SQLite session persistence** + serve mode — M10.
 - **Task learning** (pattern recognition, persistent tasks) — M11.
 - **Web UI** (`gnoma web`) — M15.
