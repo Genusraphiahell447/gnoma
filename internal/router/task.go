@@ -91,6 +91,7 @@ type Task struct {
 	Priority         Priority
 	EstimatedTokens  int
 	RequiresTools    bool
+	RequiresVision   bool                 // input includes inline image content; arm must advertise Capabilities.Vision
 	ComplexityScore  float64              // 0-1
 	RequiredEffort   provider.EffortLevel // EffortAuto = no constraint on thinking
 	ExcludedArms     []ArmID              // Arms to avoid (e.g. due to recent 429 errors)

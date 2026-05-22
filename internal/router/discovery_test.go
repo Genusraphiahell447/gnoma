@@ -270,7 +270,7 @@ func TestDiscoverOllama_AppliesDefaultContextSize(t *testing.T) {
 	srv := stub.server()
 	defer srv.Close()
 
-	cache := map[string]bool{}
+	cache := map[string]OllamaProbeResult{}
 	models, err := DiscoverOllama(context.Background(), srv.URL, cache)
 	if err != nil {
 		t.Fatalf("DiscoverOllama: %v", err)
@@ -296,10 +296,10 @@ func TestDiscoverOllama_PrunesCacheOnDisappearance(t *testing.T) {
 	srv := stub.server()
 	defer srv.Close()
 
-	cache := map[string]bool{
-		"alive:latest":  true,
-		"ghost:latest":  true, // not in tags response — must be pruned
-		"another-ghost": false,
+	cache := map[string]OllamaProbeResult{
+		"alive:latest":  {SupportsTools: true},
+		"ghost:latest":  {SupportsTools: true}, // not in tags response — must be pruned
+		"another-ghost": {},
 	}
 	if _, err := DiscoverOllama(context.Background(), srv.URL, cache); err != nil {
 		t.Fatalf("DiscoverOllama: %v", err)

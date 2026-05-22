@@ -236,6 +236,14 @@ func filterFeasible(arms []*Arm, task Task) []*Arm {
 			continue
 		}
 
+		// Must support vision if task carries inline image content.
+		// No tools/quality fallback for vision: a non-vision arm physically
+		// cannot consume the image bytes, so degrading to it would silently
+		// drop the image and confuse the model.
+		if task.RequiresVision && !arm.Capabilities.Vision {
+			continue
+		}
+
 		// Must support the required effort level (EffortAuto always passes)
 		if !arm.Capabilities.SupportsEffort(task.RequiredEffort) {
 			continue
@@ -272,6 +280,12 @@ func filterFeasible(arms []*Arm, task Task) []*Arm {
 	if len(feasible) == 0 && task.RequiresTools {
 		for _, arm := range arms {
 			if !arm.Capabilities.ToolUse {
+				continue
+			}
+			// Vision requirement is hard: a non-vision arm cannot
+			// consume image bytes, so even the last-resort fallback
+			// must respect it.
+			if task.RequiresVision && !arm.Capabilities.Vision {
 				continue
 			}
 			poolsOK := true

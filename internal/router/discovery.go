@@ -25,19 +25,31 @@ const (
 
 // DiscoveredModel represents a model found via discovery.
 type DiscoveredModel struct {
-	ID            string
-	Name          string
-	Provider      string // "ollama" or "llamacpp"
-	Size          int64  // bytes, if available
-	SupportsTools bool   // whether the model supports function/tool calling
-	ContextSize   int    // context window in tokens (always populated; provider-specific default if probe was inconclusive)
+	ID             string
+	Name           string
+	Provider       string // "ollama" or "llamacpp"
+	Size           int64  // bytes, if available
+	SupportsTools  bool   // whether the model supports function/tool calling
+	SupportsVision bool   // whether the model accepts image inputs (multimodal)
+	ContextSize    int    // context window in tokens (always populated; provider-specific default if probe was inconclusive)
+}
+
+// OllamaProbeResult bundles the capabilities probed from a single
+// /api/show call. Cached per model name so discovery cycles don't re-probe
+// every model. SupportsVision was added alongside SupportsTools; older
+// callers using `map[string]bool` should migrate to `map[string]OllamaProbeResult`.
+type OllamaProbeResult struct {
+	SupportsTools  bool
+	SupportsVision bool
+	ContextSize    int
 }
 
 // DiscoverOllama polls the local Ollama instance for available models.
-// toolCache caches /api/show probe results per model name to avoid N requests
-// per discovery cycle. Pass nil to probe every model unconditionally.
-// The caller owns the cache and should pass the same map across cycles.
-func DiscoverOllama(ctx context.Context, baseURL string, toolCache map[string]bool) ([]DiscoveredModel, error) {
+// probeCache caches /api/show probe results per model name to avoid N
+// requests per discovery cycle. Pass nil to probe every model
+// unconditionally. The caller owns the cache and should pass the same
+// map across cycles.
+func DiscoverOllama(ctx context.Context, baseURL string, probeCache map[string]OllamaProbeResult) ([]DiscoveredModel, error) {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -81,17 +93,15 @@ func DiscoverOllama(ctx context.Context, baseURL string, toolCache map[string]bo
 			Size:     m.Size,
 		}
 
-		// Try to probe capabilities if we have a cache or if we want to probe
-		if toolCache != nil {
-			if supported, ok := toolCache[m.Name]; ok {
-				dm.SupportsTools = supported
-			} else {
-				// Probe once
-				supported, contextSize := probeOllamaModel(ctx, baseURL, m.Name)
-				toolCache[m.Name] = supported
-				dm.SupportsTools = supported
-				dm.ContextSize = contextSize
+		if probeCache != nil {
+			result, ok := probeCache[m.Name]
+			if !ok {
+				result = probeOllamaModel(ctx, baseURL, m.Name)
+				probeCache[m.Name] = result
 			}
+			dm.SupportsTools = result.SupportsTools
+			dm.SupportsVision = result.SupportsVision
+			dm.ContextSize = result.ContextSize
 		}
 
 		if dm.ContextSize == 0 {
@@ -103,43 +113,75 @@ func DiscoverOllama(ctx context.Context, baseURL string, toolCache map[string]bo
 
 	// Prune cache entries for models that have disappeared since the last
 	// poll. Without this, the cache grows unbounded and stale entries linger
-	// (a reappearing model would replay an out-of-date tool-support verdict).
-	for name := range toolCache {
+	// (a reappearing model would replay an out-of-date probe verdict).
+	for name := range probeCache {
 		if !currentModels[name] {
-			delete(toolCache, name)
+			delete(probeCache, name)
 		}
 	}
 	return discovered, nil
 }
 
-func probeOllamaModel(ctx context.Context, baseURL, model string) (bool, int) {
+func probeOllamaModel(ctx context.Context, baseURL, model string) OllamaProbeResult {
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/show", strings.NewReader(fmt.Sprintf(`{"name":"%s"}`, model)))
 	if err != nil {
-		return false, 0
+		return OllamaProbeResult{}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false, 0
+		return OllamaProbeResult{}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
-		return false, 0
+		return OllamaProbeResult{}
 	}
 	var data struct {
 		Template   string `json:"template"`
 		Parameters string `json:"parameters"`
+		Details    struct {
+			Families []string `json:"families"`
+			Family   string   `json:"family"`
+		} `json:"details"`
+		Capabilities []string `json:"capabilities"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return false, 0
+		return OllamaProbeResult{}
 	}
 
 	// Heuristic for tool support: many modern models that support tools
 	// have "call" or "tool" or "json" in their template or system prompt
 	// logic. More specifically, Ollama's own tool-calling models often
-	// include specific jinja templates.
-	supported := strings.Contains(data.Template, ".Tool") ||
+	// include specific jinja templates. Newer Ollama versions also
+	// advertise capabilities via the "capabilities" field.
+	supportsTools := strings.Contains(data.Template, ".Tool") ||
 		strings.Contains(data.Template, "tools") ||
 		strings.Contains(data.Template, "json")
+	for _, cap := range data.Capabilities {
+		if cap == "tools" {
+			supportsTools = true
+		}
+	}
+
+	// Vision detection: CLIP/vision encoder families show up in
+	// details.families (e.g. "clip", "mllama"); newer Ollama also lists
+	// "vision" in the capabilities array. Fall back to a name-pattern
+	// match for releases that predate the capabilities field.
+	supportsVision := false
+	for _, fam := range data.Details.Families {
+		f := strings.ToLower(fam)
+		if f == "clip" || f == "mllama" || strings.HasSuffix(f, "vl") {
+			supportsVision = true
+			break
+		}
+	}
+	for _, cap := range data.Capabilities {
+		if cap == "vision" {
+			supportsVision = true
+		}
+	}
+	if !supportsVision && isKnownVisionModelName(model) {
+		supportsVision = true
+	}
 
 	// Context size heuristic from parameters
 	contextSize := 0
@@ -154,7 +196,39 @@ func probeOllamaModel(ctx context.Context, baseURL, model string) (bool, int) {
 		}
 	}
 
-	return supported, contextSize
+	return OllamaProbeResult{
+		SupportsTools:  supportsTools,
+		SupportsVision: supportsVision,
+		ContextSize:    contextSize,
+	}
+}
+
+// knownVisionModelPrefixes lists Ollama model name prefixes that ship as
+// multimodal models. Used as a fallback when the /api/show response is
+// missing details.families or the capabilities array (older Ollama).
+var knownVisionModelPrefixes = []string{
+	"llava",
+	"bakllava",
+	"moondream",
+	"qwen2-vl",
+	"qwen2.5-vl",
+	"qwen3-vl",
+	"llama3.2-vision",
+	"llama4-vision",
+	"minicpm-v",
+	"cogvlm",
+	"pixtral",
+	"gemma3", // gemma3 multimodal variants
+}
+
+func isKnownVisionModelName(model string) bool {
+	low := strings.ToLower(model)
+	for _, p := range knownVisionModelPrefixes {
+		if strings.HasPrefix(low, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // DiscoverLlamaCPP enumerates models served by a llama.cpp server.
@@ -261,10 +335,10 @@ func fetchLlamaCppContextSize(ctx context.Context, baseURL string) int {
 }
 
 // DiscoverLocalModels polls all known local providers.
-func DiscoverLocalModels(ctx context.Context, logger *slog.Logger, ollamaURL, llamacppURL string, ollamaToolCache map[string]bool) []DiscoveredModel {
+func DiscoverLocalModels(ctx context.Context, logger *slog.Logger, ollamaURL, llamacppURL string, ollamaProbeCache map[string]OllamaProbeResult) []DiscoveredModel {
 	var all []DiscoveredModel
 
-	if models, err := DiscoverOllama(ctx, ollamaURL, ollamaToolCache); err != nil {
+	if models, err := DiscoverOllama(ctx, ollamaURL, ollamaProbeCache); err != nil {
 		logger.Debug("ollama discovery skipped", "error", err)
 	} else {
 		all = append(all, models...)
@@ -288,7 +362,7 @@ func StartDiscoveryLoop(ctx context.Context, r *Router, logger *slog.Logger,
 	onReconcile func(ArmID),
 ) {
 	go func() {
-		ollamaToolCache := make(map[string]bool)
+		ollamaProbeCache := make(map[string]OllamaProbeResult)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -296,7 +370,7 @@ func StartDiscoveryLoop(ctx context.Context, r *Router, logger *slog.Logger,
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				models := DiscoverLocalModels(ctx, logger, ollamaURL, llamacppURL, ollamaToolCache)
+				models := DiscoverLocalModels(ctx, logger, ollamaURL, llamacppURL, ollamaProbeCache)
 				reconcileArms(r, models, providerFactory, logger, onReconcile)
 			}
 		}
@@ -390,9 +464,10 @@ func RegisterDiscoveredModels(r *Router, models []DiscoveredModel, providerFacto
 				// Many small local models (phi, etc.) don't support
 				// function calling and will produce confused output if selected
 				// for tool-requiring tasks. Larger known models (mistral, llama3,
-				// qwen2.5-coder, tiny3.5) support tools. Callers can update the arm's
-				// Capabilities after probing the model template.
+				// qwen2.5-coder, tiny3.5) support tools. Vision is set from the
+				// /api/show probe (capabilities/families/name fallback).
 				ToolUse:       m.SupportsTools,
+				Vision:        m.SupportsVision,
 				ContextWindow: m.ContextSize,
 			},
 		})
