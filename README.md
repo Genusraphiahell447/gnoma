@@ -95,7 +95,7 @@ learning); `/help` lists slash commands; `Esc` cancels an in-flight turn.
 | Mistral | `MISTRAL_API_KEY` | `mistral-large-latest` (Mistral Large 3) | `mistral-medium-3.5`, `magistral-medium-2509` |
 | Ollama (local) | — | `qwen3:8b` (override with `--model`) | any model on your Ollama instance |
 | llama.cpp (local) | — | reported by `/v1/models` | n/a |
-| Subprocess (`claude`, `gemini`, `agy` CLIs) | provider-specific | binary name | configurable via `[cli_agents]` |
+| Subprocess (`claude`, `gemini`, `agy`, `codex`, `vibe` CLIs) | provider-specific | binary name | configurable via `[cli_agents]` |
 
 Override per-invocation:
 
