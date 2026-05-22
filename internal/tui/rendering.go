@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,17 +77,24 @@ func (m Model) renderChat(height int) string {
 
 	// Header info — scrolls with content
 	status := m.session.Status()
+	var modelInfo string
+	if m.config.SLM.Active {
+		modelInfo = fmt.Sprintf("router (slm: %s)", m.config.SLM.Model)
+	} else {
+		modelInfo = fmt.Sprintf("%s/%s", status.Provider, status.Model)
+	}
+
 	lines = append(lines,
-		sHeaderBrand.Render(" gnoma ")+"  "+sHeaderDim.Render("gnoma "+version),
-		"    "+sHeaderModel.Render(fmt.Sprintf("%s/%s", status.Provider, status.Model))+
-			sHeaderDim.Render(" · ")+sHeaderDim.Render(m.shortCwd()),
+		theme().sHeaderBrand.Render(" gnoma ")+"  "+theme().sHeaderDim.Render("gnoma "+version),
+		"    "+theme().sHeaderModel.Render(modelInfo)+
+			theme().sHeaderDim.Render(" · ")+theme().sHeaderDim.Render(m.shortCwd()),
 		"",
 	)
 
 	if len(m.messages) == 0 && !m.streaming {
 		lines = append(lines,
-			sHint.Render("    Type a message and press Enter."),
-			sHint.Render("    /help for commands, Ctrl+C to cancel or quit."),
+			theme().sHint.Render("    Type a message and press Enter."),
+			theme().sHint.Render("    /help for commands, Ctrl+C to cancel or quit."),
 			"",
 		)
 	}
@@ -100,14 +110,12 @@ func (m Model) renderChat(height int) string {
 
 	// Transient: running tools (disappear when tool completes)
 	for _, name := range m.runningTools {
-		lines = append(lines, "  "+sToolOutput.Render(fmt.Sprintf("⚙ [%s] running...", name)))
+		lines = append(lines, "  "+theme().sToolOutput.Render(fmt.Sprintf("⚙ [%s] running...", name)))
 	}
 
 	// Transient: permission prompt (disappear when approved/denied)
 	if m.permPending {
-		lines = append(lines, "")
-		lines = append(lines, sSystem.Render("• "+formatPermissionPrompt(m.permToolName, m.permArgs)))
-		lines = append(lines, "")
+		lines = append(lines, m.renderPermissionPending(m.width)...)
 	}
 
 	// Settings panel (/config)
@@ -115,29 +123,44 @@ func (m Model) renderChat(height int) string {
 		lines = append(lines, m.renderConfigPanel(m.width)...)
 	}
 
+	// Model Picker
+	if m.modelPickerOpen {
+		lines = append(lines, m.renderModelPicker(m.width)...)
+	}
+
+	// Provider Picker
+	if m.providerPickerOpen {
+		lines = append(lines, m.renderProviderPicker(m.width)...)
+	}
+
+	// Profile Picker
+	if m.profilePickerOpen {
+		lines = append(lines, m.renderProfilePicker(m.width)...)
+	}
+
+	// Skills Picker
+	if m.skillsPickerOpen {
+		lines = append(lines, m.renderSkillsPicker(m.width)...)
+	}
+
+	// Plugins Picker
+	if m.pluginsPickerOpen {
+		lines = append(lines, m.renderPluginsPicker(m.width)...)
+	}
+
+	// Theme Picker
+	if m.themePickerOpen {
+		lines = append(lines, m.renderThemePicker(m.width)...)
+	}
+
+	// Help Picker
+	if m.helpPickerOpen {
+		lines = append(lines, m.renderHelpPicker(m.width)...)
+	}
+
 	// Transient: session resume picker
 	if m.resumePending && len(m.resumeSessions) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, sSystem.Render("  Sessions  ↑↓ · Enter to load · Esc to cancel"))
-		lines = append(lines, "")
-		for i, s := range m.resumeSessions {
-			age := time.Since(s.UpdatedAt).Truncate(time.Minute)
-			label := s.ID
-			if s.Title != "" {
-				label = s.Title
-				if len(label) > 40 {
-					label = label[:40] + "…"
-				}
-			}
-			row := fmt.Sprintf("%-42s  %s/%s  %d turns  %s ago",
-				label, s.Provider, s.Model, s.TurnCount, age)
-			if i == m.resumeSelected {
-				lines = append(lines, sText.Render("→ "+row))
-			} else {
-				lines = append(lines, sHint.Render("  "+row))
-			}
-		}
-		lines = append(lines, "")
+		lines = append(lines, m.renderResumePicker(m.width)...)
 	}
 
 	// Streaming: show frozen thinking above live text content
@@ -154,13 +177,13 @@ func (m Model) renderChat(height int) string {
 			}
 			for i, line := range thinkLines[:showN] {
 				if i == 0 {
-					lines = append(lines, sThinkingLabel.Render("◇ ")+sThinkingBody.Render(line))
+					lines = append(lines, theme().sThinkingLabel.Render("◇ ")+theme().sThinkingBody.Render(line))
 				} else {
-					lines = append(lines, sThinkingBody.Render("  "+line))
+					lines = append(lines, theme().sThinkingBody.Render("  "+line))
 				}
 			}
 			if !m.expandOutput && len(thinkLines) > liveThinkMax {
-				lines = append(lines, sHint.Render(fmt.Sprintf("  +%d lines (ctrl+o to expand)", len(thinkLines)-liveThinkMax)))
+				lines = append(lines, theme().sHint.Render(fmt.Sprintf("  +%d lines (ctrl+o to expand)", len(thinkLines)-liveThinkMax)))
 			}
 		}
 		if m.streamBuf.Len() > 0 {
@@ -168,13 +191,13 @@ func (m Model) renderChat(height int) string {
 			liveText := sanitizeAssistantText(m.streamBuf.String())
 			for i, line := range strings.Split(wrapText(liveText, maxWidth), "\n") {
 				if i == 0 {
-					lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
+					lines = append(lines, theme().styleAssistantLabel.Render("◆ ")+line)
 				} else {
 					lines = append(lines, "  "+line)
 				}
 			}
 		} else if m.thinkingBuf.Len() == 0 {
-			lines = append(lines, styleAssistantLabel.Render("◆ ")+sCursor.Render("█"))
+			lines = append(lines, theme().styleAssistantLabel.Render("◆ ")+theme().sCursor.Render("█"))
 		}
 	}
 
@@ -239,9 +262,9 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		msgLines := strings.Split(wrapText(msg.content, maxWidth), "\n")
 		for i, line := range msgLines {
 			if i == 0 {
-				lines = append(lines, sUserLabel.Render("❯ ")+sUserLabel.Render(line))
+				lines = append(lines, theme().sUserLabel.Render("❯ ")+theme().sUserLabel.Render(line))
 			} else {
-				lines = append(lines, sUserLabel.Render(indent+line))
+				lines = append(lines, theme().sUserLabel.Render(indent+line))
 			}
 		}
 		lines = append(lines, "")
@@ -258,14 +281,14 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		}
 		for i, line := range msgLines[:showLines] {
 			if i == 0 {
-				lines = append(lines, sThinkingLabel.Render("◇ ")+sThinkingBody.Render(line))
+				lines = append(lines, theme().sThinkingLabel.Render("◇ ")+theme().sThinkingBody.Render(line))
 			} else {
-				lines = append(lines, sThinkingBody.Render(indent+line))
+				lines = append(lines, theme().sThinkingBody.Render(indent+line))
 			}
 		}
 		if !m.expandOutput && len(msgLines) > thinkingMaxLines {
 			remaining := len(msgLines) - thinkingMaxLines
-			lines = append(lines, sHint.Render(indent+fmt.Sprintf("+%d lines (ctrl+o to expand)", remaining)))
+			lines = append(lines, theme().sHint.Render(indent+fmt.Sprintf("+%d lines (ctrl+o to expand)", remaining)))
 		}
 		lines = append(lines, "")
 
@@ -281,7 +304,7 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		renderedLines := strings.Split(rendered, "\n")
 		for i, line := range renderedLines {
 			if i == 0 {
-				lines = append(lines, styleAssistantLabel.Render("◆ ")+line)
+				lines = append(lines, theme().styleAssistantLabel.Render("◆ ")+line)
 			} else {
 				lines = append(lines, indent+line)
 			}
@@ -291,7 +314,7 @@ func (m Model) renderMessage(msg chatMessage) []string {
 	case "tool":
 		maxW := m.width - len([]rune(indent))
 		for _, line := range strings.Split(wrapText(msg.content, maxW), "\n") {
-			lines = append(lines, indent+sToolOutput.Render(line))
+			lines = append(lines, indent+theme().sToolOutput.Render(line))
 		}
 
 	case "toolresult":
@@ -304,7 +327,7 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		for i, line := range resultLines {
 			if i >= maxShow {
 				remaining := len(resultLines) - maxShow
-				lines = append(lines, indent+indent+sHint.Render(
+				lines = append(lines, indent+indent+theme().sHint.Render(
 					fmt.Sprintf("+%d lines (ctrl+o to expand)", remaining)))
 				break
 			}
@@ -312,11 +335,11 @@ func (m Model) renderMessage(msg chatMessage) []string {
 			for _, subLine := range strings.Split(wrapText(line, maxW), "\n") {
 				trimmed := strings.TrimSpace(subLine)
 				if strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "++") && len(trimmed) > 1 {
-					lines = append(lines, indent+indent+sDiffAdd.Render(subLine))
+					lines = append(lines, indent+indent+theme().sDiffAdd.Render(subLine))
 				} else if strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "--") && len(trimmed) > 1 {
-					lines = append(lines, indent+indent+sDiffRemove.Render(subLine))
+					lines = append(lines, indent+indent+theme().sDiffRemove.Render(subLine))
 				} else {
-					lines = append(lines, indent+indent+sToolResult.Render(subLine))
+					lines = append(lines, indent+indent+theme().sToolResult.Render(subLine))
 				}
 			}
 		}
@@ -326,9 +349,9 @@ func (m Model) renderMessage(msg chatMessage) []string {
 		maxW := m.width - 4 // "• "(2) + indent(2)
 		for i, line := range strings.Split(wrapText(msg.content, maxW), "\n") {
 			if i == 0 {
-				lines = append(lines, sSystem.Render("• "+line))
+				lines = append(lines, theme().sSystem.Render("• "+line))
 			} else {
-				lines = append(lines, sSystem.Render(indent+line))
+				lines = append(lines, theme().sSystem.Render(indent+line))
 			}
 		}
 		lines = append(lines, "")
@@ -336,12 +359,12 @@ func (m Model) renderMessage(msg chatMessage) []string {
 	case "error":
 		maxW := m.width - 2 // "✗ " = 2
 		for _, line := range strings.Split(wrapText(msg.content, maxW), "\n") {
-			lines = append(lines, sError.Render("✗ "+line))
+			lines = append(lines, theme().sError.Render("✗ "+line))
 		}
 		lines = append(lines, "")
 
 	case "cost":
-		lines = append(lines, sHint.Render(indent+msg.content))
+		lines = append(lines, theme().sHint.Render(indent+msg.content))
 	}
 
 	return lines
@@ -369,14 +392,14 @@ func (m Model) renderElfTree() []string {
 			header += "s"
 		}
 		header += "…"
-		lines = append(lines, sStatusStreaming.Render(header))
+		lines = append(lines, theme().sStatusStreaming.Render(header))
 	} else {
 		header := fmt.Sprintf("● %d elf", len(m.elfOrder))
 		if len(m.elfOrder) != 1 {
 			header += "s"
 		}
 		header += " completed"
-		lines = append(lines, sToolOutput.Render(header))
+		lines = append(lines, theme().sToolOutput.Render(header))
 	}
 
 	for i, elfID := range m.elfOrder {
@@ -416,9 +439,9 @@ func (m Model) renderElfTree() []string {
 				desc = string([]rune(desc)[:maxDescW-1]) + "…"
 			}
 		}
-		line := sToolOutput.Render(branch+" ") + sText.Render(desc)
+		line := theme().sToolOutput.Render(branch+" ") + theme().sText.Render(desc)
 		if len(statsStr) > 0 {
-			line += sToolResult.Render(statsStr)
+			line += theme().sToolResult.Render(statsStr)
 		}
 		lines = append(lines, line)
 
@@ -426,17 +449,17 @@ func (m Model) renderElfTree() []string {
 		var activity string
 		if p.Done {
 			if p.Error != "" {
-				activity = sError.Render("Error: " + p.Error)
+				activity = theme().sError.Render("Error: " + p.Error)
 			} else {
 				dur := p.Duration.Round(time.Millisecond)
-				activity = sToolOutput.Render(fmt.Sprintf("Done (%s)", dur))
+				activity = theme().sToolOutput.Render(fmt.Sprintf("Done (%s)", dur))
 			}
 		} else {
 			activity = p.Activity
 			if activity == "" {
 				activity = "working…"
 			}
-			activity = sToolResult.Render(activity)
+			activity = theme().sToolResult.Render(activity)
 		}
 		// Wrap activity so long error/path strings don't overflow the terminal.
 		actPrefix := childPrefix + "└─ "
@@ -444,9 +467,9 @@ func (m Model) renderElfTree() []string {
 		actLines := strings.Split(wrapText(activity, actMaxW), "\n")
 		for j, al := range actLines {
 			if j == 0 {
-				lines = append(lines, sToolResult.Render(actPrefix)+al)
+				lines = append(lines, theme().sToolResult.Render(actPrefix)+al)
 			} else {
-				lines = append(lines, sToolResult.Render(childPrefix+"   ")+al)
+				lines = append(lines, theme().sToolResult.Render(childPrefix+"   ")+al)
 			}
 		}
 	}
@@ -466,24 +489,22 @@ func formatTokens(tokens int) string {
 }
 
 func (m Model) renderSeparators() (string, string) {
-	lineColor := cSurface // default dim
+	lineColor := theme().cSurface // default dim
 	modeLabel := ""
 
 	if m.config.Permissions != nil {
 		mode := m.config.Permissions.Mode()
 		lineColor = ModeColor(mode)
-		modeLabel = string(mode)
 	}
 
-	// Incognito adds amber overlay but keeps mode visible
+	// Incognito adds amber overlay
 	if m.incognito {
-		lineColor = cYellow
-		modeLabel = "🔒 " + modeLabel
+		lineColor = theme().cYellow
 	}
 
 	// Permission pending — flash the line with command summary
 	if m.permPending {
-		lineColor = cRed
+		lineColor = theme().cRed
 		hint := shortPermHint(m.permToolName, m.permArgs)
 		modeLabel = "⚠ " + hint + " [y/n]"
 	}
@@ -491,19 +512,23 @@ func (m Model) renderSeparators() (string, string) {
 	lineStyle := lipgloss.NewStyle().Foreground(lineColor)
 	labelStyle := lipgloss.NewStyle().Foreground(lineColor).Bold(true)
 
-	// Top line: ─── with mode label on right ─── bypass ───
-	label := " " + modeLabel + " "
-	labelW := lipgloss.Width(labelStyle.Render(label))
-	lineW := m.width - labelW
-	if lineW < 4 {
-		lineW = 4
+	// Top line: ─── with mode label on right if any (like permission pending hint)
+	var topLine string
+	if modeLabel != "" {
+		label := " " + modeLabel + " "
+		labelW := lipgloss.Width(labelStyle.Render(label))
+		lineW := m.width - labelW
+		if lineW < 4 {
+			lineW = 4
+		}
+		leftW := lineW - 2
+		rightW := 2
+		topLine = lineStyle.Render(strings.Repeat("─", leftW)) +
+			labelStyle.Render(label) +
+			lineStyle.Render(strings.Repeat("─", rightW))
+	} else {
+		topLine = lineStyle.Render(strings.Repeat("─", m.width))
 	}
-	leftW := lineW - 2
-	rightW := 2
-
-	topLine := lineStyle.Render(strings.Repeat("─", leftW)) +
-		labelStyle.Render(label) +
-		lineStyle.Render(strings.Repeat("─", rightW))
 
 	bottomLine := lineStyle.Render(strings.Repeat("─", m.width))
 
@@ -527,34 +552,52 @@ func (m Model) renderStatus() string {
 	status := m.session.Status()
 
 	// Left: provider + model + incognito
-	provModel := fmt.Sprintf(" %s/%s", status.Provider, status.Model)
+	var provModel string
+	if m.config.SLM.Active {
+		provModel = " router"
+	} else {
+		provModel = fmt.Sprintf(" %s/%s", status.Provider, status.Model)
+	}
 	if m.incognito {
-		provModel += " " + sStatusIncognito.Render("🔒")
+		provModel += " " + theme().sStatusIncognito.Render("🔒")
 	}
 	if !status.ToolsAvailable {
-		provModel += " " + sStatusDim.Render("text-only")
+		provModel += " " + theme().sStatusDim.Render("text-only")
 	}
-	left := sStatusHighlight.Render(provModel) + renderSLMBadge(m.config.SLM) + renderProfileBadge(m.config.Profile)
+
+	modeStr := ""
+	if m.config.Permissions != nil {
+		mode := m.config.Permissions.Mode()
+		modeColor := ModeColor(mode)
+		modeStyle := lipgloss.NewStyle().
+			Background(modeColor).
+			Foreground(theme().cMantle).
+			Bold(true).
+			Padding(0, 1)
+		modeStr = " " + modeStyle.Render(strings.ToUpper(string(mode)))
+	}
+
+	left := theme().sStatusHighlight.Render(provModel) + modeStr + renderSLMBadge(m.config.SLM) + renderProfileBadge(m.config.Profile)
 
 	// Center: cwd + git branch
 	dir := filepath.Base(m.cwd)
 	centerParts := []string{"📁 " + dir}
 	if m.gitBranch != "" {
-		centerParts = append(centerParts, sStatusBranch.Render(" "+m.gitBranch))
+		centerParts = append(centerParts, theme().sStatusBranch.Render(" "+m.gitBranch))
 	}
-	center := sStatusDim.Render(strings.Join(centerParts, ""))
+	center := theme().sStatusDim.Render(strings.Join(centerParts, ""))
 
 	// Right: context bar + tokens + turns
-	right := renderContextBar(status) + sStatusDim.Render(fmt.Sprintf(" │ turns: %d ", status.TurnCount))
+	right := renderContextBar(status) + theme().sStatusDim.Render(fmt.Sprintf(" │ turns: %d ", status.TurnCount))
 
 	if m.quitHint {
-		right = lipgloss.NewStyle().Foreground(cRed).Bold(true).Render("ctrl+c to quit ") + sStatusDim.Render("│ ") + right
+		right = lipgloss.NewStyle().Foreground(theme().cRed).Bold(true).Render("ctrl+c to quit ") + theme().sStatusDim.Render("│ ") + right
 	}
 	if m.copyMode {
-		right = lipgloss.NewStyle().Foreground(cYellow).Bold(true).Render("✂ COPY ") + sStatusDim.Render("│ ") + right
+		right = lipgloss.NewStyle().Foreground(theme().cYellow).Bold(true).Render("✂ COPY ") + theme().sStatusDim.Render("│ ") + right
 	}
 	if m.streaming {
-		right = sStatusStreaming.Render("● streaming ") + sStatusDim.Render("│ ") + right
+		right = theme().sStatusStreaming.Render("● streaming ") + theme().sStatusDim.Render("│ ") + right
 	}
 
 	// Compose with spacing
@@ -572,14 +615,14 @@ func (m Model) renderStatus() string {
 	}
 
 	bar := left + strings.Repeat(" ", gap1) + center + strings.Repeat(" ", gap2) + right
-	return sStatusBar.Width(m.width).Render(bar)
+	return theme().sStatusBar.Width(m.width).Render(bar)
 }
 
 // renderContextBar draws a compact [████░░░░] 45% progress bar for the context window.
 func renderContextBar(s session.Status) string {
 	pct := s.TokenPercent
 	if pct <= 0 && s.TokensUsed == 0 {
-		return sStatusDim.Render("ctx: —")
+		return theme().sStatusDim.Render("ctx: —")
 	}
 
 	const barWidth = 8
@@ -592,13 +635,13 @@ func renderContextBar(s session.Status) string {
 	var barColor lipgloss.Style
 	switch s.TokenState {
 	case "critical":
-		barColor = lipgloss.NewStyle().Foreground(cRed).Bold(true)
+		barColor = lipgloss.NewStyle().Foreground(theme().cRed).Bold(true)
 	case "warning":
-		barColor = lipgloss.NewStyle().Foreground(cYellow)
+		barColor = lipgloss.NewStyle().Foreground(theme().cYellow)
 	default:
 		barColor = lipgloss.NewStyle().Foreground(lipgloss.Color("42")) // green
 	}
-	dimBlock := sStatusDim
+	dimBlock := theme().sStatusDim
 
 	bar := barColor.Render(strings.Repeat("█", filled)) + dimBlock.Render(strings.Repeat("░", empty))
 	label := fmt.Sprintf(" %d%%", pct)
@@ -606,11 +649,11 @@ func renderContextBar(s session.Status) string {
 	var labelStyle lipgloss.Style
 	switch s.TokenState {
 	case "critical":
-		labelStyle = lipgloss.NewStyle().Foreground(cRed).Bold(true)
+		labelStyle = lipgloss.NewStyle().Foreground(theme().cRed).Bold(true)
 	case "warning":
-		labelStyle = lipgloss.NewStyle().Foreground(cYellow)
+		labelStyle = lipgloss.NewStyle().Foreground(theme().cYellow)
 	default:
-		labelStyle = sStatusDim
+		labelStyle = theme().sStatusDim
 	}
 	return "[" + bar + "]" + labelStyle.Render(label)
 }
@@ -622,13 +665,13 @@ func renderSLMBadge(info SLMInfo) string {
 		return ""
 	}
 	if !info.Active {
-		return sStatusDim.Render(" · slm: ✗")
+		return theme().sStatusDim.Render(" · slm: ✗")
 	}
 	label := " · slm: " + info.Model
 	if info.Tools {
 		label += " ⚙"
 	}
-	return sStatusDim.Render(label)
+	return theme().sStatusDim.Render(label)
 }
 
 // renderProfileBadge produces " · profile: <name>" for the status bar's
@@ -639,7 +682,7 @@ func renderProfileBadge(info ProfileInfo) string {
 	if !info.Active || info.Name == "" {
 		return ""
 	}
-	return sStatusDim.Render(" · profile: " + info.Name)
+	return theme().sStatusDim.Render(" · profile: " + info.Name)
 }
 
 // formatTurnUsage produces a compact token summary for a single turn.
@@ -655,15 +698,15 @@ func formatTurnUsage(u message.Usage) string {
 func (m Model) renderSuggestions() string {
 	const maxVisible = 6
 
-	sCmd := lipgloss.NewStyle().Foreground(cPurple).Bold(true)
-	sDesc := lipgloss.NewStyle().Foreground(cSubtext)
+	sCmd := lipgloss.NewStyle().Foreground(theme().cPurple).Bold(true)
+	sDesc := lipgloss.NewStyle().Foreground(theme().cSubtext)
 	sSelectedCmd := lipgloss.NewStyle().
-		Background(cSurface).
-		Foreground(cPurple).
+		Background(theme().cSurface).
+		Foreground(theme().cPurple).
 		Bold(true)
 	sSelectedDesc := lipgloss.NewStyle().
-		Background(cSurface).
-		Foreground(cText)
+		Background(theme().cSurface).
+		Foreground(theme().cText)
 
 	// Determine visible window around selected item
 	start := 0
@@ -716,12 +759,12 @@ func (m Model) renderSuggestions() string {
 	}
 	if len(m.suggestions) > maxVisible {
 		extra := len(m.suggestions) - maxVisible
-		bodyLines = append(bodyLines, sHint.Render(fmt.Sprintf("  +%d more", extra)))
+		bodyLines = append(bodyLines, theme().sHint.Render(fmt.Sprintf("  +%d more", extra)))
 	}
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(cSurface).
+		BorderForeground(theme().cSurface).
 		Padding(0, 1).
 		Width(innerW + 2).
 		Render(strings.Join(bodyLines, "\n"))
@@ -731,43 +774,42 @@ func (m Model) renderSuggestions() string {
 
 // renderConfigPanel renders the interactive /config settings overlay.
 func (m Model) renderConfigPanel(width int) []string {
-	rtr := m.config.Router
 	perm := m.config.Permissions
 
-	// Build the three setting rows
-	type row struct{ label, value string }
-	rows := make([]row, 3)
+	status := m.session.Status()
 
-	// Row 0: Model
-	modelVal := "none"
-	if rtr != nil {
-		forced := rtr.ForcedArm()
-		if forced != "" {
-			modelVal = string(forced)
-		} else {
-			arms := configPanelArms(rtr.Arms())
-			if len(arms) > 0 {
-				modelVal = string(arms[0].ID) + "  (press Enter to select)"
-			} else {
-				modelVal = "none discovered"
+	// Build the setting rows
+	type row struct{ label, value string }
+	var rows []row
+
+	for _, setting := range m.getActiveSettings() {
+		switch setting {
+		case "provider":
+			provVal := "none"
+			if status.Provider != "" {
+				provVal = status.Provider + "  (press Enter to switch)"
 			}
+			rows = append(rows, row{"Provider", provVal})
+		case "model":
+			modelVal := "none"
+			if status.Model != "" {
+				modelVal = status.Model + "  (press Enter to switch)"
+			}
+			rows = append(rows, row{"Model", modelVal})
+		case "permission":
+			permVal := "—"
+			if perm != nil {
+				permVal = string(perm.Mode())
+			}
+			rows = append(rows, row{"Permission", permVal})
+		case "incognito":
+			incogVal := "Off"
+			if m.incognito {
+				incogVal = "On"
+			}
+			rows = append(rows, row{"Incognito", incogVal})
 		}
 	}
-	rows[0] = row{"Model", modelVal}
-
-	// Row 1: Permission
-	permVal := "—"
-	if perm != nil {
-		permVal = string(perm.Mode())
-	}
-	rows[1] = row{"Permission", permVal}
-
-	// Row 2: Incognito
-	incogVal := "Off"
-	if m.incognito {
-		incogVal = "On"
-	}
-	rows[2] = row{"Incognito", incogVal}
 
 	// Measure widest label for alignment
 	maxLabel := 0
@@ -778,11 +820,11 @@ func (m Model) renderConfigPanel(width int) []string {
 	}
 
 	sSelected := lipgloss.NewStyle().
-		Background(cTeal).
-		Foreground(cMantle).
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
 		Bold(true)
-	sItem := lipgloss.NewStyle().Foreground(cText)
-	sLabel := lipgloss.NewStyle().Foreground(cSubtext)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+	sLabel := lipgloss.NewStyle().Foreground(theme().cSubtext)
 
 	innerW := width - 8 // border(2) + padding(2) each side = 8
 	if innerW < 30 {
@@ -804,14 +846,14 @@ func (m Model) renderConfigPanel(width int) []string {
 		}
 	}
 	bodyLines = append(bodyLines, "")
-	bodyLines = append(bodyLines, sHint.Render("↑↓ Navigate  Enter Select/Toggle  Esc Exit"))
+	bodyLines = append(bodyLines, theme().sHint.Render("↑↓ Navigate  Enter Select/Toggle  Esc Exit"))
 
 	body := strings.Join(bodyLines, "\n")
 
-	titleStyle := lipgloss.NewStyle().Foreground(cTeal).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(cTeal).
+		BorderForeground(theme().cTeal).
 		Padding(0, 1).
 		Width(innerW + 2) // +2 for padding
 
@@ -827,4 +869,493 @@ func wrapText(text string, width int) string {
 		return text
 	}
 	return xansi.Wordwrap(text, width, "")
+}
+
+func (m Model) renderPermissionPending(width int) []string {
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	var bodyLines []string
+	bodyLines = append(bodyLines, lipgloss.NewStyle().Foreground(theme().cRed).Bold(true).Render("Permission Requested"))
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, fmt.Sprintf("Tool: %s", lipgloss.NewStyle().Foreground(theme().cPurple).Bold(true).Render(m.permToolName)))
+	bodyLines = append(bodyLines, "")
+
+	var details []string
+	switch m.permToolName {
+	case "bash":
+		var a struct{ Command string }
+		if json.Unmarshal(m.permArgs, &a) == nil && a.Command != "" {
+			details = append(details, "Command to run:")
+			cmdLines := strings.Split(wrapText(a.Command, innerW-4), "\n")
+			for _, cl := range cmdLines {
+				details = append(details, "  "+theme().sText.Render(cl))
+			}
+		}
+	case "fs.write", "fs_write":
+		var a struct {
+			Path    string `json:"file_path"`
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(m.permArgs, &a) == nil && a.Path != "" {
+			details = append(details, fmt.Sprintf("Write to: %s", theme().sStatusBranch.Render(a.Path)))
+			if a.Content != "" {
+				details = append(details, "Preview:")
+				previewLines := strings.Split(diffPreviewWrite(a.Content), "\n")
+				for _, pl := range previewLines {
+					details = append(details, "  "+pl)
+				}
+			}
+		}
+	case "fs.edit", "fs_edit":
+		var a struct {
+			Path      string `json:"file_path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal(m.permArgs, &a) == nil && a.Path != "" {
+			details = append(details, fmt.Sprintf("Edit: %s", theme().sStatusBranch.Render(a.Path)))
+			previewLines := strings.Split(diffPreviewEdit(a.OldString, a.NewString), "\n")
+			for _, pl := range previewLines {
+				details = append(details, "  "+pl)
+			}
+		}
+	default:
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, m.permArgs, "  ", "  "); err == nil {
+			details = append(details, "Arguments:")
+			for _, line := range strings.Split(pretty.String(), "\n") {
+				details = append(details, "  "+theme().sText.Render(line))
+			}
+		} else if len(m.permArgs) > 0 {
+			details = append(details, "Arguments:", "  "+theme().sText.Render(string(m.permArgs)))
+		}
+	}
+
+	for _, line := range details {
+		bodyLines = append(bodyLines, strings.Split(wrapText(line, innerW), "\n")...)
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("y Approve  /  n Deny  /  Esc Cancel"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cRed).
+		Padding(1, 2).
+		Width(innerW + 4)
+
+	box := boxStyle.Render(strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderModelPicker(width int) []string {
+	if m.config.Router == nil {
+		return []string{"", "No models configured", ""}
+	}
+	arms := m.config.Router.Arms()
+	sort.Slice(arms, func(i, j int) bool {
+		return string(arms[i].ID) < string(arms[j].ID)
+	})
+
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
+	sSelected := lipgloss.NewStyle().
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+
+	var bodyLines []string
+	for i, arm := range arms {
+		tag := ""
+		if arm.IsCLIAgent {
+			tag = " [CLI]"
+		} else if arm.IsLocal {
+			tag = " [Local]"
+		}
+
+		lineText := fmt.Sprintf(" %s%s", arm.ID, tag)
+		if i == m.pickerSelected {
+			if lipgloss.Width(lineText) < innerW {
+				lineText += strings.Repeat(" ", innerW-lipgloss.Width(lineText))
+			}
+			bodyLines = append(bodyLines, sSelected.Render(lineText))
+		} else {
+			bodyLines = append(bodyLines, sItem.Render(lineText))
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("↑/↓ Navigate  /  Enter Select  /  Esc Exit"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cTeal).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Select Model") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderProviderPicker(width int) []string {
+	providers := m.getAvailableProviders()
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
+	sSelected := lipgloss.NewStyle().
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+
+	var bodyLines []string
+	if len(providers) == 0 {
+		bodyLines = append(bodyLines, theme().sHint.Render(" No providers configured"))
+	} else {
+		for i, prov := range providers {
+			activeTag := ""
+			status := m.session.Status()
+			if prov == status.Provider {
+				activeTag = " (active)"
+			}
+			lineText := fmt.Sprintf(" %s%s", prov, activeTag)
+			if i == m.pickerSelected {
+				if lipgloss.Width(lineText) < innerW {
+					lineText += strings.Repeat(" ", innerW-lipgloss.Width(lineText))
+				}
+				bodyLines = append(bodyLines, sSelected.Render(lineText))
+			} else {
+				bodyLines = append(bodyLines, sItem.Render(lineText))
+			}
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("↑/↓ Navigate  /  Enter Select  /  Esc Exit"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cTeal).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Select Provider") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderProfilePicker(width int) []string {
+	profiles := m.config.ProfileNames
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
+	sSelected := lipgloss.NewStyle().
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+
+	var bodyLines []string
+	if len(profiles) == 0 {
+		bodyLines = append(bodyLines, theme().sHint.Render(" No profiles configured"))
+	} else {
+		for i, name := range profiles {
+			lineText := " " + name
+			if name == m.config.Profile.Name {
+				lineText += " (active)"
+			}
+			if i == m.pickerSelected {
+				if lipgloss.Width(lineText) < innerW {
+					lineText += strings.Repeat(" ", innerW-lipgloss.Width(lineText))
+				}
+				bodyLines = append(bodyLines, sSelected.Render(lineText))
+			} else {
+				bodyLines = append(bodyLines, sItem.Render(lineText))
+			}
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("↑/↓ Navigate  /  Enter Select  /  Esc Exit"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cTeal).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Select Profile") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderSkillsPicker(width int) []string {
+	var names []string
+	if m.config.Skills != nil {
+		names = m.config.Skills.Names()
+		sort.Strings(names)
+	}
+
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
+	sSelected := lipgloss.NewStyle().
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+
+	var bodyLines []string
+	if len(names) == 0 {
+		bodyLines = append(bodyLines, theme().sHint.Render(" No skills registered"))
+	} else {
+		for i, name := range names {
+			lineText := " /" + name
+			if i == m.pickerSelected {
+				if lipgloss.Width(lineText) < innerW {
+					lineText += strings.Repeat(" ", innerW-lipgloss.Width(lineText))
+				}
+				bodyLines = append(bodyLines, sSelected.Render(lineText))
+			} else {
+				bodyLines = append(bodyLines, sItem.Render(lineText))
+			}
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("↑/↓ Navigate  /  Enter Select  /  Esc Exit"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cTeal).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Select Skill") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderPluginsPicker(width int) []string {
+	plugins := m.config.PluginInfos
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
+	sSelected := lipgloss.NewStyle().
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+	sDisabled := lipgloss.NewStyle().Foreground(theme().cOverlay)
+
+	var bodyLines []string
+	if len(plugins) == 0 {
+		bodyLines = append(bodyLines, theme().sHint.Render(" No plugins installed"))
+	} else {
+		for i, p := range plugins {
+			status := "enabled"
+			if !p.Enabled {
+				status = "disabled"
+			}
+			lineText := fmt.Sprintf(" %s (%s, v%s) [%s]", p.Name, p.Scope, p.Version, status)
+			if i == m.pickerSelected {
+				if lipgloss.Width(lineText) < innerW {
+					lineText += strings.Repeat(" ", innerW-lipgloss.Width(lineText))
+				}
+				bodyLines = append(bodyLines, sSelected.Render(lineText))
+			} else {
+				if p.Enabled {
+					bodyLines = append(bodyLines, sItem.Render(lineText))
+				} else {
+					bodyLines = append(bodyLines, sDisabled.Render(lineText))
+				}
+			}
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("↑/↓ Navigate  /  Esc Exit"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cTeal).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Plugins") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderThemePicker(width int) []string {
+	themes := []string{"catppuccin", "nord", "gruvbox", "monokai", "solarized-light"}
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
+	sSelected := lipgloss.NewStyle().
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+
+	var bodyLines []string
+	for i, name := range themes {
+		lineText := " " + name
+		if strings.EqualFold(name, theme().name) || (name == "solarized-light" && strings.EqualFold(theme().name, "solarized_light")) {
+			lineText += " (active)"
+		}
+		if i == m.pickerSelected {
+			if lipgloss.Width(lineText) < innerW {
+				lineText += strings.Repeat(" ", innerW-lipgloss.Width(lineText))
+			}
+			bodyLines = append(bodyLines, sSelected.Render(lineText))
+		} else {
+			bodyLines = append(bodyLines, sItem.Render(lineText))
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("↑/↓ Navigate  /  Enter Select  /  Esc Exit"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cTeal).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Select Theme") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderHelpPicker(width int) []string {
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cPurple).Bold(true)
+	sCmd := lipgloss.NewStyle().Foreground(theme().cPurple).Bold(true)
+	sDesc := lipgloss.NewStyle().Foreground(theme().cText)
+	sHeader := lipgloss.NewStyle().Foreground(theme().cSubtext).Underline(true).Bold(true)
+
+	var bodyLines []string
+	bodyLines = append(bodyLines, sHeader.Render("Slash Commands"))
+	maxCmdW := 12
+	for _, cmd := range builtinCommands {
+		pad := strings.Repeat(" ", maxCmdW-len(cmd.name)+1)
+		desc := cmd.desc
+		descLines := strings.Split(wrapText(desc, innerW-maxCmdW-2), "\n")
+		for j, dl := range descLines {
+			if j == 0 {
+				bodyLines = append(bodyLines, " "+sCmd.Render(cmd.name)+pad+sDesc.Render(dl))
+			} else {
+				bodyLines = append(bodyLines, " "+strings.Repeat(" ", maxCmdW+1)+sDesc.Render(dl))
+			}
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, sHeader.Render("Keyboard Shortcuts"))
+	shortcuts := []struct{ key, desc string }{
+		{"Ctrl+C", "quit / cancel streaming"},
+		{"Ctrl+O", "toggle expanded tool output display"},
+		{"Ctrl+Y", "copy latest assistant response to clipboard"},
+		{"Ctrl+J / Shift+Enter", "insert newline in prompt"},
+		{"Tab", "accept autocomplete suggestion"},
+		{"Esc", "close active menu / picker"},
+		{"Up / Down", "navigate history (on empty prompt) or menus"},
+	}
+
+	maxKeyW := 21
+	for _, s := range shortcuts {
+		pad := strings.Repeat(" ", maxKeyW-len(s.key)+1)
+		descLines := strings.Split(wrapText(s.desc, innerW-maxKeyW-2), "\n")
+		for j, dl := range descLines {
+			if j == 0 {
+				bodyLines = append(bodyLines, " "+sCmd.Render(s.key)+pad+sDesc.Render(dl))
+			} else {
+				bodyLines = append(bodyLines, " "+strings.Repeat(" ", maxKeyW+1)+sDesc.Render(dl))
+			}
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("Esc / Enter to close help menu"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cPurple).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Help & Keyboard Shortcuts") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
+}
+
+func (m Model) renderResumePicker(width int) []string {
+	sessions := m.resumeSessions
+	innerW := width - 8
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(theme().cTeal).Bold(true)
+	sSelected := lipgloss.NewStyle().
+		Background(theme().cTeal).
+		Foreground(theme().cMantle).
+		Bold(true)
+	sItem := lipgloss.NewStyle().Foreground(theme().cText)
+
+	var bodyLines []string
+	if len(sessions) == 0 {
+		bodyLines = append(bodyLines, theme().sHint.Render(" No saved sessions found"))
+	} else {
+		for i, s := range sessions {
+			title := s.Title
+			if title == "" {
+				title = "(untitled session)"
+			}
+			dateStr := s.UpdatedAt.Format("2006-01-02 15:04")
+			lineText := fmt.Sprintf(" %s (%s, turns: %d) - %s", title, s.Model, s.TurnCount, dateStr)
+			if i == m.resumeSelected {
+				if lipgloss.Width(lineText) < innerW {
+					lineText += strings.Repeat(" ", innerW-lipgloss.Width(lineText))
+				}
+				bodyLines = append(bodyLines, sSelected.Render(lineText))
+			} else {
+				bodyLines = append(bodyLines, sItem.Render(lineText))
+			}
+		}
+	}
+
+	bodyLines = append(bodyLines, "")
+	bodyLines = append(bodyLines, theme().sHint.Render("↑/↓ Navigate  /  Enter Select  /  Esc Exit"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme().cTeal).
+		Padding(0, 1).
+		Width(innerW + 2)
+
+	box := boxStyle.Render(titleStyle.Render("Resume Session") + "\n\n" + strings.Join(bodyLines, "\n"))
+	return []string{"", box, ""}
 }

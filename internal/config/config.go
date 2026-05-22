@@ -22,6 +22,7 @@ type Config struct {
 	Hooks      []HookConfig      `toml:"hooks"`
 	MCPServers []MCPServerConfig `toml:"mcp_servers"`
 	Plugins    PluginsSection    `toml:"plugins"`
+	TUI        TUISection        `toml:"tui"`
 }
 
 // SLMSection configures the optional small language model used for task
@@ -253,4 +254,9 @@ func (d *Duration) UnmarshalText(text []byte) error {
 
 func (d Duration) Duration() time.Duration {
 	return time.Duration(d)
+}
+
+type TUISection struct {
+	Theme string `toml:"theme"`
+	Vim   bool   `toml:"vim"`
 }

@@ -1018,6 +1018,7 @@ func main() {
 		var switchTarget string
 
 		m := tui.New(sess, tui.Config{
+			AppConfig:             cfg,
 			Firewall:              fw,
 			Engine:                eng,
 			Permissions:           permChecker,

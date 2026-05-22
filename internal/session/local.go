@@ -201,6 +201,13 @@ func (s *Local) SetModel(model string) {
 	s.model = model
 }
 
+// SetProvider updates the displayed provider name.
+func (s *Local) SetProvider(provider string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.provider = provider
+}
+
 func (s *Local) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()

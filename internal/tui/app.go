@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	gnomacfg "somegit.dev/Owlibou/gnoma/internal/config"
 	"somegit.dev/Owlibou/gnoma/internal/elf"
 	"somegit.dev/Owlibou/gnoma/internal/engine"
@@ -57,6 +59,7 @@ type chatMessage struct {
 
 // Config holds optional dependencies for TUI features.
 type Config struct {
+	AppConfig             *gnomacfg.Config      // full application configuration
 	Firewall              *security.Firewall    // for incognito toggle
 	Engine                *engine.Engine        // for model switching
 	Permissions           *permission.Checker   // for mode switching
@@ -123,7 +126,7 @@ type Model struct {
 	inputMode       string     // "", "command" (/), "execute" (!)
 	mdRenderer      *glamour.TermRenderer
 	mdRendererWidth int                      // cached width to avoid recreating on same-width resizes
-	expandOutput    bool                     // ctrl+o toggles expanded tool output
+	expandOutput    bool                     // Ctrl+O toggles expanded tool output
 	elfStates       map[string]*elf.Progress // active elf states keyed by ID
 	elfOrder        []string                 // insertion-ordered elf IDs for tree rendering
 	elfToolActive   bool                     // suppresses next toolresult (elf output)
@@ -142,6 +145,24 @@ type Model struct {
 	configPanelOpen bool
 	configSelected  int
 
+	// Vim mode preference
+	vimMode       bool
+	vimNormalMode bool
+
+	// Prompt history
+	promptHistory []string
+	historyIdx    int
+
+	// Interactive sub-menu overlays
+	modelPickerOpen    bool
+	profilePickerOpen  bool
+	skillsPickerOpen   bool
+	pluginsPickerOpen  bool
+	helpPickerOpen     bool
+	themePickerOpen    bool
+	providerPickerOpen bool
+	pickerSelected     int // generic index for active picker navigation
+
 	// Session resume picker
 	resumePending     bool
 	resumeSessions    []session.Metadata
@@ -154,6 +175,10 @@ type Model struct {
 	initWriteNudged   bool     // set after write nudge (spawn_elfs-ran-but-no-fs_write case)
 	streamFilterClose string   // non-empty while suppressing a model pseudo-block; value is expected close tag
 	runningTools      []string // transient: tool names currently executing (rendered ephemerally, not in chat history)
+
+	// Pasted contents
+	pastedTexts  map[string]string
+	pastedImages map[string]string
 }
 
 func New(sess session.Session, cfg Config) Model {
@@ -206,19 +231,49 @@ func New(sess session.Session, cfg Config) Model {
 		initialIncognito = cfg.Firewall.Incognito().Active()
 	}
 
-	return Model{
+	var initialVim bool
+	themeName := "catppuccin"
+	if cfg.AppConfig != nil {
+		if cfg.AppConfig.TUI.Theme != "" {
+			themeName = cfg.AppConfig.TUI.Theme
+		}
+		initialVim = cfg.AppConfig.TUI.Vim
+	}
+	ApplyTheme(themeName)
+
+	compSrc := completionSource(cfg.Skills)
+	if cfg.SLM.Active {
+		var filtered []cmdEntry
+		for _, entry := range compSrc {
+			if entry.name == "/model" || entry.name == "/provider" {
+				continue
+			}
+			filtered = append(filtered, entry)
+		}
+		compSrc = filtered
+	}
+
+	m := Model{
 		session:       sess,
 		config:        cfg,
 		input:         ti,
 		incognito:     initialIncognito,
-		completionSrc: completionSource(cfg.Skills),
+		completionSrc: compSrc,
 		mdRenderer:    mdRenderer,
 		elfStates:     make(map[string]*elf.Progress),
 		cwd:           cwd,
 		gitBranch:     gitBranch,
 		streamBuf:     &strings.Builder{},
 		thinkingBuf:   &strings.Builder{},
+		promptHistory: loadPromptHistory(),
+		vimMode:       initialVim,
+		vimNormalMode: false, // Start in Insert Mode
+		pastedTexts:   make(map[string]string),
+		pastedImages:  make(map[string]string),
 	}
+	m.historyIdx = len(m.promptHistory)
+	m = m.updateInputPrompt()
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -269,7 +324,108 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.PasteMsg:
+		content := msg.Content
+		id := fmt.Sprintf("#p%d", len(m.pastedTexts)+1)
+		lines := strings.Count(strings.TrimRight(content, "\n"), "\n") + 1
+		placeholder := fmt.Sprintf("[Pasted text %s +%d lines]", id, lines)
+		m.pastedTexts[id] = content
+		m.input.InsertString(placeholder)
+		return m, nil
+
 	case tea.KeyMsg:
+		// Interactive pickers navigation and action handling
+		pickerOpen := m.modelPickerOpen || m.profilePickerOpen || m.skillsPickerOpen || m.pluginsPickerOpen || m.helpPickerOpen || m.themePickerOpen || m.providerPickerOpen
+		if pickerOpen {
+			switch msg.String() {
+			case "up", "k":
+				if m.pickerSelected > 0 {
+					m.pickerSelected--
+				}
+				return m, nil
+			case "down", "j":
+				count := m.getPickerItemCount()
+				if m.pickerSelected < count-1 {
+					m.pickerSelected++
+				}
+				return m, nil
+			case "enter":
+				return m.triggerPickerAction()
+			case "q":
+				m = m.closeAllPickers()
+				return m, nil
+			case "escape", "esc", "ctrl+c":
+				// Close the overlay but fall through to the global escape /
+				// ctrl+c handlers below so streaming cancel and double-tap
+				// quit still work while a picker is up.
+				m = m.closeAllPickers()
+			default:
+				// Swallow any other key so picker overlays don't pass
+				// stray input through to vim or global handlers.
+				return m, nil
+			}
+		}
+
+		// Vim Mode Handling
+		if m.vimMode {
+			if !m.vimNormalMode {
+				if msg.String() == "escape" {
+					m.vimNormalMode = true
+					m = m.updateInputPrompt()
+					return m, nil
+				}
+			} else {
+				// Normal Mode key overrides
+				switch msg.String() {
+				case "i":
+					m.vimNormalMode = false
+					m = m.updateInputPrompt()
+					return m, nil
+				case "a":
+					m.vimNormalMode = false
+					m = m.updateInputPrompt()
+					m.input, _ = m.input.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+					return m, nil
+				case "h":
+					m.input, _ = m.input.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+					return m, nil
+				case "l":
+					m.input, _ = m.input.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+					return m, nil
+				case "j":
+					m.input.CursorDown()
+					return m, nil
+				case "k":
+					m.input.CursorUp()
+					return m, nil
+				case "0":
+					m.input.CursorStart()
+					return m, nil
+				case "$":
+					m.input.CursorEnd()
+					return m, nil
+				case "w":
+					m.input, _ = m.input.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Mod: tea.ModAlt}))
+					return m, nil
+				case "b":
+					m.input, _ = m.input.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft, Mod: tea.ModAlt}))
+					return m, nil
+				case "x":
+					m.input, _ = m.input.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDelete}))
+					return m, nil
+				default:
+					if len(msg.String()) == 1 {
+						return m, nil // swallow any other typing key in Normal Mode
+					}
+				}
+			}
+		}
+
+		// Reset history navigation index if the key is not up or down
+		if msg.String() != "up" && msg.String() != "down" {
+			m.historyIdx = len(m.promptHistory)
+		}
+
 		// --- Global keys: work in ALL states ---
 
 		// Escape = global stop, never quits
@@ -389,7 +545,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// --- Settings panel (when /config is open) ---
 		if m.configPanelOpen {
-			const numSettings = 3
+			numSettings := len(m.getActiveSettings())
 			switch msg.String() {
 			case "up", "k":
 				if m.configSelected > 0 {
@@ -513,6 +669,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+o":
 			m.expandOutput = !m.expandOutput
 			return m, nil
+		case "ctrl+y":
+			return m.copyLatestResponse()
+		case "ctrl+v":
+			// Image paste writes bytes to .gnoma/pasted_image_*.png on disk,
+			// which violates the /incognito no-persistence contract — skip
+			// the image branch when incognito is active and fall through to
+			// the in-memory text fallback.
+			if !m.incognito {
+				imgBytes, ext, err := pasteImageFromClipboard()
+				if err == nil && len(imgBytes) > 0 {
+					timestamp := time.Now().UnixNano()
+					dir := filepath.Join(gnomacfg.ProjectRoot(), ".gnoma")
+					if errDir := os.MkdirAll(dir, 0o755); errDir == nil {
+						filename := fmt.Sprintf("pasted_image_%d%s", timestamp, ext)
+						path := filepath.Join(dir, filename)
+						if errWrite := os.WriteFile(path, imgBytes, 0o600); errWrite == nil {
+							id := fmt.Sprintf("#img%d", len(m.pastedImages)+1)
+							placeholder := fmt.Sprintf("[Pasted image %s]", id)
+							m.pastedImages[id] = path
+							m.input.InsertString(placeholder)
+							return m, nil
+						}
+					}
+				}
+			}
+			// Fallback to text clipboard paste
+			txt, errTxt := clipboard.ReadAll()
+			if errTxt == nil && txt != "" {
+				id := fmt.Sprintf("#p%d", len(m.pastedTexts)+1)
+				lines := strings.Count(strings.TrimRight(txt, "\n"), "\n") + 1
+				placeholder := fmt.Sprintf("[Pasted text %s +%d lines]", id, lines)
+				m.pastedTexts[id] = txt
+				m.input.InsertString(placeholder)
+				return m, nil
+			}
+			return m, nil
 		case "ctrl+]":
 			m.copyMode = !m.copyMode
 			return m, nil
@@ -523,12 +715,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if len(m.promptHistory) > 0 {
+				val := m.input.Value()
+				if val == "" || (m.historyIdx < len(m.promptHistory) && val == m.promptHistory[m.historyIdx]) {
+					if m.historyIdx > 0 {
+						m.historyIdx--
+						m.input.SetValue(m.promptHistory[m.historyIdx])
+						m.input.CursorEnd()
+					}
+					return m, nil
+				}
+			}
 		case "down":
 			if len(m.suggestions) > 0 {
 				if m.suggIdx < len(m.suggestions)-1 {
 					m.suggIdx++
 				}
 				return m, nil
+			}
+			if len(m.promptHistory) > 0 {
+				val := m.input.Value()
+				if m.historyIdx < len(m.promptHistory) && val == m.promptHistory[m.historyIdx] {
+					m.historyIdx++
+					if m.historyIdx < len(m.promptHistory) {
+						m.input.SetValue(m.promptHistory[m.historyIdx])
+						m.input.CursorEnd()
+					} else {
+						m.input.SetValue("")
+					}
+					return m, nil
+				}
 			}
 		case "tab":
 			if len(m.suggestions) > 0 {
@@ -859,7 +1075,7 @@ Mark anything you're unsure about with TODO. Be terse — directive-style bullet
 		m.suggestion = ""
 	default:
 		// Normal mode: prefix-based ghost text and dropdown
-		m.suggestion = matchCompletion(val, m.completionSrc, m.config.ProfileNames)
+		m.suggestion = matchCompletion(val, m.completionSrc, m.config.ProfileNames, m.getAvailableProviders())
 		m.suggestions = matchSuggestions(val, m.completionSrc)
 	}
 	if len(m.suggestions) == 0 {
@@ -918,6 +1134,17 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 		return m.handleBangCommand(strings.TrimPrefix(input, "!"))
 	}
 
+	// Save prompt to history. In-memory history stays available for Up/Down
+	// recall during the session; only the persistent file is gated by
+	// incognito to honor the no-persistence contract.
+	if !m.incognito {
+		savePromptHistory(input)
+	}
+	m.promptHistory = append(m.promptHistory, input)
+	m.historyIdx = len(m.promptHistory)
+
+	expandedInput := m.expandPlaceholders(input)
+
 	m.messages = append(m.messages, chatMessage{role: "user", content: input})
 	m.streaming = true
 	m.currentRole = "assistant"
@@ -925,7 +1152,7 @@ func (m Model) submitInput(input string) (tea.Model, tea.Cmd) {
 	m.thinkingBuf.Reset()
 	m.streamFilterClose = ""
 
-	if err := m.session.Send(input); err != nil {
+	if err := m.session.Send(expandedInput); err != nil {
 		m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
 		m.streaming = false
 		return m, nil
@@ -966,6 +1193,36 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	switch command {
 	case "/quit", "/exit", "/q":
 		return m, tea.Quit
+
+	case "/vim":
+		m.vimMode = !m.vimMode
+		m.vimNormalMode = false
+		m = m.updateInputPrompt()
+		m.messages = append(m.messages, chatMessage{role: "system", content: fmt.Sprintf("Vim mode toggled: %v", m.vimMode)})
+		if err := gnomacfg.SetProjectConfig("tui.vim", strconv.FormatBool(m.vimMode)); err != nil {
+			m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
+		}
+		return m, nil
+
+	case "/copy":
+		return m.copyLatestResponse()
+
+	case "/theme":
+		if args == "" {
+			m = m.closeAllPickers()
+			m.themePickerOpen = true
+			m.pickerSelected = 0
+			return m, nil
+		}
+		if ApplyTheme(args) {
+			m.messages = append(m.messages, chatMessage{role: "system", content: fmt.Sprintf("Theme switched to: %s", args)})
+			if err := gnomacfg.SetProjectConfig("tui.theme", args); err != nil {
+				m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
+			}
+		} else {
+			m.messages = append(m.messages, chatMessage{role: "error", content: fmt.Sprintf("Theme not found: %s", args)})
+		}
+		return m, nil
 
 	case "/undo":
 		// Pop messages until we remove the last assistant turn.
@@ -1042,47 +1299,24 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/model":
+		if m.config.SLM.Active {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "Model switching is overruled and disabled when local SLM is active."})
+			return m, nil
+		}
 		if args == "" {
-			status := m.session.Status()
-			var b strings.Builder
-			fmt.Fprintf(&b, "current: %s/%s\n", status.Provider, status.Model)
+			m = m.closeAllPickers()
+			m.modelPickerOpen = true
+			m.pickerSelected = 0
 			if m.config.Router != nil {
 				arms := m.config.Router.Arms()
 				sort.Slice(arms, func(i, j int) bool {
 					return string(arms[i].ID) < string(arms[j].ID)
 				})
-				// Snapshot model names so /model <n> references this exact ordering.
 				m.modelSnapshot = m.modelSnapshot[:0]
-				b.WriteString("\nAvailable models:\n")
-				for i, arm := range arms {
+				for _, arm := range arms {
 					m.modelSnapshot = append(m.modelSnapshot, arm.ModelName)
-					marker := "  "
-					if string(arm.ID) == status.Provider+"/"+status.Model {
-						marker = "→ "
-					}
-					var caps []string
-					if arm.Capabilities.ToolUse {
-						caps = append(caps, "tools")
-					}
-					if arm.Capabilities.SupportsThinking() {
-						caps = append(caps, "thinking")
-					}
-					if arm.Capabilities.Vision {
-						caps = append(caps, "vision")
-					}
-					local := ""
-					if arm.IsLocal {
-						local = " (local)"
-					}
-					capStr := ""
-					if len(caps) > 0 {
-						capStr = " [" + strings.Join(caps, ", ") + "]"
-					}
-					fmt.Fprintf(&b, "%s%d. %s%s%s\n", marker, i+1, arm.ID, capStr, local)
 				}
 			}
-			b.WriteString("\nUsage: /model <name-or-number>")
-			m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
 			return m, nil
 		}
 		if m.config.Engine != nil {
@@ -1176,47 +1410,26 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/profile":
+		if args == "" {
+			m = m.closeAllPickers()
+			m.profilePickerOpen = true
+			m.pickerSelected = 0
+			return m, nil
+		}
 		return m.handleProfileCommand(args)
 
 	case "/provider":
-		if args != "" {
-			m.messages = append(m.messages, chatMessage{role: "system",
-				content: fmt.Sprintf("provider switching requires restart: gnoma --provider %s", args)})
+		if m.config.SLM.Active {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "Provider switching is overruled and disabled when local SLM is active."})
 			return m, nil
 		}
-		status := m.session.Status()
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Active: %s/%s\n", status.Provider, status.Model))
-		if m.config.Router != nil {
-			arms := m.config.Router.Arms()
-			if len(arms) > 0 {
-				// Group arms by provider prefix
-				providers := make(map[string][]string)
-				for _, arm := range arms {
-					parts := strings.SplitN(string(arm.ID), "/", 2)
-					prov := parts[0]
-					model := string(arm.ID)
-					if len(parts) == 2 {
-						model = parts[1]
-					}
-					tag := ""
-					if arm.IsLocal {
-						tag = " (local)"
-					}
-					providers[prov] = append(providers[prov], model+tag)
-				}
-				b.WriteString("\nRegistered arms:\n")
-				for prov, models := range providers {
-					b.WriteString(fmt.Sprintf("  %s:\n", prov))
-					for _, model := range models {
-						b.WriteString(fmt.Sprintf("    - %s\n", model))
-					}
-				}
-			}
+		if args == "" {
+			m = m.closeAllPickers()
+			m.providerPickerOpen = true
+			m.pickerSelected = 0
+			return m, nil
 		}
-		b.WriteString("\nTo switch: gnoma --provider <name>")
-		m.messages = append(m.messages, chatMessage{role: "system", content: b.String()})
-		return m, nil
+		return m.switchProvider(args)
 
 	case "/init":
 		root := gnomacfg.ProjectRoot()
@@ -1310,6 +1523,7 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, chatMessage{role: "system", content: "no saved sessions"})
 			return m, nil
 		}
+		m = m.closeAllPickers()
 		m.resumePending = true
 		m.resumeSessions = sessions
 		m.resumeSelected = 0
@@ -1317,11 +1531,23 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/help":
+		if args == "" {
+			m = m.closeAllPickers()
+			m.helpPickerOpen = true
+			m.pickerSelected = 0
+			return m, nil
+		}
 		m.messages = append(m.messages, chatMessage{role: "system",
 			content: "Commands:\n  /init               generate or update AGENTS.md project docs\n  /clear, /new        clear chat and start new conversation\n  /config             show current config\n  /incognito          toggle incognito (Ctrl+X)\n  /keys               show keyboard shortcuts\n  /model [name]       list/switch models\n  /permission [mode]  set permission mode (Shift+Tab to cycle)\n  /plugins            list installed plugins\n  /profile [name]     list profiles / switch (re-execs gnoma)\n  /provider           show current provider\n  /replay             scroll to top to re-read conversation\n  /resume [id]        list or restore saved sessions\n  /shell [cmd]        open interactive shell (or run cmd in shell)\n  /skills             list loaded skills\n  /usage              show token usage and cost\n  /help               show this help\n  /quit               exit gnoma\n\nSkills (use /<name> [args] to invoke):\n  Add .md files with YAML front matter to .gnoma/skills/ or ~/.config/gnoma/skills/"})
 		return m, nil
 
 	case "/keys":
+		if args == "" {
+			m = m.closeAllPickers()
+			m.helpPickerOpen = true
+			m.pickerSelected = 0
+			return m, nil
+		}
 		m.messages = append(m.messages, chatMessage{role: "system",
 			content: "Keyboard shortcuts:\n" +
 				"  Enter           send message\n" +
@@ -1329,16 +1555,29 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 				"  Tab             accept completion\n" +
 				"  Ctrl+C          cancel stream / quit (press twice)\n" +
 				"  Ctrl+X          toggle incognito mode\n" +
+				"  Ctrl+O          expand/collapse tool output\n" +
+				"  Ctrl+Y          copy latest response to clipboard\n" +
+				"  Ctrl+V          paste image/text from clipboard\n" +
+				"  Ctrl+]          toggle copy mode (disables mouse)\n" +
 				"  Shift+Tab       cycle permission mode\n" +
 				"  ↑/↓             scroll chat history\n" +
 				"  PgUp/PgDn       scroll one page\n" +
 				"  Home            jump up 50 lines\n" +
 				"  End             scroll to bottom\n" +
-				"  Ctrl+Y          toggle copy mode (disables mouse)\n" +
 				"  y/n             approve/deny permission prompts"})
 		return m, nil
 
 	case "/plugins":
+		if args == "" {
+			if len(m.config.PluginInfos) == 0 {
+				m.messages = append(m.messages, chatMessage{role: "system", content: "No plugins installed."})
+				return m, nil
+			}
+			m = m.closeAllPickers()
+			m.pluginsPickerOpen = true
+			m.pickerSelected = 0
+			return m, nil
+		}
 		if len(m.config.PluginInfos) == 0 {
 			m.messages = append(m.messages, chatMessage{role: "system", content: "No plugins installed."})
 			return m, nil
@@ -1356,6 +1595,16 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/skills":
+		if args == "" {
+			if m.config.Skills == nil || len(m.config.Skills.Names()) == 0 {
+				m.messages = append(m.messages, chatMessage{role: "system", content: "No skills loaded."})
+				return m, nil
+			}
+			m = m.closeAllPickers()
+			m.skillsPickerOpen = true
+			m.pickerSelected = 0
+			return m, nil
+		}
 		if m.config.Skills == nil || len(m.config.Skills.Names()) == 0 {
 			m.messages = append(m.messages, chatMessage{role: "system", content: "No skills loaded."})
 			return m, nil
@@ -1674,62 +1923,6 @@ func shortPermHint(toolName string, args json.RawMessage) string {
 	return toolName
 }
 
-// formatPermissionPrompt builds a readable prompt showing what the tool wants to do.
-func formatPermissionPrompt(toolName string, args json.RawMessage) string {
-	var detail string
-
-	switch toolName {
-	case "bash":
-		var a struct{ Command string }
-		if json.Unmarshal(args, &a) == nil && a.Command != "" {
-			cmd := a.Command
-			if len(cmd) > 120 {
-				cmd = cmd[:120] + "…"
-			}
-			detail = cmd
-		}
-	case "fs.write", "fs_write":
-		var a struct {
-			Path    string `json:"file_path"`
-			Content string `json:"content"`
-		}
-		if json.Unmarshal(args, &a) == nil && a.Path != "" {
-			detail = a.Path
-			if a.Content != "" {
-				preview := diffPreviewWrite(a.Content)
-				if preview != "" {
-					detail += "\n" + preview
-				}
-			}
-		}
-	case "fs.edit", "fs_edit":
-		var a struct {
-			Path      string `json:"file_path"`
-			OldString string `json:"old_string"`
-			NewString string `json:"new_string"`
-		}
-		if json.Unmarshal(args, &a) == nil && a.Path != "" {
-			detail = a.Path
-			if a.OldString != "" || a.NewString != "" {
-				preview := diffPreviewEdit(a.OldString, a.NewString)
-				if preview != "" {
-					detail += "\n" + preview
-				}
-			}
-		}
-	default:
-		// Generic: try to extract a readable summary from args
-		if len(args) > 0 && len(args) < 200 {
-			detail = string(args)
-		}
-	}
-
-	if detail != "" {
-		return fmt.Sprintf("⚠ %s wants to execute: %s [y/n]", toolName, detail)
-	}
-	return fmt.Sprintf("⚠ %s wants to execute [y/n]", toolName)
-}
-
 // diffPreviewEdit produces a compact diff preview for fs.edit operations.
 func diffPreviewEdit(oldStr, newStr string) string {
 	const maxLines = 5
@@ -1764,35 +1957,52 @@ func diffPreviewWrite(content string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// getActiveSettings returns the active settings keys, hiding model/provider options when local SLM is active.
+func (m Model) getActiveSettings() []string {
+	if m.config.SLM.Active {
+		return []string{"permission", "incognito"}
+	}
+	return []string{"provider", "model", "permission", "incognito"}
+}
+
 // applyConfigSetting applies the Enter action for the currently selected settings item.
 func (m Model) applyConfigSetting() Model {
-	switch m.configSelected {
-	case 0: // Model — cycle through arms
-		if m.config.Router == nil {
-			return m
-		}
-		arms := configPanelArms(m.config.Router.Arms())
-		if len(arms) == 0 {
-			return m
-		}
-		current := m.config.Router.ForcedArm()
-		idx := 0
-		for i, a := range arms {
-			if a.ID == current {
-				idx = (i + 1) % len(arms)
+	status := m.session.Status()
+	settings := m.getActiveSettings()
+	if m.configSelected < 0 || m.configSelected >= len(settings) {
+		return m
+	}
+	switch settings[m.configSelected] {
+	case "provider": // Provider — open provider sub-menu picker
+		m.configPanelOpen = false
+		m.providerPickerOpen = true
+		m.pickerSelected = 0
+		providers := m.getAvailableProviders()
+		for idx, prov := range providers {
+			if prov == status.Provider {
+				m.pickerSelected = idx
 				break
 			}
 		}
-		next := arms[idx]
-		m.config.Router.ForceArm(next.ID)
-		if m.config.Engine != nil {
-			m.config.Engine.SetModel(next.ModelName)
-		}
-		if ls, ok := m.session.(*session.Local); ok {
-			ls.SetModel(next.ModelName)
+
+	case "model": // Model — open model sub-menu picker
+		m.configPanelOpen = false
+		m.modelPickerOpen = true
+		m.pickerSelected = 0
+		if m.config.Router != nil {
+			arms := m.config.Router.Arms()
+			sort.Slice(arms, func(i, j int) bool {
+				return string(arms[i].ID) < string(arms[j].ID)
+			})
+			for idx, arm := range arms {
+				if arm.ModelName == status.Model {
+					m.pickerSelected = idx
+					break
+				}
+			}
 		}
 
-	case 1: // Permission — cycle modes
+	case "permission": // Permission — cycle modes
 		if m.config.Permissions == nil {
 			return m
 		}
@@ -1814,34 +2024,11 @@ func (m Model) applyConfigSetting() Model {
 		}
 		m.config.Permissions.SetMode(next)
 
-	case 2: // Incognito — toggle (silent; config panel has no status line)
+	case "incognito": // Incognito — toggle (silent; config panel has no status line)
 		newM, _, _ := m.attemptIncognitoToggle()
 		m = newM
 	}
 	return m
-}
-
-// configPanelArms returns a stable-ordered slice of arms suitable for cycling.
-// Order: CLI agents first, then local models, then API arms, excluding stub/SLM.
-func configPanelArms(arms []*router.Arm) []*router.Arm {
-	var cli, local, api []*router.Arm
-	for _, a := range arms {
-		if string(a.ID) == "slm/llamafile" {
-			continue // SLM is not a user-selectable primary arm
-		}
-		if a.IsCLIAgent {
-			cli = append(cli, a)
-		} else if a.IsLocal {
-			local = append(local, a)
-		} else {
-			api = append(api, a)
-		}
-	}
-	result := make([]*router.Arm, 0, len(cli)+len(local)+len(api))
-	result = append(result, cli...)
-	result = append(result, local...)
-	result = append(result, api...)
-	return result
 }
 
 // shellExe returns the path of the user's preferred interactive shell.
@@ -1969,4 +2156,426 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func (m Model) updateInputPrompt() Model {
+	if m.permPending {
+		m.input.SetPromptFunc(17, func(info textarea.PromptInfo) string {
+			if info.LineNumber == 0 {
+				return "APPROVE? (y/n) ❯ "
+			}
+			return "                 "
+		})
+	} else if m.vimMode {
+		if m.vimNormalMode {
+			m.input.SetPromptFunc(6, func(info textarea.PromptInfo) string {
+				if info.LineNumber == 0 {
+					return "(N) ❯ "
+				}
+				return "      "
+			})
+		} else {
+			m.input.SetPromptFunc(6, func(info textarea.PromptInfo) string {
+				if info.LineNumber == 0 {
+					return "(I) ❯ "
+				}
+				return "      "
+			})
+		}
+	} else {
+		m.input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+			if info.LineNumber == 0 {
+				return "❯ "
+			}
+			return "  "
+		})
+	}
+	m.input.SetWidth(m.width - 4)
+	return m
+}
+
+func (m Model) copyLatestResponse() (tea.Model, tea.Cmd) {
+	var lastAssistant string
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].role == "assistant" {
+			lastAssistant = m.messages[i].content
+			break
+		}
+	}
+	if lastAssistant == "" {
+		m.messages = append(m.messages, chatMessage{role: "error", content: "No assistant response to copy"})
+		return m, nil
+	}
+
+	if err := clipboard.WriteAll(lastAssistant); err != nil {
+		m.messages = append(m.messages, chatMessage{role: "error", content: fmt.Sprintf("Failed to copy clipboard: %v", err)})
+	} else {
+		m.messages = append(m.messages, chatMessage{role: "system", content: "Copied latest response to clipboard"})
+	}
+	m.scrollOffset = 0
+	return m, nil
+}
+
+func loadPromptHistory() []string {
+	dir := gnomacfg.GlobalConfigDir()
+	path := filepath.Join(dir, "history.txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(data), "\n")
+	var history []string
+	for _, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		if line != "" {
+			history = append(history, line)
+		}
+	}
+	if len(history) > 500 {
+		history = history[len(history)-500:]
+	}
+	return history
+}
+
+const maxPromptHistory = 500
+
+func savePromptHistory(input string) {
+	if strings.TrimSpace(input) == "" {
+		return
+	}
+	dir := gnomacfg.GlobalConfigDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		slog.Warn("prompt history: mkdir failed", "err", err, "dir", dir)
+		return
+	}
+	path := filepath.Join(dir, "history.txt")
+
+	// Read current history (best-effort), append, cap to maxPromptHistory.
+	var history []string
+	if data, err := os.ReadFile(path); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSuffix(line, "\r")
+			if line != "" {
+				history = append(history, line)
+			}
+		}
+	}
+	history = append(history, strings.ReplaceAll(input, "\n", " "))
+	if len(history) > maxPromptHistory {
+		history = history[len(history)-maxPromptHistory:]
+	}
+
+	if err := os.WriteFile(path, []byte(strings.Join(history, "\n")+"\n"), 0o600); err != nil {
+		slog.Warn("prompt history: write failed", "err", err, "path", path)
+		return
+	}
+	// os.WriteFile preserves existing perms; force 0600 for files created
+	// before the perm tightening landed.
+	if err := os.Chmod(path, 0o600); err != nil {
+		slog.Warn("prompt history: chmod failed", "err", err, "path", path)
+	}
+}
+
+func pasteImageFromClipboard() ([]byte, string, error) {
+	// Try wl-paste
+	if _, err := exec.LookPath("wl-paste"); err == nil {
+		cmd := exec.Command("wl-paste", "--list-types")
+		out, err := cmd.Output()
+		if err == nil {
+			types := string(out)
+			var mime string
+			if strings.Contains(types, "image/png") {
+				mime = "image/png"
+			} else if strings.Contains(types, "image/jpeg") {
+				mime = "image/jpeg"
+			} else if strings.Contains(types, "image/jpg") {
+				mime = "image/jpg"
+			}
+
+			if mime != "" {
+				cmdImg := exec.Command("wl-paste", "--type", mime)
+				imgBytes, errImg := cmdImg.Output()
+				if errImg == nil && len(imgBytes) > 0 {
+					ext := ".png"
+					if strings.Contains(mime, "jpeg") || strings.Contains(mime, "jpg") {
+						ext = ".jpg"
+					}
+					return imgBytes, ext, nil
+				}
+			}
+		}
+	}
+
+	// Try xclip
+	if _, err := exec.LookPath("xclip"); err == nil {
+		cmd := exec.Command("xclip", "-selection", "clipboard", "-t", "TARGETS", "-o")
+		out, err := cmd.Output()
+		if err == nil {
+			targets := string(out)
+			var mime string
+			if strings.Contains(targets, "image/png") {
+				mime = "image/png"
+			} else if strings.Contains(targets, "image/jpeg") {
+				mime = "image/jpeg"
+			} else if strings.Contains(targets, "image/jpg") {
+				mime = "image/jpg"
+			}
+
+			if mime != "" {
+				cmdImg := exec.Command("xclip", "-selection", "clipboard", "-t", mime, "-o")
+				imgBytes, errImg := cmdImg.Output()
+				if errImg == nil && len(imgBytes) > 0 {
+					ext := ".png"
+					if strings.Contains(mime, "jpeg") || strings.Contains(mime, "jpg") {
+						ext = ".jpg"
+					}
+					return imgBytes, ext, nil
+				}
+			}
+		}
+	}
+
+	return nil, "", fmt.Errorf("no image in clipboard or missing tools")
+}
+
+func (m Model) closeAllPickers() Model {
+	m.modelPickerOpen = false
+	m.profilePickerOpen = false
+	m.skillsPickerOpen = false
+	m.pluginsPickerOpen = false
+	m.helpPickerOpen = false
+	m.themePickerOpen = false
+	m.providerPickerOpen = false
+	m.resumePending = false
+	m.configPanelOpen = false
+	return m
+}
+
+func (m Model) getPickerItemCount() int {
+	if m.modelPickerOpen {
+		if m.config.Router != nil {
+			return len(m.config.Router.Arms())
+		}
+		return 0
+	}
+	if m.providerPickerOpen {
+		return len(m.getAvailableProviders())
+	}
+	if m.profilePickerOpen {
+		return len(m.config.ProfileNames)
+	}
+	if m.skillsPickerOpen {
+		if m.config.Skills != nil {
+			return len(m.config.Skills.Names())
+		}
+		return 0
+	}
+	if m.pluginsPickerOpen {
+		return len(m.config.PluginInfos)
+	}
+	if m.themePickerOpen {
+		return 5
+	}
+	return 0
+}
+
+func (m Model) triggerPickerAction() (tea.Model, tea.Cmd) {
+	if m.modelPickerOpen {
+		if m.config.Router != nil && m.config.Engine != nil {
+			arms := m.config.Router.Arms()
+			sort.Slice(arms, func(i, j int) bool {
+				return string(arms[i].ID) < string(arms[j].ID)
+			})
+			if m.pickerSelected >= 0 && m.pickerSelected < len(arms) {
+				modelName := arms[m.pickerSelected].ModelName
+				m.config.Engine.SetModel(modelName)
+				if ls, ok := m.session.(*session.Local); ok {
+					ls.SetModel(modelName)
+				}
+				m.messages = append(m.messages, chatMessage{role: "system", content: fmt.Sprintf("model switched to: %s", modelName)})
+			}
+		}
+		m = m.closeAllPickers()
+		return m, nil
+	}
+	if m.providerPickerOpen {
+		providers := m.getAvailableProviders()
+		if m.pickerSelected >= 0 && m.pickerSelected < len(providers) {
+			provName := providers[m.pickerSelected]
+			m = m.closeAllPickers()
+			return m.switchProvider(provName)
+		}
+		m = m.closeAllPickers()
+		return m, nil
+	}
+	if m.profilePickerOpen {
+		if m.pickerSelected >= 0 && m.pickerSelected < len(m.config.ProfileNames) {
+			profileName := m.config.ProfileNames[m.pickerSelected]
+			m = m.closeAllPickers()
+			return m.handleProfileCommand(profileName)
+		}
+		m = m.closeAllPickers()
+		return m, nil
+	}
+	if m.skillsPickerOpen {
+		if m.config.Skills != nil {
+			names := m.config.Skills.Names()
+			sort.Strings(names)
+			if m.pickerSelected >= 0 && m.pickerSelected < len(names) {
+				skillName := names[m.pickerSelected]
+				m = m.closeAllPickers()
+				return m.handleCommand("/" + skillName)
+			}
+		}
+		m = m.closeAllPickers()
+		return m, nil
+	}
+	if m.pluginsPickerOpen {
+		m = m.closeAllPickers()
+		return m, nil
+	}
+	if m.themePickerOpen {
+		themes := []string{"catppuccin", "nord", "gruvbox", "monokai", "solarized-light"}
+		if m.pickerSelected >= 0 && m.pickerSelected < len(themes) {
+			themeName := themes[m.pickerSelected]
+			if ApplyTheme(themeName) {
+				m.messages = append(m.messages, chatMessage{role: "system", content: fmt.Sprintf("Theme switched to: %s", themeName)})
+				if err := gnomacfg.SetProjectConfig("tui.theme", themeName); err != nil {
+					m.messages = append(m.messages, chatMessage{role: "error", content: formatError(err)})
+				}
+			}
+		}
+		m = m.closeAllPickers()
+		return m, nil
+	}
+	if m.helpPickerOpen {
+		m = m.closeAllPickers()
+		return m, nil
+	}
+	m = m.closeAllPickers()
+	return m, nil
+}
+
+// placeholderRe matches all four placeholder forms in one pass over the
+// original input, so pasted content that happens to contain `#p\d+` or
+// `#img\d+` literals is not re-expanded after the bracket form is inlined.
+var placeholderRe = regexp.MustCompile(`\[Pasted text (#p\d+)[^\]]*\]|\[Pasted image (#img\d+)\]|#p\d+|#img\d+`)
+
+func (m Model) expandPlaceholders(input string) string {
+	return placeholderRe.ReplaceAllStringFunc(input, func(match string) string {
+		switch {
+		case strings.HasPrefix(match, "[Pasted text "):
+			sub := placeholderRe.FindStringSubmatch(match)
+			if len(sub) > 1 {
+				if val, ok := m.pastedTexts[sub[1]]; ok {
+					return val
+				}
+			}
+		case strings.HasPrefix(match, "[Pasted image "):
+			sub := placeholderRe.FindStringSubmatch(match)
+			if len(sub) > 2 {
+				if path, ok := m.pastedImages[sub[2]]; ok {
+					return "[Image: " + path + "]"
+				}
+			}
+		case strings.HasPrefix(match, "#p"):
+			if val, ok := m.pastedTexts[match]; ok {
+				return val
+			}
+		case strings.HasPrefix(match, "#img"):
+			if path, ok := m.pastedImages[match]; ok {
+				return "[Image: " + path + "]"
+			}
+		}
+		return match
+	})
+}
+
+func (m Model) getAvailableProviders() []string {
+	if m.config.Router == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var list []string
+	for _, arm := range m.config.Router.Arms() {
+		prov := arm.ID.Provider()
+		if !seen[prov] {
+			seen[prov] = true
+			list = append(list, prov)
+		}
+	}
+	sort.Strings(list)
+	return list
+}
+
+func (m Model) findBestArmForProvider(provName string) *router.Arm {
+	if m.config.Router == nil {
+		return nil
+	}
+	arms := m.config.Router.Arms()
+	sort.Slice(arms, func(i, j int) bool {
+		return string(arms[i].ID) < string(arms[j].ID)
+	})
+
+	var providerDefaultModel string
+	var fallbackArm *router.Arm
+
+	for _, arm := range arms {
+		if arm.ID.Provider() == provName {
+			if fallbackArm == nil {
+				fallbackArm = arm
+			}
+			if providerDefaultModel == "" && arm.Provider != nil {
+				providerDefaultModel = arm.Provider.DefaultModel()
+			}
+			if providerDefaultModel != "" && arm.ModelName == providerDefaultModel {
+				return arm
+			}
+		}
+	}
+	return fallbackArm
+}
+
+func (m Model) switchProvider(provName string) (Model, tea.Cmd) {
+	provName = strings.ToLower(strings.TrimSpace(provName))
+	providers := m.getAvailableProviders()
+	valid := false
+	for _, p := range providers {
+		if strings.ToLower(p) == provName {
+			provName = p // normalize case
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		m.messages = append(m.messages, chatMessage{
+			role:    "error",
+			content: fmt.Sprintf("unknown provider: %q — available providers: %s", provName, strings.Join(providers, ", ")),
+		})
+		return m, nil
+	}
+
+	arm := m.findBestArmForProvider(provName)
+	if arm == nil {
+		m.messages = append(m.messages, chatMessage{
+			role:    "error",
+			content: fmt.Sprintf("no registered arms found for provider: %s", provName),
+		})
+		return m, nil
+	}
+
+	if m.config.Engine != nil {
+		m.config.Engine.SetProvider(arm.Provider)
+		m.config.Engine.SetModel(arm.ModelName)
+	}
+	if ls, ok := m.session.(*session.Local); ok {
+		ls.SetProvider(provName)
+		ls.SetModel(arm.ModelName)
+	}
+
+	msg := fmt.Sprintf("provider switched to: %s (model: %s)", provName, arm.ModelName)
+	m.messages = append(m.messages, chatMessage{role: "system", content: msg})
+	m.injectSystemContext(msg)
+
+	return m, nil
 }

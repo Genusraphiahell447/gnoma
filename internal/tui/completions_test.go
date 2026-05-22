@@ -34,7 +34,7 @@ func TestMatchCompletion(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := matchCompletion(tt.input, cmds, nil)
+		got := matchCompletion(tt.input, cmds, nil, nil)
 		if got != tt.want {
 			t.Errorf("matchCompletion(%q) = %q, want %q", tt.input, got, tt.want)
 		}
@@ -113,7 +113,7 @@ func TestMatchArgCompletion(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := matchArgCompletion(tt.input, nil)
+		got := matchArgCompletion(tt.input, nil, nil)
 		if got != tt.want {
 			t.Errorf("matchArgCompletion(%q) = %q, want %q", tt.input, got, tt.want)
 		}
@@ -134,7 +134,7 @@ func TestMatchArgCompletion_Profile(t *testing.T) {
 		{"/profile ", ""},  // empty arg — wait for input
 	}
 	for _, tt := range tests {
-		got := matchArgCompletion(tt.input, profiles)
+		got := matchArgCompletion(tt.input, profiles, nil)
 		if got != tt.want {
 			t.Errorf("matchArgCompletion(%q, profiles) = %q, want %q", tt.input, got, tt.want)
 		}
@@ -145,7 +145,7 @@ func TestMatchCompletion_DispatchesToProfileArgCompletion(t *testing.T) {
 	// End-to-end: matchCompletion sees "/profile w", forwards to
 	// matchArgCompletion with profileNames, gets back "/profile work".
 	cmds := []cmdEntry{{"/profile", "profiles"}}
-	got := matchCompletion("/profile w", cmds, []string{"work", "private"})
+	got := matchCompletion("/profile w", cmds, []string{"work", "private"}, nil)
 	if got != "/profile work" {
 		t.Errorf("matchCompletion(/profile w) = %q, want /profile work", got)
 	}
@@ -154,8 +154,37 @@ func TestMatchCompletion_DispatchesToProfileArgCompletion(t *testing.T) {
 func TestMatchArgCompletion_ProfileNoNamesAvailable(t *testing.T) {
 	// When profile mode isn't engaged, profileNames is nil/empty and the
 	// completer must not try to suggest anything.
-	got := matchArgCompletion("/profile w", nil)
+	got := matchArgCompletion("/profile w", nil, nil)
 	if got != "" {
 		t.Errorf("matchArgCompletion(profile, nil) = %q, want empty", got)
+	}
+}
+
+func TestMatchArgCompletion_Provider(t *testing.T) {
+	providers := []string{"anthropic", "openai", "google"}
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"/provider a", "/provider anthropic"},
+		{"/provider o", "/provider openai"},
+		{"/provider openai", ""}, // already complete
+		{"/provider g", "/provider google"},
+		{"/provider z", ""}, // no match
+		{"/provider ", ""},  // empty arg — wait for input
+	}
+	for _, tt := range tests {
+		got := matchArgCompletion(tt.input, nil, providers)
+		if got != tt.want {
+			t.Errorf("matchArgCompletion(%q, providers) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestMatchCompletion_DispatchesToProviderArgCompletion(t *testing.T) {
+	cmds := []cmdEntry{{"/provider", "providers"}}
+	got := matchCompletion("/provider a", cmds, nil, []string{"anthropic", "openai"})
+	if got != "/provider anthropic" {
+		t.Errorf("matchCompletion(/provider a) = %q, want /provider anthropic", got)
 	}
 }

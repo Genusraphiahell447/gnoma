@@ -18,6 +18,7 @@ var builtinCommands = []cmdEntry{
 	{"/clear", "clear conversation history"},
 	{"/compact", "summarize and compact conversation context"},
 	{"/config", "open settings panel"},
+	{"/copy", "copy the latest assistant response to the clipboard"},
 	{"/exit", "exit gnoma"},
 	{"/help", "show available commands and shortcuts"},
 	{"/incognito", "toggle incognito mode (no persistence, local-only routing)"},
@@ -34,8 +35,10 @@ var builtinCommands = []cmdEntry{
 	{"/replay", "replay last assistant response"},
 	{"/resume", "browse and resume a saved session"},
 	{"/shell", "open interactive shell"},
+	{"/theme", "list themes or set active theme"},
 	{"/skills", "list available skills"},
 	{"/usage", "show token usage for this session"},
+	{"/vim", "toggle Vim keybindings in the input composer"},
 }
 
 // permissionModes lists valid modes for /permission completion.
@@ -81,14 +84,14 @@ func matchSuggestions(input string, commands []cmdEntry) []cmdEntry {
 
 // matchCompletion returns the unique ghost-text completion, or "".
 // Used for Tab acceptance of a single unambiguous match. profileNames
-// is the dynamic completion source for `/profile <name>` — pass nil
-// when none are known.
-func matchCompletion(input string, commands []cmdEntry, profileNames []string) string {
+// is the dynamic completion source for `/profile <name>`, and providerNames
+// is for `/provider <name>` — pass nil when none are known.
+func matchCompletion(input string, commands []cmdEntry, profileNames []string, providerNames []string) string {
 	if !strings.HasPrefix(input, "/") || len(input) < 2 {
 		return ""
 	}
 	if strings.Contains(input, " ") {
-		return matchArgCompletion(input, profileNames)
+		return matchArgCompletion(input, profileNames, providerNames)
 	}
 	suggestions := matchSuggestions(input, commands)
 	if len(suggestions) == 1 && suggestions[0].name != input {
@@ -126,9 +129,9 @@ func fuzzyMatchCommands(query string, commands []cmdEntry) []cmdEntry {
 }
 
 // matchArgCompletion handles second-level completion for commands with args.
-// profileNames is the dynamic source for `/profile <name>`; pass nil when
-// profile mode isn't engaged.
-func matchArgCompletion(input string, profileNames []string) string {
+// profileNames is the dynamic source for `/profile <name>`, and providerNames
+// is for `/provider <name>`; pass nil when not available.
+func matchArgCompletion(input string, profileNames []string, providerNames []string) string {
 	parts := strings.SplitN(input, " ", 2)
 	if len(parts) != 2 {
 		return ""
@@ -153,6 +156,16 @@ func matchArgCompletion(input string, profileNames []string) string {
 		}
 		lower := strings.ToLower(arg)
 		for _, name := range profileNames {
+			if strings.HasPrefix(strings.ToLower(name), lower) && name != arg {
+				return cmd + " " + name
+			}
+		}
+	case "/provider":
+		if arg == "" || len(providerNames) == 0 {
+			return ""
+		}
+		lower := strings.ToLower(arg)
+		for _, name := range providerNames {
 			if strings.HasPrefix(strings.ToLower(name), lower) && name != arg {
 				return cmd + " " + name
 			}

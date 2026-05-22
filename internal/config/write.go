@@ -29,6 +29,8 @@ func setConfig(path, key, value string) error {
 		"slm.model_url":    true,
 		"slm.enabled":      true,
 		"slm.data_dir":     true,
+		"tui.theme":        true,
+		"tui.vim":          true,
 	}
 	if !allowed[key] {
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, strings.Join(allowedKeys(), ", "))
@@ -60,6 +62,10 @@ func setConfig(path, key, value string) error {
 		cfg.SLM.Enabled = value == "true"
 	case "slm.data_dir":
 		cfg.SLM.DataDir = value
+	case "tui.theme":
+		cfg.TUI.Theme = value
+	case "tui.vim":
+		cfg.TUI.Vim = value == "true"
 	}
 
 	// Ensure directory exists
@@ -88,5 +94,6 @@ func allowedKeys() []string {
 	return []string{
 		"provider.default", "provider.model", "permission.mode",
 		"slm.model_url", "slm.enabled", "slm.data_dir",
+		"tui.theme", "tui.vim",
 	}
 }

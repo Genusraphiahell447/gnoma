@@ -22,5 +22,9 @@ func Defaults() Config {
 		SLM: SLMSection{
 			StartupTimeout: Duration(5 * time.Second),
 		},
+		TUI: TUISection{
+			Theme: "catppuccin",
+			Vim:   false,
+		},
 	}
 }
