@@ -1,5 +1,10 @@
 # gnoma
 
+[![Release](https://img.shields.io/github/v/release/VikingOwl91/gnoma?style=for-the-badge&logo=go&logoColor=white&color=00ADD8)](https://github.com/VikingOwl91/gnoma/releases)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white)](go.mod)
+[![Container](https://img.shields.io/badge/ghcr.io-vikingowl91%2Fgnoma-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/VikingOwl91/gnoma/pkgs/container/gnoma)
+
 **A provider-agnostic agentic coding assistant in Go.** gnoma routes each prompt
 to the best available model — cloud or local — through a multi-armed bandit
 router, executes tools on your behalf, and stays extensible through hooks,
@@ -19,9 +24,7 @@ Named after the northern pygmy-owl (*Glaucidium gnoma*); agents are called
 
 Releases are built by [GoReleaser](.goreleaser.yml) for
 `linux`, `darwin`, and `windows` × `amd64`/`arm64` as static (`CGO_ENABLED=0`)
-archives. Until the first tag is cut, see "Build from source" below.
-
-Once releases are published, grab the archive matching your OS/arch from
+archives. Grab the one matching your OS/arch from
 <https://github.com/VikingOwl91/gnoma/releases>:
 
 ```sh
@@ -85,6 +88,27 @@ learning); `/help` lists slash commands; `Esc` cancels an in-flight turn.
 
 ---
 
+## Vision / image input
+
+`Ctrl+V` in the TUI pastes a screenshot from the system clipboard:
+gnoma writes the bytes to your user cache and inserts a
+`[Pasted image #imgN]` placeholder, which expands to `[Image: /path]`
+when the turn is sent. You can also type a literal `[Image: /path]`
+marker anywhere in a prompt to reference an existing file:
+
+```
+explain this error [Image: /tmp/screen.png] — what's the root cause?
+```
+
+Image markers are parsed by the engine, files larger than 10 MiB are
+skipped (the marker stays as plain text), and the router only routes
+vision-tagged turns to arms that declare the `Vision` capability
+(Anthropic, OpenAI, Google, and Ollama models that advertise
+multimodal support). Image paste is disabled under `--incognito` to
+honour the no-persistence contract.
+
+---
+
 ## Providers
 
 | Provider | Env var | Default model | Also available |
@@ -108,6 +132,19 @@ gnoma --provider llamacpp                          # model picked from server
 ```
 
 `gnoma providers` prints every discovered provider, model, and CLI agent.
+
+**Subprocess sandbox bypass.** The `agy` and `codex` CLIs each run with
+their respective sandboxes enabled by default. Two env vars exist for the
+rare case where a sandbox blocks legitimate work (e.g., reading files
+outside the project root):
+
+| Env var | Effect |
+|---|---|
+| `GNOMA_AGY_BYPASS_PERMISSIONS=1` | Skip agy's permission prompts |
+| `GNOMA_CODEX_BYPASS_SANDBOX=1` | Disable codex's filesystem sandbox |
+
+These are footguns — set them deliberately, per-invocation. They do not
+disable gnoma's own permission system, hooks, or firewall.
 
 ### Local models
 
@@ -294,6 +331,25 @@ gnoma runs tools and shell commands on your behalf. The
 (TOCTOU-safe), gates network access through a configurable firewall, and
 scans tool output for secrets before it ever reaches the model. The
 `SafeProvider` boundary keeps incognito-mode data out of long-lived stores.
+
+### Entropy false-positive reduction
+
+The secret scanner also computes Shannon entropy on long unstructured
+tokens to catch unknown-format secrets. Under a lowered threshold or
+`redact_high_entropy = true`, this can fire on shapes that are never
+secrets (UUIDs, SHA digests, ISO-8601 timestamps, URLs). Opt into the
+format-aware safelist to skip them:
+
+```toml
+[security]
+entropy_threshold    = 3.5
+redact_high_entropy  = true
+entropy_safelist     = ["uuid", "sha_hex", "iso8601", "url"]
+```
+
+Default is an empty list — pre-safelist behaviour. Skips are logged
+(`Debug`-level, per pattern, token length only — never the bytes) so the
+real false-positive rate is measurable on real workloads.
 
 Architecture references:
 
