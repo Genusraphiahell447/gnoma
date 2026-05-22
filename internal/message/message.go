@@ -87,3 +87,15 @@ func (m Message) TextContent() string {
 	}
 	return b.String()
 }
+
+// HasImages reports whether any content block in the message is an inline
+// image. Providers that don't support vision can use this to decide whether
+// to fall back to a text-only representation.
+func (m Message) HasImages() bool {
+	for _, c := range m.Content {
+		if c.Type == ContentImage {
+			return true
+		}
+	}
+	return false
+}

@@ -13,6 +13,7 @@ const (
 	ContentToolCall
 	ContentToolResult
 	ContentThinking
+	ContentImage
 )
 
 func (ct ContentType) String() string {
@@ -25,6 +26,8 @@ func (ct ContentType) String() string {
 		return "tool_result"
 	case ContentThinking:
 		return "thinking"
+	case ContentImage:
+		return "image"
 	default:
 		return fmt.Sprintf("unknown(%d)", ct)
 	}
@@ -37,6 +40,7 @@ type Content struct {
 	ToolCall   *ToolCall   // ContentToolCall
 	ToolResult *ToolResult // ContentToolResult
 	Thinking   *Thinking   // ContentThinking
+	Image      *Image      // ContentImage
 }
 
 // ToolCall represents the model's request to invoke a tool.
@@ -61,6 +65,17 @@ type Thinking struct {
 	Redacted  bool   `json:"redacted,omitempty"`
 }
 
+// Image carries inline image bytes for vision-capable models. Data is the
+// raw image bytes captured at user-input time so the message snapshot is
+// self-contained (file deletion or rename after the turn does not break
+// translation). MediaType is the IANA media type (e.g. "image/png").
+// Path is retained for human-readable display and logging only.
+type Image struct {
+	Data      []byte `json:"data"`
+	MediaType string `json:"media_type"`
+	Path      string `json:"path,omitempty"`
+}
+
 func NewTextContent(text string) Content {
 	return Content{Type: ContentText, Text: text}
 }
@@ -75,4 +90,8 @@ func NewToolResultContent(tr ToolResult) Content {
 
 func NewThinkingContent(th Thinking) Content {
 	return Content{Type: ContentThinking, Thinking: &th}
+}
+
+func NewImageContent(img Image) Content {
+	return Content{Type: ContentImage, Image: &img}
 }
